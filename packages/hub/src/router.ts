@@ -138,7 +138,8 @@ export class Router {
     const { findSubsByOwner } = await import("./repos/push-subs.ts");
     const daemon = findDaemon(this.db, daemon_id);
     if (!daemon) return;
-    const subs = findSubsByOwner(this.db, daemon.owner_sub);
+    const allSubs = findSubsByOwner(this.db, daemon.owner_sub);
+    const subs = allSubs.filter((s) => s.preferences.permission !== false);
     if (subs.length === 0) return;
     await this.push.sendTo(subs, {
       kind: "permission",

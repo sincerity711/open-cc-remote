@@ -5,7 +5,7 @@ test("createPushHelper returns no-op when vapid is undefined", async () => {
   const h = createPushHelper(undefined);
   // Should not throw and should not actually send.
   await h.sendTo(
-    [{ device_id: "d1", endpoint: "https://x", p256dh: "p", auth: "a" }],
+    [{ device_id: "d1", endpoint: "https://x", p256dh: "p", auth: "a", preferences: { permission: true } }],
     { kind: "test" },
   );
   // No-op — nothing to assert beyond "did not throw".

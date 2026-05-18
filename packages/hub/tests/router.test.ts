@@ -259,7 +259,7 @@ test("permission_request triggers Web Push fanout to subscriptions of daemon's o
     await new Promise((r) => setTimeout(r, 10)); // let the void-promise dispatchPush complete
 
     expect(sentTo).toHaveLength(1);
-    expect(sentTo[0]!.subs).toEqual([{ device_id: dev.device_id, endpoint: "https://fcm/x", p256dh: "p", auth: "a" }]);
+    expect(sentTo[0]!.subs).toEqual([{ device_id: dev.device_id, endpoint: "https://fcm/x", p256dh: "p", auth: "a", preferences: { permission: true } }]);
     expect(sentTo[0]!.payload).toEqual({
       kind: "permission",
       daemon_id: "d-1", session_id: "s1", request_id: "r1",

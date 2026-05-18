@@ -70,6 +70,30 @@ export function makeServer(opts: MakeServerOpts = {}) {
       }
     }
 
+    if (url.pathname === "/push/preferences" && req.method === "GET") {
+      if (!opts.db) return new Response("not configured", { status: 503 });
+      const { authenticatePwa } = await import("./auth/pwa-auth.ts");
+      const auth = authenticatePwa(opts.db, req);
+      if ("error" in auth) return new Response(auth.error, { status: 401 });
+      const { getPreferences } = await import("./repos/push-subs.ts");
+      return Response.json(getPreferences(opts.db, auth.device_id));
+    }
+
+    if (url.pathname === "/push/preferences" && req.method === "PUT") {
+      if (!opts.db) return new Response("not configured", { status: 503 });
+      const { authenticatePwa } = await import("./auth/pwa-auth.ts");
+      const auth = authenticatePwa(opts.db, req);
+      if ("error" in auth) return new Response(auth.error, { status: 401 });
+      try {
+        const body = await req.json() as { permission?: boolean };
+        const { setPreferences } = await import("./repos/push-subs.ts");
+        setPreferences(opts.db, auth.device_id, body);
+        return new Response(null, { status: 204 });
+      } catch (e) {
+        return new Response((e as Error).message, { status: 400 });
+      }
+    }
+
     if (url.pathname === "/pair" && req.method === "POST") {
       if (!opts.db || !opts.jwt_secret) return new Response("not configured", { status: 503 });
       try {
