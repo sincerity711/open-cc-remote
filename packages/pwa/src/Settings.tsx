@@ -50,6 +50,17 @@ export function Settings({ hubUrl, bearer, onClose }: Props) {
     }
   };
 
+  const toggleCompletedPush = async () => {
+    if (!prefs) return;
+    const next: PushPreferences = { ...prefs, completed: !(prefs.completed === true) };
+    setPrefs(next);
+    try {
+      await setPushPreferences(hubUrl, bearer, next);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
   const startEdit = (d: DeviceItem) => {
     setEditing(d.device_id);
     setEditValue(d.display_name ?? "");
@@ -109,6 +120,14 @@ export function Settings({ hubUrl, bearer, onClose }: Props) {
                   onChange={toggleOfflinePush}
                 />
                 <span>Notify me when a daemon goes offline (≥ 30s)</span>
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, padding: 12, background: "#fafafa", border: "1px solid #eee", borderRadius: 4, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={prefs.completed === true}
+                  onChange={toggleCompletedPush}
+                />
+                <span>Notify me when Claude finishes a turn</span>
               </label>
             </div>
           )}

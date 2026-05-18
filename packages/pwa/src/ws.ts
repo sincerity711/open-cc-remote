@@ -10,6 +10,7 @@ export interface HubState {
   daemons: DaemonView[];
   events: Record<string, EventFrameForPwa[]>;
   pendingPermissions: Record<string, PwaPermissionRequest>;
+  completedCounts: Record<string, number>;
 }
 
 export function eventKey(daemon_id: string, session_id: string): string {
@@ -25,7 +26,7 @@ export interface UseHubResult extends HubState {
 
 export function useHub(hubUrl: string, bearer: string | null): UseHubResult {
   const [state, setState] = useState<HubState>({
-    connected: false, daemons: [], events: {}, pendingPermissions: {},
+    connected: false, daemons: [], events: {}, pendingPermissions: {}, completedCounts: {},
   });
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -110,8 +111,14 @@ export function useHub(hubUrl: string, bearer: string | null): UseHubResult {
             delete next[frame.request_id];
             return { ...prev, pendingPermissions: next };
           }
-          case "task_completed":
-            return prev; // wired in P14-T2
+          case "task_completed": {
+            const k = eventKey(frame.daemon_id, frame.session_id);
+            const prevCount = prev.completedCounts[k] ?? 0;
+            return {
+              ...prev,
+              completedCounts: { ...prev.completedCounts, [k]: prevCount + 1 },
+            };
+          }
         }
         return prev;
       });

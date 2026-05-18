@@ -35,7 +35,7 @@ export function App() {
     });
   }, [bearer]);
 
-  const { connected, daemons, events, pendingPermissions, sendPermissionReply, requestHistory, killSession, startSession } = useHub(HUB_URL, bearer);
+  const { connected, daemons, events, pendingPermissions, sendPermissionReply, requestHistory, killSession, startSession, completedCounts } = useHub(HUB_URL, bearer);
 
   if (!bearer) {
     return (
@@ -132,6 +132,11 @@ export function App() {
                           {s.tmux_session ? <span>tmux:{s.tmux_session} · </span> : null}
                           cwd: <code>{s.cwd}</code> · model: <code>{s.model}</code>
                           {evtCount > 0 && <span style={{ marginLeft: 8, color: "#0a0" }}>{evtCount}↓</span>}
+                          {(completedCounts[eventKey(d.daemon_id, s.session_id)] ?? 0) > 0 && (
+                            <span style={{ marginLeft: 8, color: "#080" }} title="Tasks completed">
+                              ✓{completedCounts[eventKey(d.daemon_id, s.session_id)]}
+                            </span>
+                          )}
                         </span>
                         <button
                           onClick={(e) => {
