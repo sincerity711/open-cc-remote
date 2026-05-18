@@ -3,7 +3,7 @@
 Remote control plane for local Claude Code sessions. See the
 [design spec](docs/superpowers/specs/2026-05-18-open-cc-remote-design.md).
 
-**Status:** Plan 11 (daemon-offline push) complete.
+**Status:** Plan 12 (remote kill_session) complete.
 
 ## Prerequisites
 
@@ -106,7 +106,7 @@ bun test e2e/         # end-to-end only
 bun run typecheck     # 5 packages
 ```
 
-## What Plans 1–11 cover
+## What Plans 1–12 cover
 
 - Plan 1: vertical slice — plugin/daemon/hub/PWA wired up, sessions visible in PWA
 - Plan 2: auth — IAS OIDC for PWA, DPoP-bound JWT for daemons, `cc-remote pair` CLI
@@ -118,19 +118,23 @@ bun run typecheck     # 5 packages
 - Plan 8: launchd / systemd installer — `cc-remote install` writes the right service file for your platform and starts the daemon; `cc-remote uninstall` reverses it
 - Plan 9: push preferences — Settings panel has a Notifications toggle to opt out of permission-request push without revoking the device
 - Plan 10: acceptance suite — automated benchmarks asserting the design spec's quantitative criteria
-- Plan 11: daemon-offline push — opt-in notification when a daemon stays offline ≥ 30s (configurable). Cancelled if the daemon reconnects in time
+- Plan 11: daemon-offline push — opt-in notification when a daemon stays offline ≥ 30s; cancelled if the daemon reconnects in time
+- Plan 12: remote kill_session — opt-in dangerous action: ✕ button per session in the PWA terminates the plugin (and Claude Code with it). Requires `allow_kill: true` in `~/.cc-remote/config.json`
 
-## Verified acceptance (Plan 10 automated tests)
+## Verified acceptance
 
-- ✅ Permission round-trip P95 < 1s — `e2e/perf-permission.test.ts` (20 sequential iterations; observed P95 ≈ 6ms on localhost)
-- ✅ 3 concurrent daemons surface within seconds — `e2e/multi-daemon.test.ts` (3 daemons + 3 sessions, full visibility within ~2s)
-- ✅ Daemon-offline push debounce honors the 30s window — `packages/hub/tests/router.test.ts` (fires after delay; cancelled on reconnect; opt-in default-off)
+- ✅ Permission round-trip P95 < 1s — `e2e/perf-permission.test.ts`
+- ✅ 3 concurrent daemons surface within seconds — `e2e/multi-daemon.test.ts`
+- ✅ Daemon-offline push debounce honors the 30s window — `packages/hub/tests/router.test.ts`
+- ✅ kill_session terminates the plugin and emits session_close — `e2e/kill.test.ts`
+- ✅ kill_session is ignored when allow_kill is false (default) — `e2e/kill.test.ts`
 
-## Known gaps for Plan 12+
+## Known gaps for Plan 13+
 
 - **Hardware-bound keys** — keystore abstraction layer is in place, but only file-backed Ed25519 ships; macOS Keychain (Security framework) and Linux libsecret bindings are deferred
 - **Real Claude Code channel-permissions wire format** — for now `CC_REMOTE_FAKE_PERMISSION` simulates the chain; integrating with Claude Code's actual `--channels` permission protocol is open work
-- **Push for idle / task_completed events** — only `permission_request` and `daemon_offline` trigger push today; idle/completed signals would require parsing Claude Code's JSONL message types
+- **start_session** — Plan 12 covers terminate-only; spawning new tmux sessions remotely is a separate feature
+- **Push for idle / task_completed events** — only `permission_request` and `daemon_offline` trigger push today
 - **Windows installer** — Plan 8 covers macOS + Linux only
 
 ## License
