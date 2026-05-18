@@ -42,7 +42,13 @@ test("plugin → daemon → hub → PWA snapshot loop", async () => {
   try {
     // Start hub.
     const hub = spawn("bun", ["run", join(ROOT, "packages/hub/src/index.ts")], {
-      env: { ...process.env, HUB_PORT: String(HUB_PORT) },
+      env: {
+        ...process.env,
+        HUB_PORT: String(HUB_PORT),
+        HUB_DISABLE_AUTH: "1",
+        HUB_DB_PATH: join(stateDir, "hub.sqlite"),
+        HUB_JWT_SECRET: "test-secret",
+      },
       stdio: ["ignore", "pipe", "pipe"],
     });
     procs.push(hub);

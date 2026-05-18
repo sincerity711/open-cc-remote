@@ -12,6 +12,7 @@ export interface MakeServerOpts {
   db?: Db;
   jwt_secret?: string;
   ias?: IasContext;
+  disable_auth?: boolean;
 }
 
 export function makeServer(opts: MakeServerOpts = {}) {
@@ -62,10 +63,34 @@ export function makeServer(opts: MakeServerOpts = {}) {
     if (url.pathname === "/ws/daemon") {
       const id = url.searchParams.get("daemon_id");
       if (!id) return new Response("daemon_id required", { status: 400 });
+
+      if (!opts.disable_auth) {
+        if (!opts.db || !opts.jwt_secret) return new Response("auth not configured", { status: 503 });
+        const auth = req.headers.get("authorization");
+        const dpopHeader = req.headers.get("dpop");
+        if (!auth?.startsWith("DPoP ") || !dpopHeader) {
+          return new Response("DPoP required", { status: 401 });
+        }
+        try {
+          const { verifyDaemonAuth } = await import("./auth/dpop-verify.ts");
+          await verifyDaemonAuth(
+            opts.db, opts.jwt_secret, id, auth.slice(5), dpopHeader, req.url, req.method,
+          );
+        } catch (e) {
+          return new Response((e as Error).message, { status: 401 });
+        }
+      }
+
       const ok = server.upgrade(req, { data: { kind: "daemon", key: id } satisfies WsData });
       return ok ? undefined : new Response("upgrade failed", { status: 500 });
     }
     if (url.pathname === "/ws/pwa") {
+      if (!opts.disable_auth) {
+        if (!opts.db) return new Response("auth not configured", { status: 503 });
+        const { authenticatePwa } = await import("./auth/pwa-auth.ts");
+        const r = authenticatePwa(opts.db, req);
+        if ("error" in r) return new Response(r.error, { status: 401 });
+      }
       const ok = server.upgrade(req, { data: { kind: "pwa", key: "" } satisfies WsData });
       return ok ? undefined : new Response("upgrade failed", { status: 500 });
     }

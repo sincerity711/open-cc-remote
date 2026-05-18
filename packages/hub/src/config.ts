@@ -12,6 +12,7 @@ export interface HubConfig {
   port: number;
   db_path: string;
   jwt_secret: string;
+  disable_auth: boolean;
   ias?: IasOidcConfig;
 }
 
@@ -24,6 +25,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
       "WARN: HUB_JWT_SECRET not set; using random ephemeral secret (all daemon JWTs invalidated on restart)\n",
     );
   }
+  const disable_auth = env.HUB_DISABLE_AUTH === "1" || env.HUB_DISABLE_AUTH === "true";
 
   const issuer_url = env.HUB_IAS_ISSUER;
   const client_id = env.HUB_IAS_CLIENT_ID;
@@ -33,12 +35,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
 
   if (issuer_url && client_id && client_secret && redirect_uri && allowed) {
     return {
-      port, db_path, jwt_secret,
+      port, db_path, jwt_secret, disable_auth,
       ias: {
         issuer_url, client_id, client_secret, redirect_uri,
         allowed_subjects: allowed.split(",").map((s) => s.trim()).filter(Boolean),
       },
     };
   }
-  return { port, db_path, jwt_secret };
+  return { port, db_path, jwt_secret, disable_auth };
 }
