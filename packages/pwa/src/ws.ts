@@ -19,6 +19,7 @@ export function eventKey(daemon_id: string, session_id: string): string {
 export interface UseHubResult extends HubState {
   sendPermissionReply: (req: PwaPermissionRequest, decision: "allow" | "deny") => void;
   requestHistory: (daemon_id: string, session_id: string, before_offset: number, limit: number) => void;
+  killSession: (daemon_id: string, session_id: string) => void;
 }
 
 export function useHub(hubUrl: string, bearer: string | null): UseHubResult {
@@ -184,5 +185,18 @@ export function useHub(hubUrl: string, bearer: string | null): UseHubResult {
     [],
   );
 
-  return { ...state, sendPermissionReply, requestHistory };
+  const killSession = useCallback(
+    (daemon_id: string, session_id: string) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const msg: PwaToHub = {
+        type: "kill_session",
+        daemon_id, session_id,
+      };
+      ws.send(JSON.stringify(msg));
+    },
+    [],
+  );
+
+  return { ...state, sendPermissionReply, requestHistory, killSession };
 }

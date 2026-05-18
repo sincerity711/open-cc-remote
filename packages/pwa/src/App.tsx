@@ -34,7 +34,7 @@ export function App() {
     });
   }, [bearer]);
 
-  const { connected, daemons, events, pendingPermissions, sendPermissionReply, requestHistory } = useHub(HUB_URL, bearer);
+  const { connected, daemons, events, pendingPermissions, sendPermissionReply, requestHistory, killSession } = useHub(HUB_URL, bearer);
 
   if (!bearer) {
     return (
@@ -90,20 +90,43 @@ export function App() {
                     return (
                       <li
                         key={s.session_id}
-                        onClick={() => setSelected({ daemon_id: d.daemon_id, session_id: s.session_id })}
                         style={{
                           padding: "8px 12px",
                           marginBottom: 4,
                           background: isSel ? "#e8f5e8" : "#fafafa",
                           border: isSel ? "1px solid #0a0" : "1px solid #eee",
                           borderRadius: 4,
-                          cursor: "pointer",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          gap: 8,
                         }}
                       >
-                        <code>{s.session_id}</code>{" — "}
-                        {s.tmux_session ? <span>tmux:{s.tmux_session} · </span> : null}
-                        cwd: <code>{s.cwd}</code> · model: <code>{s.model}</code>
-                        {evtCount > 0 && <span style={{ marginLeft: 8, color: "#0a0" }}>{evtCount}↓</span>}
+                        <span
+                          onClick={() => setSelected({ daemon_id: d.daemon_id, session_id: s.session_id })}
+                          style={{ flex: 1, cursor: "pointer" }}
+                        >
+                          <code>{s.session_id}</code>{" — "}
+                          {s.tmux_session ? <span>tmux:{s.tmux_session} · </span> : null}
+                          cwd: <code>{s.cwd}</code> · model: <code>{s.model}</code>
+                          {evtCount > 0 && <span style={{ marginLeft: 8, color: "#0a0" }}>{evtCount}↓</span>}
+                        </span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (confirm(`Kill session ${s.session_id}?`)) {
+                              killSession(d.daemon_id, s.session_id);
+                            }
+                          }}
+                          style={{
+                            fontSize: 11, padding: "2px 8px", background: "#fff",
+                            border: "1px solid #ccc", borderRadius: 3, cursor: "pointer",
+                            color: "#a00",
+                          }}
+                          title="Kill this session"
+                        >
+                          ✕
+                        </button>
                       </li>
                     );
                   })}
