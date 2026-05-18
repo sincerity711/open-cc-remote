@@ -3,7 +3,7 @@
 Remote control plane for local Claude Code sessions. See the
 [design spec](docs/superpowers/specs/2026-05-18-open-cc-remote-design.md).
 
-**Status:** Plan 15 (idle events) complete.
+**Status:** Plan 16 (status CLI) complete.
 
 ## Prerequisites
 
@@ -125,6 +125,7 @@ bun run typecheck     # 5 packages
 - Plan 13: remote start_session — opt-in dangerous action: launches a new tmux session running `spawn_command` in a chosen cwd
 - Plan 14: task-completed events — daemon detects `assistant` lines with `stop_reason: "end_turn"` and emits a typed `task_completed` event
 - Plan 15: idle events — after a task completes, daemon waits `idle_window_ms` (default 30s) for activity; if none, emits `idle`. Cancelled by any new JSONL line. Optional push
+- Plan 16: `cc-remote status` CLI — operator visibility for daemon configuration, pairing state, JWT expiry, and recent permission audit entries
 
 ## Verified acceptance
 

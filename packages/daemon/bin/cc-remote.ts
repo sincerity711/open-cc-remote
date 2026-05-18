@@ -163,6 +163,79 @@ async function cmdInstall(args: ParsedArgs): Promise<void> {
   process.stdout.write(`✔ daemon installed and started\n`);
 }
 
+async function cmdStatus(): Promise<void> {
+  const { existsSync, readFileSync } = await import("node:fs");
+  const { loadConfig } = await import("../src/config.ts");
+
+  const cfg = loadConfig();
+
+  process.stdout.write("=== cc-remote status ===\n\n");
+  process.stdout.write(`daemon_id:           ${cfg.daemon_id}\n`);
+  process.stdout.write(`hub_url:             ${cfg.hub_url}\n`);
+  process.stdout.write(`state_dir:           ${cfg.state_dir}\n`);
+  process.stdout.write(`allow_kill:          ${cfg.allow_kill}\n`);
+  process.stdout.write(`allow_start:         ${cfg.allow_start}\n`);
+  if (cfg.allow_start) {
+    process.stdout.write(`allowed_cwd_prefix:  ${JSON.stringify(cfg.allowed_cwd_prefix)}\n`);
+    process.stdout.write(`spawn_command:       ${cfg.spawn_command}\n`);
+  }
+  process.stdout.write(`idle_window_ms:      ${cfg.idle_window_ms}\n`);
+  process.stdout.write("\n");
+
+  // Pairing status
+  if (existsSync(cfg.state_path)) {
+    try {
+      const state = JSON.parse(readFileSync(cfg.state_path, "utf8")) as { jwt?: string; exp?: number; paired_at?: number };
+      process.stdout.write(`paired:              yes\n`);
+      if (state.exp) {
+        const expIso = new Date(state.exp * 1000).toISOString();
+        const remaining = Math.round((state.exp * 1000 - Date.now()) / 1000);
+        process.stdout.write(`jwt_exp:             ${expIso} (${remaining}s remaining)\n`);
+      }
+      if (state.paired_at) {
+        process.stdout.write(`paired_at:           ${new Date(state.paired_at).toISOString()}\n`);
+      }
+    } catch (e) {
+      process.stdout.write(`paired:              CORRUPT (${(e as Error).message})\n`);
+    }
+  } else {
+    process.stdout.write(`paired:              no — run 'cc-remote pair --hub <url> --code <code>'\n`);
+  }
+  process.stdout.write("\n");
+
+  // Permission audit
+  const dbPath = `${cfg.state_dir}/db.sqlite`;
+  if (existsSync(dbPath)) {
+    try {
+      const { Database } = await import("bun:sqlite");
+      const db = new Database(dbPath, { readonly: true });
+      try {
+        const total = db.query("SELECT count(*) AS n FROM permissions").get() as { n: number };
+        process.stdout.write(`permissions logged:  ${total.n}\n`);
+        const recent = db.query(
+          "SELECT request_id, tool, args_summary, decision, decided_via, created_at, resolved_at FROM permissions ORDER BY created_at DESC LIMIT 5"
+        ).all() as Array<{
+          request_id: string; tool: string; args_summary: string;
+          decision: string | null; decided_via: string | null;
+          created_at: number; resolved_at: number | null;
+        }>;
+        if (recent.length > 0) {
+          process.stdout.write(`\nrecent permissions:\n`);
+          for (const r of recent) {
+            const age = Math.round((Date.now() - r.created_at) / 1000);
+            const status = r.decision ? `${r.decision} via ${r.decided_via ?? "?"}` : "PENDING";
+            process.stdout.write(`  ${age.toString().padStart(6)}s ago  ${r.tool.padEnd(8)} ${status.padEnd(20)} ${r.args_summary.slice(0, 60)}\n`);
+          }
+        }
+      } finally { db.close(); }
+    } catch (e) {
+      process.stdout.write(`permissions:         could not read (${(e as Error).message})\n`);
+    }
+  } else {
+    process.stdout.write(`permissions:         no audit DB yet\n`);
+  }
+}
+
 async function cmdUninstall(args: ParsedArgs): Promise<void> {
   const { detectPlatform, unitPath, uninstallCommands } = await import("../src/installer.ts");
   const platform = detectPlatform();
@@ -206,6 +279,7 @@ function usage(): string {
     "    [--daemon-id <id>]         override default (hostname)",
     "  install [--dry-run]          install daemon as launchd/systemd unit",
     "  uninstall [--dry-run]        remove the unit",
+    "  status                       show pairing/permission/health state",
   ].join("\n");
 }
 
@@ -219,6 +293,7 @@ try {
   else if (cmd === "daemon") await cmdDaemon();
   else if (cmd === "install") await cmdInstall(args);
   else if (cmd === "uninstall") await cmdUninstall(args);
+  else if (cmd === "status") await cmdStatus();
   else {
     process.stderr.write(usage() + "\n");
     process.exit(1);
