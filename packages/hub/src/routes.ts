@@ -21,7 +21,7 @@ export interface MakeServerOpts {
 export function makeServer(opts: MakeServerOpts = {}) {
   const daemonReg = new DaemonRegistry<ServerWebSocket<WsData>>();
   const pwaReg = new PwaRegistry<ServerWebSocket<WsData>>();
-  const router = new Router(daemonReg, pwaReg);
+  const router = new Router(daemonReg, pwaReg, opts.db, opts.push);
 
   const fetch = async (req: Request, server: ReturnType<typeof Bun.serve>) => {
     const url = new URL(req.url);

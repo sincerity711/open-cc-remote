@@ -1,5 +1,7 @@
 import type { DaemonToHub, HubToPwa, SessionSnapshot, DaemonView, EventFrameForPwa, PwaToHub } from "@cc-remote/proto";
 import type { DaemonRegistry, PwaRegistry } from "./connections.ts";
+import type { Db } from "./db.ts";
+import type { PushHelper } from "./push.ts";
 
 const RING_BUFFER_SIZE = 200;
 
@@ -17,6 +19,8 @@ export class Router {
   constructor(
     private daemonReg: DaemonRegistry<unknown>,
     private pwaReg: PwaRegistry<unknown>,
+    private db?: Db,
+    private push?: PushHelper,
   ) {}
 
   onDaemonFrame(daemon_id: string, frame: DaemonToHub): void {
@@ -75,6 +79,10 @@ export class Router {
           args_summary: frame.args_summary,
           expires_at: frame.expires_at,
         });
+        // Web Push fanout (best-effort).
+        if (this.db && this.push) {
+          void this.dispatchPush(daemon_id, frame);
+        }
         return;
       }
       case "permission_resolved": {
@@ -107,6 +115,27 @@ export class Router {
         return;
       }
     }
+  }
+
+  private async dispatchPush(
+    daemon_id: string,
+    frame: { session_id: string; request_id: string; tool: string; args_summary: string },
+  ): Promise<void> {
+    if (!this.db || !this.push) return;
+    const { findDaemon } = await import("./repos/daemons.ts");
+    const { findSubsByOwner } = await import("./repos/push-subs.ts");
+    const daemon = findDaemon(this.db, daemon_id);
+    if (!daemon) return;
+    const subs = findSubsByOwner(this.db, daemon.owner_sub);
+    if (subs.length === 0) return;
+    await this.push.sendTo(subs, {
+      kind: "permission",
+      daemon_id,
+      session_id: frame.session_id,
+      request_id: frame.request_id,
+      tool: frame.tool,
+      args_summary: frame.args_summary,
+    });
   }
 
   onDaemonDisconnect(daemon_id: string): void {

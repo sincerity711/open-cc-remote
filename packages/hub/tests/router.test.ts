@@ -1,6 +1,13 @@
 import { test, expect } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Router } from "../src/router.ts";
 import { DaemonRegistry, PwaRegistry } from "../src/connections.ts";
+import { openDb } from "../src/db.ts";
+import { createDevice } from "../src/repos/devices.ts";
+import { addPushSub } from "../src/repos/push-subs.ts";
+import { pairDaemon } from "../src/repos/daemons.ts";
 
 test("hello frame populates state and broadcasts daemon_online", () => {
   const dreg = new DaemonRegistry<unknown>();
@@ -217,4 +224,64 @@ test("onPwaCommand forwards permission_reply to addressed daemon", () => {
     request_id: "r1",
     decision: "allow",
   }]);
+});
+
+test("permission_request triggers Web Push fanout to subscriptions of daemon's owner", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ccr-rp-"));
+  try {
+    const db = openDb(join(dir, "h.sqlite"));
+    db.prepare("INSERT INTO users (sub, created_at) VALUES (?, ?)").run("u1", 1);
+    pairDaemon(db, "d-1", "u1", "{}", null);
+    const dev = createDevice(db, "u1", "iPhone", null, 60_000);
+    addPushSub(db, dev.device_id, "https://fcm/x", "p", "a");
+
+    const sentTo: Array<{ subs: unknown[]; payload: unknown }> = [];
+    const push = {
+      async sendTo(subs: unknown[], payload: unknown) {
+        sentTo.push({ subs, payload });
+      },
+    };
+    const dreg = new DaemonRegistry<unknown>();
+    const preg = new PwaRegistry<unknown>();
+    const router = new Router(dreg, preg, db, push);
+
+    router.onDaemonFrame("d-1", { type: "hello", daemon_id: "d-1", epoch: 1,
+      hostname: "h", agent_version: "0", sessions: [] });
+    router.onDaemonFrame("d-1", {
+      type: "permission_request",
+      session_id: "s1",
+      request_id: "r1",
+      tool: "Bash",
+      args_summary: "ls -la",
+      expires_at: 9999,
+    });
+
+    await new Promise((r) => setTimeout(r, 10)); // let the void-promise dispatchPush complete
+
+    expect(sentTo).toHaveLength(1);
+    expect(sentTo[0]!.subs).toEqual([{ device_id: dev.device_id, endpoint: "https://fcm/x", p256dh: "p", auth: "a" }]);
+    expect(sentTo[0]!.payload).toEqual({
+      kind: "permission",
+      daemon_id: "d-1", session_id: "s1", request_id: "r1",
+      tool: "Bash", args_summary: "ls -la",
+    });
+    db.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("permission_request with no push helper still works", () => {
+  // Just verify existing tests / no exception when db/push undefined
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);  // no db, no push
+  router.onDaemonFrame("d-1", { type: "hello", daemon_id: "d-1", epoch: 1,
+    hostname: "h", agent_version: "0", sessions: [] });
+  router.onDaemonFrame("d-1", {
+    type: "permission_request", session_id: "s1", request_id: "r1",
+    tool: "Bash", args_summary: "x", expires_at: 9999,
+  });
+  // No throw → ok.
+  expect(true).toBe(true);
 });
