@@ -3,6 +3,7 @@ import { useHub, eventKey } from "./ws.ts";
 import { consumeFragment, getBearer, loginUrl, clearBearer } from "./auth.ts";
 import { SessionPane } from "./SessionPane.tsx";
 import { PermissionBanner } from "./PermissionBanner.tsx";
+import { registerPushSubscription } from "./push.ts";
 
 const HUB_URL = (import.meta.env.VITE_HUB_URL as string) ?? "ws://localhost:7745";
 
@@ -16,6 +17,20 @@ export function App() {
     consumeFragment();
     setBearer(getBearer());
   }, []);
+
+  useEffect(() => {
+    if (!bearer) return;
+    const vapid = (import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined) ?? null;
+    registerPushSubscription(HUB_URL, bearer, vapid).then((r) => {
+      if (!r.registered) {
+        console.log("[cc-remote] push not registered:", r.reason);
+      } else {
+        console.log("[cc-remote] push subscribed");
+      }
+    }).catch((e) => {
+      console.error("[cc-remote] push registration failed:", e);
+    });
+  }, [bearer]);
 
   const { connected, daemons, events, pendingPermissions, sendPermissionReply } = useHub(HUB_URL, bearer);
 

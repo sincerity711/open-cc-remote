@@ -1,0 +1,36 @@
+// Service worker for cc-remote.
+// Receives Web Push events, shows OS notification, opens PWA on click.
+
+self.addEventListener("push", (event) => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch (e) {}
+
+  const title = "cc-remote";
+  let body = "";
+  if (data.kind === "permission") {
+    body = `${data.daemon_id || "daemon"} wants to run ${data.tool || "?"}\n${data.args_summary || ""}`;
+  } else {
+    body = JSON.stringify(data);
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      tag: data.request_id || "cc-remote",
+      data,
+      requireInteraction: data.kind === "permission",
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const c of clientList) {
+        if ("focus" in c) return c.focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow("/");
+    }),
+  );
+});
