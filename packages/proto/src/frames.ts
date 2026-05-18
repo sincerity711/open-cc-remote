@@ -52,7 +52,8 @@ export type DaemonToHub =
 export type HubToDaemon =
   | { type: "ping"; ts: number }
   | HubPermissionReply
-  | HubToDaemonRequestHistory;
+  | HubToDaemonRequestHistory
+  | HubToDaemonKillSession;
 
 // ─── hub ↔ PWA (WSS) ──────────────────────────────────────────────────
 
@@ -77,7 +78,21 @@ export type HubToPwa =
 export type PwaToHub =
   | { type: "subscribe" }  // Plan 1 PWA only subscribes; commands come in Plan 4
   | PwaToHubPermissionReply
-  | PwaToHubRequestHistory;
+  | PwaToHubRequestHistory
+  | PwaToHubKillSession;
+
+// ─── kill_session (dangerous action) ──────────────────────────────────
+
+export interface PwaToHubKillSession {
+  type: "kill_session";
+  daemon_id: string;
+  session_id: string;
+}
+
+export interface HubToDaemonKillSession {
+  type: "kill_session";
+  session_id: string;
+}
 
 // ─── history (scroll-back) ────────────────────────────────────────────
 
