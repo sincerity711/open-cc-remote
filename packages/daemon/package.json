@@ -3,6 +3,9 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "bin": {
+    "cc-remote": "./bin/cc-remote.ts"
+  },
   "scripts": {
     "start": "bun run src/index.ts",
     "typecheck": "tsc --noEmit"
