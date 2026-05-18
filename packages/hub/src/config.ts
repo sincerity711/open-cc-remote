@@ -8,6 +8,12 @@ export interface IasOidcConfig {
   allowed_subjects: string[];
 }
 
+export interface VapidConfig {
+  public_key: string;
+  private_key: string;
+  subject: string;       // mailto: or https URL
+}
+
 export interface HubConfig {
   port: number;
   db_path: string;
@@ -15,6 +21,7 @@ export interface HubConfig {
   disable_auth: boolean;
   pwa_url: string;
   ias?: IasOidcConfig;
+  vapid?: VapidConfig;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
@@ -35,14 +42,25 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
   const redirect_uri = env.HUB_IAS_REDIRECT_URI;
   const allowed = env.HUB_IAS_ALLOWED_SUBJECTS;
 
+  let ias: IasOidcConfig | undefined;
   if (issuer_url && client_id && client_secret && redirect_uri && allowed) {
-    return {
-      port, db_path, jwt_secret, disable_auth, pwa_url,
-      ias: {
-        issuer_url, client_id, client_secret, redirect_uri,
-        allowed_subjects: allowed.split(",").map((s) => s.trim()).filter(Boolean),
-      },
+    ias = {
+      issuer_url, client_id, client_secret, redirect_uri,
+      allowed_subjects: allowed.split(",").map((s) => s.trim()).filter(Boolean),
     };
   }
-  return { port, db_path, jwt_secret, disable_auth, pwa_url };
+
+  const vapid_public = env.HUB_VAPID_PUBLIC_KEY;
+  const vapid_private = env.HUB_VAPID_PRIVATE_KEY;
+  const vapid_subject = env.HUB_VAPID_SUBJECT;
+  let vapid: VapidConfig | undefined;
+  if (vapid_public && vapid_private && vapid_subject) {
+    vapid = { public_key: vapid_public, private_key: vapid_private, subject: vapid_subject };
+  } else if (vapid_public || vapid_private || vapid_subject) {
+    process.stderr.write(
+      "WARN: incomplete VAPID config (need HUB_VAPID_PUBLIC_KEY, HUB_VAPID_PRIVATE_KEY, HUB_VAPID_SUBJECT); Web Push disabled\n",
+    );
+  }
+
+  return { port, db_path, jwt_secret, disable_auth, pwa_url, ias, vapid };
 }

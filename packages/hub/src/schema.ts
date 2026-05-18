@@ -45,6 +45,14 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
         consumed_at INTEGER
       );
       CREATE INDEX IF NOT EXISTS idx_devices_token_hash ON devices(token_hash);
+      CREATE TABLE IF NOT EXISTS push_subs (
+        device_id TEXT PRIMARY KEY,
+        endpoint TEXT NOT NULL,
+        p256dh TEXT NOT NULL,
+        auth TEXT NOT NULL,
+        preferences TEXT NOT NULL DEFAULT '{}',
+        FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
+      );
     `,
   },
 ];
