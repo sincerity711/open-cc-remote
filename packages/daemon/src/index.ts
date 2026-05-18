@@ -7,6 +7,8 @@ import { LiveSessions } from "./registry.ts";
 import { startSocketServer } from "./socket-server.ts";
 import { startHubClient } from "./hub-client.ts";
 import { getOrCreateKeypair } from "./keystore.ts";
+import { jsonlPath } from "./jsonl-paths.ts";
+import { startWatcher, type WatcherHandle } from "./jsonl-watcher.ts";
 
 const cfg = loadConfig();
 const epoch = Math.floor(Date.now() / 1000);
@@ -47,8 +49,41 @@ const hub = startHubClient({
   privateJwk,
 });
 
-sessions.onAdd((s: SessionSnapshot) => { hub.send({ type: "session_open", session: s }); });
-sessions.onRemove((session_id: string) => { hub.send({ type: "session_close", session_id, reason: "plugin_bye" }); });
+const watchers = new Map<string, WatcherHandle>();
+
+sessions.onAdd((s: SessionSnapshot) => {
+  hub.send({ type: "session_open", session: s });
+
+  // Start watching the session's JSONL.
+  const path = jsonlPath(s.cwd, s.session_id);
+  const watcher = startWatcher({
+    path,
+    onLine: (line, offset) => {
+      let payload: unknown;
+      try { payload = JSON.parse(line); } catch { payload = { raw: line }; }
+      hub.send({
+        type: "event",
+        session_id: s.session_id,
+        jsonl_offset: offset,
+        ts: Date.now(),
+        payload,
+      });
+    },
+    onError: (e) => {
+      process.stderr.write(`daemon: watcher error for ${s.session_id}: ${e.message}\n`);
+    },
+  });
+  watchers.set(s.session_id, watcher);
+});
+
+sessions.onRemove((session_id: string) => {
+  hub.send({ type: "session_close", session_id, reason: "plugin_bye" });
+  const w = watchers.get(session_id);
+  if (w) {
+    w.close();
+    watchers.delete(session_id);
+  }
+});
 
 const sockServer = startSocketServer({
   path: cfg.socket_path,
@@ -67,6 +102,12 @@ const sockServer = startSocketServer({
 await sockServer.ready;
 console.log(`daemon ${cfg.daemon_id} ready; socket=${cfg.socket_path}; hub=${cfg.hub_url}; auth=${jwt ? "on" : "off"}`);
 
-const shutdown = () => { sockServer.close(); hub.close(); process.exit(0); };
+const shutdown = () => {
+  for (const w of watchers.values()) w.close();
+  watchers.clear();
+  sockServer.close();
+  hub.close();
+  process.exit(0);
+};
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
