@@ -59,6 +59,8 @@ export class Router {
       }
       case "pong":
         return; // Plan 1: heartbeat ignored
+      case "event":
+        return; // Plan 3 T5: fan-out to PWAs not yet implemented
     }
   }
 

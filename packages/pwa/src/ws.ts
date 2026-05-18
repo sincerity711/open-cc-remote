@@ -50,6 +50,8 @@ export function useHub(hubUrl: string, bearer: string | null): HubState {
                   ? { ...d, sessions: d.sessions.filter((s) => s.session_id !== frame.session_id) }
                   : d),
             };
+          case "event":
+            return prev; // Plan 3 T6: event display not yet implemented
         }
         return prev;
       });
