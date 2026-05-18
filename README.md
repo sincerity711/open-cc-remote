@@ -3,7 +3,7 @@
 Remote control plane for local Claude Code sessions. See the
 [design spec](docs/superpowers/specs/2026-05-18-open-cc-remote-design.md).
 
-**Status:** Plan 14 (task_completed events) complete.
+**Status:** Plan 15 (idle events) complete.
 
 ## Prerequisites
 
@@ -108,7 +108,7 @@ bun test e2e/         # end-to-end only
 bun run typecheck     # 5 packages
 ```
 
-## What Plans 1–14 cover
+## What Plans 1–15 cover
 
 - Plan 1: vertical slice — plugin/daemon/hub/PWA wired up, sessions visible in PWA
 - Plan 2: auth — IAS OIDC for PWA, DPoP-bound JWT for daemons, `cc-remote pair` CLI
@@ -116,14 +116,15 @@ bun run typecheck     # 5 packages
 - Plan 4: permission relay — when Claude Code asks to run a tool, an amber banner appears in the PWA with Allow/Deny buttons; the decision flows back to the plugin and is recorded in the daemon's SQLite audit table
 - Plan 5: Web Push notifications — when a permission request arrives, all of the user's registered browsers/PWAs receive a push notification via VAPID-signed Web Push, with a service worker showing an OS-level notification
 - Plan 6: operational polish — "My devices" settings panel (list/rename/revoke), `cc-remote daemon rotate-token` for periodic credential rotation, hub `/pair/refresh` endpoint
-- Plan 7: history scroll-back — scroll up in any SessionPane to load older events from the JSONL file; daemon reads forward, returns last N before the requested offset
-- Plan 8: launchd / systemd installer — `cc-remote install` writes the right service file for your platform and starts the daemon; `cc-remote uninstall` reverses it
-- Plan 9: push preferences — Settings panel has a Notifications toggle to opt out of permission-request push without revoking the device
+- Plan 7: history scroll-back — scroll up in any SessionPane to load older events from the JSONL file
+- Plan 8: launchd / systemd installer — `cc-remote install` writes the right service file for your platform and starts the daemon
+- Plan 9: push preferences — Settings panel has a Notifications toggle to opt out of permission-request push
 - Plan 10: acceptance suite — automated benchmarks asserting the design spec's quantitative criteria
 - Plan 11: daemon-offline push — opt-in notification when a daemon stays offline ≥ 30s; cancelled if the daemon reconnects in time
-- Plan 12: remote kill_session — opt-in dangerous action: ✕ button per session in the PWA terminates the plugin (and Claude Code with it). Requires `allow_kill: true`
-- Plan 13: remote start_session — opt-in dangerous action: launches a new tmux session running `spawn_command` in a chosen cwd. Gated by `allow_start: true` and `allowed_cwd_prefix: [...]`
-- Plan 14: task-completed events — daemon detects `assistant` lines with `stop_reason: "end_turn"` and emits a typed `task_completed` event. Optional push notification "X finished a turn"
+- Plan 12: remote kill_session — opt-in dangerous action: ✕ button per session terminates the plugin
+- Plan 13: remote start_session — opt-in dangerous action: launches a new tmux session running `spawn_command` in a chosen cwd
+- Plan 14: task-completed events — daemon detects `assistant` lines with `stop_reason: "end_turn"` and emits a typed `task_completed` event
+- Plan 15: idle events — after a task completes, daemon waits `idle_window_ms` (default 30s) for activity; if none, emits `idle`. Cancelled by any new JSONL line. Optional push
 
 ## Verified acceptance
 
@@ -136,12 +137,13 @@ bun run typecheck     # 5 packages
 - ✅ start_session is ignored when allow_start is false (default) — `e2e/start.test.ts`
 - ✅ task_completed emitted on assistant + end_turn — `e2e/completed.test.ts`
 - ✅ task_completed NOT emitted on stop_reason: tool_use — `e2e/completed.test.ts`
+- ✅ idle event fires after idle_window_ms — `e2e/idle.test.ts`
+- ✅ idle event is cancelled by activity within window — `e2e/idle.test.ts`
 
-## Known gaps for Plan 15+
+## Known gaps for Plan 16+
 
 - **Hardware-bound keys** — keystore abstraction layer is in place, but only file-backed Ed25519 ships; macOS Keychain (Security framework) and Linux libsecret bindings are deferred
-- **Real Claude Code channel-permissions wire format** — for now `CC_REMOTE_FAKE_PERMISSION` simulates the chain; integrating with Claude Code's actual `--channels` permission protocol is open work
-- **idle event** — task_completed handles "Claude finished a turn" but not "Claude has been waiting on user input for N seconds"
+- **Real Claude Code channel-permissions wire format** — for now `CC_REMOTE_FAKE_PERMISSION` simulates the chain
 - **Windows installer** — Plan 8 covers macOS + Linux only
 
 ## License
