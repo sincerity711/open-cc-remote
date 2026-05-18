@@ -98,8 +98,18 @@ export class Router {
         });
         return;
       }
-      case "history_chunk":
-        return; // wired in P7-T4
+      case "history_chunk": {
+        const state = this.daemons.get(daemon_id);
+        if (!state) return;
+        this.pwaReg.broadcast({
+          type: "history_chunk",
+          daemon_id,
+          session_id: frame.session_id,
+          request_id: frame.request_id,
+          events: frame.events,
+        });
+        return;
+      }
       case "event": {
         const state = this.daemons.get(daemon_id);
         if (!state) return;
@@ -157,6 +167,14 @@ export class Router {
         session_id: frame.session_id,
         request_id: frame.request_id,
         decision: frame.decision,
+      });
+    } else if (frame.type === "request_history") {
+      this.daemonReg.send(frame.daemon_id, {
+        type: "request_history",
+        session_id: frame.session_id,
+        request_id: frame.request_id,
+        before_offset: frame.before_offset,
+        limit: frame.limit,
       });
     }
     // "subscribe" is handled via onPwaSubscribe; ignore here.

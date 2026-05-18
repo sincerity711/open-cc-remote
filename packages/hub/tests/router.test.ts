@@ -285,3 +285,59 @@ test("permission_request with no push helper still works", () => {
   // No throw → ok.
   expect(true).toBe(true);
 });
+
+test("history_chunk from daemon is broadcast to PWAs with daemon_id", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const broadcasts: unknown[] = [];
+  preg.add({}, (f) => broadcasts.push(f));
+  const router = new Router(dreg, preg);
+
+  router.onDaemonFrame("d-1", { type: "hello", daemon_id: "d-1", epoch: 1,
+    hostname: "h", agent_version: "0", sessions: [] });
+  broadcasts.length = 0;
+
+  router.onDaemonFrame("d-1", {
+    type: "history_chunk",
+    session_id: "s1",
+    request_id: "rh1",
+    events: [
+      { jsonl_offset: 10, payload: { line: 1 } },
+      { jsonl_offset: 22, payload: { line: 2 } },
+    ],
+  });
+  expect(broadcasts).toEqual([{
+    type: "history_chunk",
+    daemon_id: "d-1",
+    session_id: "s1",
+    request_id: "rh1",
+    events: [
+      { jsonl_offset: 10, payload: { line: 1 } },
+      { jsonl_offset: 22, payload: { line: 2 } },
+    ],
+  }]);
+});
+
+test("onPwaCommand forwards request_history to addressed daemon", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+  const sentToDaemon: unknown[] = [];
+  dreg.add("d-1", {}, (f) => sentToDaemon.push(f));
+
+  router.onPwaCommand({
+    type: "request_history",
+    daemon_id: "d-1",
+    session_id: "s1",
+    request_id: "rh1",
+    before_offset: 9999,
+    limit: 50,
+  });
+  expect(sentToDaemon).toEqual([{
+    type: "request_history",
+    session_id: "s1",
+    request_id: "rh1",
+    before_offset: 9999,
+    limit: 50,
+  }]);
+});
