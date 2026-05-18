@@ -4,6 +4,7 @@ import type { PluginToDaemon, DaemonToPlugin } from "@cc-remote/proto";
 
 export interface DaemonClient {
   send(frame: PluginToDaemon): Promise<DaemonToPlugin>;
+  sendOneWay(frame: PluginToDaemon): void;
   close(): void;
 }
 
@@ -29,7 +30,6 @@ export async function connectDaemon(socketPath: string, timeoutMs = 5000): Promi
 
   sock.on("close", () => {
     while (queue.length) queue.shift()!({ type: "ack", ref: "bye" } as DaemonToPlugin);
-    // No surprise rejections; treat post-close acks as bye-acks.
   });
 
   return {
@@ -38,6 +38,9 @@ export async function connectDaemon(socketPath: string, timeoutMs = 5000): Promi
         queue.push(resolve);
         sock.write(encodeFrame(frame));
       });
+    },
+    sendOneWay(frame: PluginToDaemon) {
+      sock.write(encodeFrame(frame));
     },
     close() { try { sock.end(); } catch {} },
   };

@@ -27,13 +27,29 @@ async function main() {
     client = await connectDaemon(sockPath, 3000);
   } catch (e) {
     process.stderr.write(`cc-remote plugin: cannot reach daemon at ${sockPath}: ${(e as Error).message}\n`);
-    // Plan 1: exit cleanly so Claude Code is unaffected.
     process.exit(0);
   }
 
   const session = buildSession();
   await client.send({ type: "register", session });
   process.stderr.write(`cc-remote plugin: registered session ${session.session_id}\n`);
+
+  // Test hook: emit a fake permission_request when env var is set.
+  const fakeTool = process.env.CC_REMOTE_FAKE_PERMISSION;
+  if (fakeTool) {
+    const requestId = process.env.CC_REMOTE_FAKE_REQUEST_ID ?? `req-${Date.now()}`;
+    const argsSummary = process.env.CC_REMOTE_FAKE_ARGS ?? `(test) ${fakeTool}`;
+    setTimeout(() => {
+      client.sendOneWay({
+        type: "permission_request",
+        request_id: requestId,
+        tool: fakeTool,
+        args_summary: argsSummary,
+        expires_at: Date.now() + 60_000,
+      });
+      process.stderr.write(`cc-remote plugin: sent fake permission_request ${requestId}\n`);
+    }, 100);
+  }
 
   const goodbye = async (code: number) => {
     try {
@@ -50,8 +66,6 @@ async function main() {
   process.on("SIGINT", () => goodbye(130));
   process.on("SIGTERM", () => goodbye(143));
 
-  // Keep the event loop alive: read stdin (Claude Code uses stdio for MCP framing
-  // in real plugins; we ignore it for Plan 1).
   process.stdin.resume();
 }
 
