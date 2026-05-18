@@ -61,6 +61,17 @@ export function Settings({ hubUrl, bearer, onClose }: Props) {
     }
   };
 
+  const toggleIdlePush = async () => {
+    if (!prefs) return;
+    const next: PushPreferences = { ...prefs, idle: !(prefs.idle === true) };
+    setPrefs(next);
+    try {
+      await setPushPreferences(hubUrl, bearer, next);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
   const startEdit = (d: DeviceItem) => {
     setEditing(d.device_id);
     setEditValue(d.display_name ?? "");
@@ -128,6 +139,14 @@ export function Settings({ hubUrl, bearer, onClose }: Props) {
                   onChange={toggleCompletedPush}
                 />
                 <span>Notify me when Claude finishes a turn</span>
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, padding: 12, background: "#fafafa", border: "1px solid #eee", borderRadius: 4, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={prefs.idle === true}
+                  onChange={toggleIdlePush}
+                />
+                <span>Notify me when Claude is idle (waiting for input)</span>
               </label>
             </div>
           )}

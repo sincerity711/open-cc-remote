@@ -9,6 +9,8 @@ self.addEventListener("push", (event) => {
   let body = "";
   if (data.kind === "permission") {
     body = `${data.daemon_id || "daemon"} wants to run ${data.tool || "?"}\n${data.args_summary || ""}`;
+  } else if (data.kind === "idle") {
+    body = `${data.daemon_id || "daemon"} / ${data.session_id || "?"} is idle (waiting for input)`;
   } else if (data.kind === "completed") {
     body = `${data.daemon_id || "daemon"} / ${data.session_id || "?"} finished a turn`;
   } else if (data.kind === "offline") {

@@ -11,6 +11,7 @@ export interface HubState {
   events: Record<string, EventFrameForPwa[]>;
   pendingPermissions: Record<string, PwaPermissionRequest>;
   completedCounts: Record<string, number>;
+  idleSessions: Record<string, true>;
 }
 
 export function eventKey(daemon_id: string, session_id: string): string {
@@ -26,7 +27,8 @@ export interface UseHubResult extends HubState {
 
 export function useHub(hubUrl: string, bearer: string | null): UseHubResult {
   const [state, setState] = useState<HubState>({
-    connected: false, daemons: [], events: {}, pendingPermissions: {}, completedCounts: {},
+    connected: false, daemons: [], events: {}, pendingPermissions: {},
+    completedCounts: {}, idleSessions: {},
   });
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -77,7 +79,14 @@ export function useHub(hubUrl: string, bearer: string | null): UseHubResult {
             const trimmed = next.length > PER_SESSION_BUFFER
               ? next.slice(next.length - PER_SESSION_BUFFER)
               : next;
-            return { ...prev, events: { ...prev.events, [k]: trimmed } };
+            // Clear idle flag (any new event = activity)
+            const nextIdleSessions = { ...prev.idleSessions };
+            delete nextIdleSessions[k];
+            return {
+              ...prev,
+              events: { ...prev.events, [k]: trimmed },
+              idleSessions: nextIdleSessions,
+            };
           }
           case "history_chunk": {
             const k = eventKey(frame.daemon_id, frame.session_id);
@@ -119,8 +128,13 @@ export function useHub(hubUrl: string, bearer: string | null): UseHubResult {
               completedCounts: { ...prev.completedCounts, [k]: prevCount + 1 },
             };
           }
-          case "idle":
-            return prev; // wired in P15-T2
+          case "idle": {
+            const k = eventKey(frame.daemon_id, frame.session_id);
+            return {
+              ...prev,
+              idleSessions: { ...prev.idleSessions, [k]: true },
+            };
+          }
         }
         return prev;
       });

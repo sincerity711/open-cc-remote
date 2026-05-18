@@ -35,7 +35,7 @@ export function App() {
     });
   }, [bearer]);
 
-  const { connected, daemons, events, pendingPermissions, sendPermissionReply, requestHistory, killSession, startSession, completedCounts } = useHub(HUB_URL, bearer);
+  const { connected, daemons, events, pendingPermissions, sendPermissionReply, requestHistory, killSession, startSession, completedCounts, idleSessions } = useHub(HUB_URL, bearer);
 
   if (!bearer) {
     return (
@@ -135,6 +135,11 @@ export function App() {
                           {(completedCounts[eventKey(d.daemon_id, s.session_id)] ?? 0) > 0 && (
                             <span style={{ marginLeft: 8, color: "#080" }} title="Tasks completed">
                               ✓{completedCounts[eventKey(d.daemon_id, s.session_id)]}
+                            </span>
+                          )}
+                          {idleSessions[eventKey(d.daemon_id, s.session_id)] && (
+                            <span style={{ marginLeft: 8, color: "#888" }} title="Idle (waiting for input)">
+                              💤
                             </span>
                           )}
                         </span>
