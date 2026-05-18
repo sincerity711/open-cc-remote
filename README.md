@@ -3,7 +3,7 @@
 Remote control plane for local Claude Code sessions. See the
 [design spec](docs/superpowers/specs/2026-05-18-open-cc-remote-design.md).
 
-**Status:** Plan 6 (operational polish) complete.
+**Status:** Plan 7 (history scroll-back) complete.
 
 ## Prerequisites
 
@@ -106,7 +106,7 @@ bun test e2e/         # end-to-end only
 bun run typecheck     # 5 packages
 ```
 
-## What Plans 1–6 cover
+## What Plans 1–7 cover
 
 - Plan 1: vertical slice — plugin/daemon/hub/PWA wired up, sessions visible in PWA
 - Plan 2: auth — IAS OIDC for PWA, DPoP-bound JWT for daemons, `cc-remote pair` CLI
@@ -114,19 +114,20 @@ bun run typecheck     # 5 packages
 - Plan 4: permission relay — when Claude Code asks to run a tool, an amber banner appears in the PWA with Allow/Deny buttons; the decision flows back to the plugin and is recorded in the daemon's SQLite audit table
 - Plan 5: Web Push notifications — when a permission request arrives, all of the user's registered browsers/PWAs receive a push notification via VAPID-signed Web Push, with a service worker showing an OS-level notification
 - Plan 6: operational polish — "My devices" settings panel (list/rename/revoke), `cc-remote daemon rotate-token` for periodic credential rotation, hub `/pair/refresh` endpoint
+- Plan 7: history scroll-back — scroll up in any SessionPane to load older events from the JSONL file; daemon reads forward, returns last N before the requested offset
 
 Click any session row in the PWA to open its live event log on the right.
+Scroll up to load older events from disk.
 When a permission prompt arrives it shows at the top of the PWA across all sessions.
 With VAPID keys configured, your phone or laptop's PWA gets a push notification too — even when the tab isn't focused.
 The Settings button in the header lets you manage all your registered devices.
 
-## Known gaps for Plan 7+
+## Known gaps for Plan 8+
 
 - **Acceptance suite** — P95 < 1s permission round-trip; 30s offline detection; 3+ daemons concurrently
 - **Hardware-bound keys** — keystore abstraction layer is in place, but only file-backed Ed25519 ships; macOS Keychain (Security framework) and Linux libsecret bindings are deferred
 - **Install scripts** — `cc-remote install` for launchd / systemd user units
 - **Real Claude Code channel-permissions wire format** — for now `CC_REMOTE_FAKE_PERMISSION` simulates the chain; integrating with Claude Code's actual `--channels` permission protocol is open work
-- **request_history** — daemon-side reads JSONL backwards on demand; PWA scroll-back UI; not yet implemented
 - **Push preferences UI** — per-event toggles (idle, completed, daemon_offline); only `permission_request` triggers push today
 
 ## License
