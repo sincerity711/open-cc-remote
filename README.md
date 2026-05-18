@@ -3,7 +3,7 @@
 Remote control plane for local Claude Code sessions. See the
 [design spec](docs/superpowers/specs/2026-05-18-open-cc-remote-design.md).
 
-**Status:** Plan 8 (launchd/systemd installer) complete.
+**Status:** Plan 9 (push preferences) complete.
 
 ## Prerequisites
 
@@ -106,7 +106,7 @@ bun test e2e/         # end-to-end only
 bun run typecheck     # 5 packages
 ```
 
-## What Plans 1–8 cover
+## What Plans 1–9 cover
 
 - Plan 1: vertical slice — plugin/daemon/hub/PWA wired up, sessions visible in PWA
 - Plan 2: auth — IAS OIDC for PWA, DPoP-bound JWT for daemons, `cc-remote pair` CLI
@@ -115,34 +115,15 @@ bun run typecheck     # 5 packages
 - Plan 5: Web Push notifications — when a permission request arrives, all of the user's registered browsers/PWAs receive a push notification via VAPID-signed Web Push, with a service worker showing an OS-level notification
 - Plan 6: operational polish — "My devices" settings panel (list/rename/revoke), `cc-remote daemon rotate-token` for periodic credential rotation, hub `/pair/refresh` endpoint
 - Plan 7: history scroll-back — scroll up in any SessionPane to load older events from the JSONL file; daemon reads forward, returns last N before the requested offset
-- Plan 8: launchd / systemd installer — `cc-remote install` writes the right service file for your platform and starts the daemon; `cc-remote uninstall` reverses it; both support `--dry-run`
+- Plan 8: launchd / systemd installer — `cc-remote install` writes the right service file for your platform and starts the daemon; `cc-remote uninstall` reverses it
+- Plan 9: push preferences — Settings panel has a Notifications toggle to opt out of permission-request push without revoking the device
 
-Click any session row in the PWA to open its live event log on the right.
-Scroll up to load older events from disk.
-When a permission prompt arrives it shows at the top of the PWA across all sessions.
-With VAPID keys configured, your phone or laptop's PWA gets a push notification too — even when the tab isn't focused.
-The Settings button in the header lets you manage all your registered devices.
-
-## Quickstart on your own machine (production-ish)
-
-After completing the auth flow once, just:
-
-```bash
-cc-remote install         # macOS launchd / Linux systemd user unit
-```
-
-That's it — daemon runs at login. To stop:
-
-```bash
-cc-remote uninstall
-```
-
-## Known gaps for Plan 9+
+## Known gaps for Plan 10+
 
 - **Acceptance suite** — P95 < 1s permission round-trip; 30s offline detection; 3+ daemons concurrently
 - **Hardware-bound keys** — keystore abstraction layer is in place, but only file-backed Ed25519 ships; macOS Keychain (Security framework) and Linux libsecret bindings are deferred
 - **Real Claude Code channel-permissions wire format** — for now `CC_REMOTE_FAKE_PERMISSION` simulates the chain; integrating with Claude Code's actual `--channels` permission protocol is open work
-- **Push preferences UI** — per-event toggles (idle, completed, daemon_offline); only `permission_request` triggers push today
+- **Push for non-permission events** — only `permission_request` triggers push today; `idle`, `task_completed`, `daemon_offline` are not yet emitted as typed events
 - **Windows installer** — Plan 8 covers macOS + Linux only
 
 ## License
