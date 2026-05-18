@@ -10,6 +10,7 @@ import { startSocketServer } from "./socket-server.ts";
 import { startHubClient } from "./hub-client.ts";
 import { getOrCreateKeypair } from "./keystore.ts";
 import { jsonlPath } from "./jsonl-paths.ts";
+import { readHistory } from "./jsonl-history.ts";
 import { startWatcher, type WatcherHandle } from "./jsonl-watcher.ts";
 import { openDb } from "./db.ts";
 import { recordRequest, resolveRequest } from "./repos/permissions.ts";
@@ -72,6 +73,34 @@ const hub = startHubClient({
         request_id: frame.request_id,
         decision: frame.decision,
         decided_via: "pwa",
+      });
+    } else if (frame.type === "request_history") {
+      const session = sessions.get(frame.session_id);
+      if (!session) {
+        hub.send({
+          type: "history_chunk",
+          session_id: frame.session_id,
+          request_id: frame.request_id,
+          events: [],
+        });
+        return;
+      }
+      const path = jsonlPath(session.cwd, frame.session_id);
+      readHistory(path, frame.before_offset, frame.limit).then((events) => {
+        hub.send({
+          type: "history_chunk",
+          session_id: frame.session_id,
+          request_id: frame.request_id,
+          events,
+        });
+      }).catch((e) => {
+        process.stderr.write(`daemon: history read failed for ${frame.session_id}: ${(e as Error).message}\n`);
+        hub.send({
+          type: "history_chunk",
+          session_id: frame.session_id,
+          request_id: frame.request_id,
+          events: [],
+        });
       });
     }
   },
