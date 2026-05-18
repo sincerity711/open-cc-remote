@@ -28,3 +28,20 @@ test("loadConfig throws when file missing", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("loadConfig allow_kill defaults to false; honors true", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ccr-c2-"));
+  try {
+    writeFileSync(join(dir, "config.json"), JSON.stringify({
+      daemon_id: "d", hub_url: "ws://x",
+    }));
+    expect(loadConfig(dir).allow_kill).toBe(false);
+
+    writeFileSync(join(dir, "config.json"), JSON.stringify({
+      daemon_id: "d", hub_url: "ws://x", allow_kill: true,
+    }));
+    expect(loadConfig(dir).allow_kill).toBe(true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -8,6 +8,7 @@ export interface DaemonConfig {
   state_dir: string;
   socket_path: string;
   state_path: string;
+  allow_kill: boolean;
 }
 
 export function defaultStateDir(): string {
@@ -22,7 +23,7 @@ export function loadConfig(stateDir: string = defaultStateDir()): DaemonConfig {
   } catch (e) {
     throw new Error(`could not read ${path}: ${(e as Error).message}`);
   }
-  const data = JSON.parse(raw) as { daemon_id?: string; hub_url?: string };
+  const data = JSON.parse(raw) as { daemon_id?: string; hub_url?: string; allow_kill?: boolean };
   if (!data.daemon_id) throw new Error(`config.json missing daemon_id`);
   if (!data.hub_url) throw new Error(`config.json missing hub_url`);
   return {
@@ -31,5 +32,6 @@ export function loadConfig(stateDir: string = defaultStateDir()): DaemonConfig {
     state_dir: stateDir,
     socket_path: join(stateDir, "daemon.sock"),
     state_path: join(stateDir, "state.json"),
+    allow_kill: data.allow_kill === true,
   };
 }

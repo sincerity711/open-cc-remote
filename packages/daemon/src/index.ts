@@ -41,6 +41,7 @@ if (existsSync(cfg.state_path)) {
 
 const watchers = new Map<string, WatcherHandle>();
 const clientToSession = new Map<Socket, string>();
+const sessionToClient = new Map<string, Socket>();
 const requestToClient = new Map<string, Socket>();
 
 const hub = startHubClient({
@@ -103,6 +104,19 @@ const hub = startHubClient({
         });
       });
     }
+    else if (frame.type === "kill_session") {
+      if (!cfg.allow_kill) {
+        process.stderr.write(`daemon: kill_session ignored (allow_kill=false in config)\n`);
+        return;
+      }
+      const client = sessionToClient.get(frame.session_id);
+      if (!client) {
+        process.stderr.write(`daemon: kill_session for unknown session ${frame.session_id}\n`);
+        return;
+      }
+      process.stderr.write(`daemon: killing session ${frame.session_id}\n`);
+      try { client.destroy(); } catch {}
+    }
   },
   jwt,
   privateJwk,
@@ -146,10 +160,12 @@ const sockServer = startSocketServer({
     if (frame.type === "register") {
       sessions.add(frame.session);
       clientToSession.set(client, frame.session.session_id);
+      sessionToClient.set(frame.session.session_id, client);
       sockServer.replyTo(client, { type: "ack", ref: "register" });
     } else if (frame.type === "bye") {
       sessions.remove(frame.session_id);
       clientToSession.delete(client);
+      sessionToClient.delete(frame.session_id);
       sockServer.replyTo(client, { type: "ack", ref: "bye" });
     } else if (frame.type === "permission_request") {
       const session_id = clientToSession.get(client);
@@ -170,6 +186,8 @@ const sockServer = startSocketServer({
     }
   },
   onClose: (client) => {
+    const session_id = clientToSession.get(client);
+    if (session_id) sessionToClient.delete(session_id);
     clientToSession.delete(client);
     // Note: requestToClient entries from this client will leak until a hub
     // permission_reply tries to deliver and fails silently. Acceptable for v1
