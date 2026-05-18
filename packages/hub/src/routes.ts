@@ -232,7 +232,7 @@ export function makeServer(opts: MakeServerOpts = {}) {
         const pf = frame as PwaToHub;
         if (pf.type === "subscribe") {
           router.onPwaSubscribe((f) => ws.send(JSON.stringify(f)));
-        } else if (pf.type === "permission_reply" || pf.type === "request_history" || pf.type === "kill_session") {
+        } else if (pf.type === "permission_reply" || pf.type === "request_history" || pf.type === "kill_session" || pf.type === "start_session") {
           router.onPwaCommand(pf);
         }
       }

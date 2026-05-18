@@ -451,3 +451,41 @@ test("daemon offline push respects opt-in (default off → no push)", async () =
     db.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("onPwaCommand forwards start_session to addressed daemon", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+  const sentToDaemon: unknown[] = [];
+  dreg.add("d-1", {}, (f) => sentToDaemon.push(f));
+
+  router.onPwaCommand({
+    type: "start_session",
+    daemon_id: "d-1",
+    cwd: "/Users/me/work",
+    name: "session-x",
+  });
+  expect(sentToDaemon).toEqual([{
+    type: "start_session",
+    cwd: "/Users/me/work",
+    name: "session-x",
+  }]);
+});
+
+test("onPwaCommand omits name when not provided in start_session", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+  const sentToDaemon: unknown[] = [];
+  dreg.add("d-1", {}, (f) => sentToDaemon.push(f));
+
+  router.onPwaCommand({
+    type: "start_session",
+    daemon_id: "d-1",
+    cwd: "/Users/me/work",
+  });
+  expect(sentToDaemon).toEqual([{
+    type: "start_session",
+    cwd: "/Users/me/work",
+  }]);
+});

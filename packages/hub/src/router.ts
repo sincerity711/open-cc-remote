@@ -1,5 +1,5 @@
 import type {
-  DaemonToHub, HubToPwa, SessionSnapshot, DaemonView, EventFrameForPwa, PwaToHub,
+  DaemonToHub, HubToPwa, HubToDaemonStartSession, SessionSnapshot, DaemonView, EventFrameForPwa, PwaToHub,
 } from "@cc-remote/proto";
 import type { DaemonRegistry, PwaRegistry } from "./connections.ts";
 import type { Db } from "./db.ts";
@@ -199,6 +199,13 @@ export class Router {
         type: "kill_session",
         session_id: frame.session_id,
       });
+    } else if (frame.type === "start_session") {
+      const out: HubToDaemonStartSession = {
+        type: "start_session",
+        cwd: frame.cwd,
+      };
+      if (frame.name !== undefined) out.name = frame.name;
+      this.daemonReg.send(frame.daemon_id, out);
     }
   }
 

@@ -2,6 +2,7 @@ import { hostname } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Socket } from "node:net";
+import { spawn as childSpawn } from "node:child_process";
 import type { JWK } from "jose";
 import type { DaemonToHub, HubToDaemon, PluginToDaemon, SessionSnapshot } from "@cc-remote/proto";
 import { loadConfig } from "./config.ts";
@@ -116,6 +117,34 @@ const hub = startHubClient({
       }
       process.stderr.write(`daemon: killing session ${frame.session_id}\n`);
       try { client.destroy(); } catch {}
+    }
+    else if (frame.type === "start_session") {
+      if (!cfg.allow_start) {
+        process.stderr.write(`daemon: start_session ignored (allow_start=false)\n`);
+        return;
+      }
+      const cwd = frame.cwd;
+      const allowed = cfg.allowed_cwd_prefix.some((p) => cwd.startsWith(p));
+      if (!allowed) {
+        process.stderr.write(`daemon: start_session rejected — cwd ${cwd} not in allowed_cwd_prefix\n`);
+        return;
+      }
+      const tmuxName = frame.name ?? `cc-${Date.now()}`;
+      try {
+        const r = childSpawn("tmux", [
+          "new-session", "-d",
+          "-s", tmuxName,
+          "-c", cwd,
+          cfg.spawn_command,
+        ], { stdio: "ignore", detached: true });
+        r.on("error", (e) => {
+          process.stderr.write(`daemon: start_session spawn error: ${e.message}\n`);
+        });
+        r.unref();
+        process.stderr.write(`daemon: spawned tmux session ${tmuxName} in ${cwd}\n`);
+      } catch (e) {
+        process.stderr.write(`daemon: start_session spawn threw: ${(e as Error).message}\n`);
+      }
     }
   },
   jwt,

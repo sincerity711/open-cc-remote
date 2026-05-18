@@ -45,3 +45,29 @@ test("loadConfig allow_kill defaults to false; honors true", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("loadConfig allow_start + allowed_cwd_prefix + spawn_command have defaults; honor overrides", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ccr-c3-"));
+  try {
+    writeFileSync(join(dir, "config.json"), JSON.stringify({
+      daemon_id: "d", hub_url: "ws://x",
+    }));
+    const c1 = loadConfig(dir);
+    expect(c1.allow_start).toBe(false);
+    expect(c1.allowed_cwd_prefix).toEqual([]);
+    expect(c1.spawn_command).toContain("claude");
+
+    writeFileSync(join(dir, "config.json"), JSON.stringify({
+      daemon_id: "d", hub_url: "ws://x",
+      allow_start: true,
+      allowed_cwd_prefix: ["/Users/me/work"],
+      spawn_command: "echo hi",
+    }));
+    const c2 = loadConfig(dir);
+    expect(c2.allow_start).toBe(true);
+    expect(c2.allowed_cwd_prefix).toEqual(["/Users/me/work"]);
+    expect(c2.spawn_command).toBe("echo hi");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
