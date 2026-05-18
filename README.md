@@ -3,7 +3,7 @@
 Remote control plane for local Claude Code sessions. See the
 [design spec](docs/superpowers/specs/2026-05-18-open-cc-remote-design.md).
 
-**Status:** Plan 12 (remote kill_session) complete.
+**Status:** Plan 13 (remote start_session) complete.
 
 ## Prerequisites
 
@@ -59,6 +59,8 @@ VITE_HUB_URL=ws://localhost:7745 bun run --filter=@cc-remote/pwa dev
 
 # 8. Open http://localhost:5173 → click Sign in → fake-IAS auto-redirects
 #    back with bearer in fragment → daemon list shows "macbook" with session "demo".
+#    Add allow_kill: true to ~/.cc-remote/config.json to enable remote kill_session.
+#    Add allow_start: true and allowed_cwd_prefix: ["/your/path"] to enable remote start_session.
 ```
 
 ## Environment variables
@@ -106,7 +108,7 @@ bun test e2e/         # end-to-end only
 bun run typecheck     # 5 packages
 ```
 
-## What Plans 1–12 cover
+## What Plans 1–13 cover
 
 - Plan 1: vertical slice — plugin/daemon/hub/PWA wired up, sessions visible in PWA
 - Plan 2: auth — IAS OIDC for PWA, DPoP-bound JWT for daemons, `cc-remote pair` CLI
@@ -120,6 +122,7 @@ bun run typecheck     # 5 packages
 - Plan 10: acceptance suite — automated benchmarks asserting the design spec's quantitative criteria
 - Plan 11: daemon-offline push — opt-in notification when a daemon stays offline ≥ 30s; cancelled if the daemon reconnects in time
 - Plan 12: remote kill_session — opt-in dangerous action: ✕ button per session in the PWA terminates the plugin (and Claude Code with it). Requires `allow_kill: true` in `~/.cc-remote/config.json`
+- Plan 13: remote start_session — opt-in dangerous action: launches a new tmux session running the configured `spawn_command` in a chosen cwd. Gated by `allow_start: true` and `allowed_cwd_prefix: [...]`
 
 ## Verified acceptance
 
@@ -128,12 +131,13 @@ bun run typecheck     # 5 packages
 - ✅ Daemon-offline push debounce honors the 30s window — `packages/hub/tests/router.test.ts`
 - ✅ kill_session terminates the plugin and emits session_close — `e2e/kill.test.ts`
 - ✅ kill_session is ignored when allow_kill is false (default) — `e2e/kill.test.ts`
+- ✅ start_session spawns via tmux when allowed — `e2e/start.test.ts`
+- ✅ start_session is ignored when allow_start is false (default) — `e2e/start.test.ts`
 
-## Known gaps for Plan 13+
+## Known gaps for Plan 14+
 
 - **Hardware-bound keys** — keystore abstraction layer is in place, but only file-backed Ed25519 ships; macOS Keychain (Security framework) and Linux libsecret bindings are deferred
 - **Real Claude Code channel-permissions wire format** — for now `CC_REMOTE_FAKE_PERMISSION` simulates the chain; integrating with Claude Code's actual `--channels` permission protocol is open work
-- **start_session** — Plan 12 covers terminate-only; spawning new tmux sessions remotely is a separate feature
 - **Push for idle / task_completed events** — only `permission_request` and `daemon_offline` trigger push today
 - **Windows installer** — Plan 8 covers macOS + Linux only
 
