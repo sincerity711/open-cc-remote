@@ -3,8 +3,7 @@
 Remote control plane for local Claude Code sessions. See the
 [design spec](docs/superpowers/specs/2026-05-18-open-cc-remote-design.md).
 
-**Status:** Plan 3 (real-time JSONL streaming) complete. Plans 4–6 (permission relay,
-Web Push, ops) ahead.
+**Status:** Plan 4 (permission relay) complete. Plans 5–6 (Web Push, ops) ahead.
 
 ## Prerequisites
 
@@ -103,22 +102,24 @@ bun test e2e/         # end-to-end only
 bun run typecheck     # 5 packages
 ```
 
-## What Plans 1–3 cover
+## What Plans 1–4 cover
 
 - Plan 1: vertical slice — plugin/daemon/hub/PWA wired up, sessions visible in PWA
 - Plan 2: auth — IAS OIDC for PWA, DPoP-bound JWT for daemons, `cc-remote pair` CLI
 - Plan 3: real-time conversation streaming — daemon tails Claude Code's session JSONL and streams every line to the PWA's per-session pane
+- Plan 4: permission relay — when Claude Code asks to run a tool, an amber banner appears in the PWA with Allow/Deny buttons; the decision flows back to the plugin and is recorded in the daemon's SQLite audit table
 
 Click any session row in the PWA to open its live event log on the right.
+When a permission prompt arrives it shows at the top of the PWA across all sessions.
 
-## What Plans 1–3 do NOT cover yet
+## What Plans 1–4 do NOT cover yet
 
-- Permission relay (Plan 4) — approve `Bash`/`Edit` from your phone
 - Web Push notifications (Plan 5) — lock-screen alerts when Claude needs you
 - "My devices" UI / token rotation (Plan 5)
-- request_history / scroll-back to past sessions (Plan 4 or later)
+- request_history / scroll-back to past sessions (Plan 5 or later)
 - launchd / systemd installer (Plan 6)
 - Hardware-bound keys (Plan 6)
+- Real Claude Code permission protocol integration (channel-permissions wire format) — for now, fake-claude with `CC_REMOTE_FAKE_PERMISSION` exercises the chain
 
 ## License
 
