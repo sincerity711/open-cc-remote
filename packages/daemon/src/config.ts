@@ -7,6 +7,7 @@ export interface DaemonConfig {
   hub_url: string;
   state_dir: string;
   socket_path: string;
+  state_path: string;
 }
 
 export function defaultStateDir(): string {
@@ -29,5 +30,6 @@ export function loadConfig(stateDir: string = defaultStateDir()): DaemonConfig {
     hub_url: data.hub_url,
     state_dir: stateDir,
     socket_path: join(stateDir, "daemon.sock"),
+    state_path: join(stateDir, "state.json"),
   };
 }

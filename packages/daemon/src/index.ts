@@ -1,13 +1,35 @@
 import { hostname } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
+import type { JWK } from "jose";
 import type { DaemonToHub, PluginToDaemon, SessionSnapshot } from "@cc-remote/proto";
 import { loadConfig } from "./config.ts";
 import { LiveSessions } from "./registry.ts";
 import { startSocketServer } from "./socket-server.ts";
 import { startHubClient } from "./hub-client.ts";
+import { getOrCreateKeypair } from "./keystore.ts";
 
 const cfg = loadConfig();
 const epoch = Math.floor(Date.now() / 1000);
 const sessions = new LiveSessions();
+
+const kp = await getOrCreateKeypair(cfg.state_dir);
+
+let jwt: string | undefined;
+let privateJwk: JWK | undefined;
+if (existsSync(cfg.state_path)) {
+  try {
+    const state = JSON.parse(readFileSync(cfg.state_path, "utf8")) as { jwt?: string };
+    if (state.jwt) {
+      jwt = state.jwt;
+      privateJwk = kp.privateJwk;
+      process.stderr.write(`daemon: authenticated mode (jwt loaded from state.json)\n`);
+    }
+  } catch (e) {
+    process.stderr.write(`daemon: warning, could not parse state.json: ${(e as Error).message}\n`);
+  }
+} else {
+  process.stderr.write(`daemon: unauthenticated mode (no state.json — run 'cc-remote pair' to enable auth)\n`);
+}
 
 const hub = startHubClient({
   hub_url: cfg.hub_url,
@@ -20,17 +42,13 @@ const hub = startHubClient({
     agent_version: "0.1.0",
     sessions: sessions.list(),
   }),
-  onFrame: (_frame) => {
-    // Plan 1: hub-to-daemon frames (ping etc.) ignored.
-  },
+  onFrame: (_frame) => {},
+  jwt,
+  privateJwk,
 });
 
-sessions.onAdd((s: SessionSnapshot) => {
-  hub.send({ type: "session_open", session: s });
-});
-sessions.onRemove((session_id: string) => {
-  hub.send({ type: "session_close", session_id, reason: "plugin_bye" });
-});
+sessions.onAdd((s: SessionSnapshot) => { hub.send({ type: "session_open", session: s }); });
+sessions.onRemove((session_id: string) => { hub.send({ type: "session_close", session_id, reason: "plugin_bye" }); });
 
 const sockServer = startSocketServer({
   path: cfg.socket_path,
@@ -43,19 +61,12 @@ const sockServer = startSocketServer({
       sockServer.replyTo(client, { type: "ack", ref: "bye" });
     }
   },
-  onClose: () => {
-    // Plan 1 simplification: rely on explicit `bye`. Plan 2 adds
-    // per-connection session tracking for ungraceful disconnects.
-  },
+  onClose: () => {},
 });
 
 await sockServer.ready;
-console.log(`daemon ${cfg.daemon_id} ready; socket=${cfg.socket_path}; hub=${cfg.hub_url}`);
+console.log(`daemon ${cfg.daemon_id} ready; socket=${cfg.socket_path}; hub=${cfg.hub_url}; auth=${jwt ? "on" : "off"}`);
 
-const shutdown = () => {
-  sockServer.close();
-  hub.close();
-  process.exit(0);
-};
+const shutdown = () => { sockServer.close(); hub.close(); process.exit(0); };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);

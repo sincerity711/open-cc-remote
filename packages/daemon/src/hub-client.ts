@@ -1,10 +1,14 @@
 import type { DaemonToHub, HubToDaemon } from "@cc-remote/proto";
+import type { JWK } from "jose";
+import { signDpop } from "./dpop.ts";
 
 export interface HubClientOptions {
   hub_url: string;
   daemon_id: string;
   hello: () => DaemonToHub;
   onFrame: (frame: HubToDaemon) => void;
+  jwt?: string;
+  privateJwk?: JWK;
   backoffStartMs?: number;
   backoffCapMs?: number;
 }
@@ -25,9 +29,37 @@ export function startHubClient(opts: HubClientOptions): HubClientHandle {
 
   const url = `${opts.hub_url.replace(/\/$/, "")}/ws/daemon?daemon_id=${encodeURIComponent(opts.daemon_id)}`;
 
-  const connect = () => {
+  const scheduleReconnect = () => {
+    ws = null;
     if (stopped) return;
-    ws = new WebSocket(url);
+    const delay = backoff;
+    backoff = Math.min(backoff * 2, capMs);
+    setTimeout(() => { void connect(); }, delay);
+  };
+
+  const connect = async () => {
+    if (stopped) return;
+
+    let init: { headers?: Record<string, string> } | undefined;
+    if (opts.jwt && opts.privateJwk) {
+      try {
+        const dpop = await signDpop(opts.privateJwk, "GET", url);
+        init = { headers: { authorization: `DPoP ${opts.jwt}`, dpop } };
+      } catch (e) {
+        process.stderr.write(`hub-client: dpop sign failed: ${(e as Error).message}\n`);
+        scheduleReconnect();
+        return;
+      }
+    }
+
+    try {
+      // Bun extension: WebSocket constructor accepts { headers } in options.
+      ws = init ? new WebSocket(url, init as unknown as string[]) : new WebSocket(url);
+    } catch (e) {
+      process.stderr.write(`hub-client: WebSocket ctor failed: ${(e as Error).message}\n`);
+      scheduleReconnect();
+      return;
+    }
 
     ws.addEventListener("open", () => {
       backoff = startMs;
@@ -45,18 +77,11 @@ export function startHubClient(opts: HubClientOptions): HubClientHandle {
       } catch {}
     });
 
-    const reconnect = () => {
-      ws = null;
-      if (stopped) return;
-      const delay = backoff;
-      backoff = Math.min(backoff * 2, capMs);
-      setTimeout(connect, delay);
-    };
-    ws.addEventListener("close", reconnect);
+    ws.addEventListener("close", scheduleReconnect);
     ws.addEventListener("error", () => { try { ws?.close(); } catch {} });
   };
 
-  connect();
+  void connect();
 
   return {
     send(frame) {
