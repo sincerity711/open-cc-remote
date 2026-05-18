@@ -23,8 +23,18 @@ function buildSession(): SessionSnapshot {
 async function main() {
   const sockPath = process.env.CC_REMOTE_SOCKET ?? join(homedir(), ".cc-remote", "daemon.sock");
   let client: DaemonClient;
+  let goodbyeSent = false;
   try {
-    client = await connectDaemon(sockPath, 3000);
+    client = await connectDaemon(sockPath, {
+      timeoutMs: 3000,
+      onClose: () => {
+        // Daemon dropped the connection (e.g., kill_session). Exit cleanly.
+        if (!goodbyeSent) {
+          process.stderr.write(`cc-remote plugin: daemon closed connection, exiting\n`);
+          process.exit(0);
+        }
+      },
+    });
   } catch (e) {
     process.stderr.write(`cc-remote plugin: cannot reach daemon at ${sockPath}: ${(e as Error).message}\n`);
     process.exit(0);
@@ -52,6 +62,7 @@ async function main() {
   }
 
   const goodbye = async (code: number) => {
+    goodbyeSent = true;
     try {
       await Promise.race([
         client.send({ type: "bye", session_id: session.session_id }),

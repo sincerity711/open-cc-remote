@@ -187,7 +187,10 @@ const sockServer = startSocketServer({
   },
   onClose: (client) => {
     const session_id = clientToSession.get(client);
-    if (session_id) sessionToClient.delete(session_id);
+    if (session_id) {
+      sessionToClient.delete(session_id);
+      sessions.remove(session_id);
+    }
     clientToSession.delete(client);
     // Note: requestToClient entries from this client will leak until a hub
     // permission_reply tries to deliver and fails silently. Acceptable for v1

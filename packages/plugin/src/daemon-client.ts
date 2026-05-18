@@ -8,7 +8,17 @@ export interface DaemonClient {
   close(): void;
 }
 
-export async function connectDaemon(socketPath: string, timeoutMs = 5000): Promise<DaemonClient> {
+export interface ConnectDaemonOptions {
+  timeoutMs?: number;
+  onClose?: () => void;
+}
+
+export async function connectDaemon(socketPath: string, timeoutMsOrOpts: number | ConnectDaemonOptions = 5000): Promise<DaemonClient> {
+  const opts: ConnectDaemonOptions = typeof timeoutMsOrOpts === "number"
+    ? { timeoutMs: timeoutMsOrOpts }
+    : timeoutMsOrOpts;
+  const timeoutMs = opts.timeoutMs ?? 5000;
+
   const sock = await new Promise<Socket>((resolve, reject) => {
     const s = connect(socketPath);
     const tid = setTimeout(() => { s.destroy(); reject(new Error("connect timeout")); }, timeoutMs);
@@ -30,6 +40,7 @@ export async function connectDaemon(socketPath: string, timeoutMs = 5000): Promi
 
   sock.on("close", () => {
     while (queue.length) queue.shift()!({ type: "ack", ref: "bye" } as DaemonToPlugin);
+    opts.onClose?.();
   });
 
   return {
