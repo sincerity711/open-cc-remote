@@ -8,6 +8,17 @@
         "typescript": "^5.4.0",
       },
     },
+    "packages/hub": {
+      "name": "@cc-remote/hub",
+      "version": "0.0.1",
+      "dependencies": {
+        "@cc-remote/proto": "workspace:*",
+      },
+      "devDependencies": {
+        "bun-types": "latest",
+        "typescript": "^5.4.0",
+      },
+    },
     "packages/proto": {
       "name": "@cc-remote/proto",
       "version": "0.0.1",
@@ -18,6 +29,8 @@
     },
   },
   "packages": {
+    "@cc-remote/hub": ["@cc-remote/hub@workspace:packages/hub"],
+
     "@cc-remote/proto": ["@cc-remote/proto@workspace:packages/proto"],
 
     "@types/node": ["@types/node@25.8.0", "", { "dependencies": { "undici-types": ">=7.24.0 <7.24.7" } }, "sha512-TCFSk8IZh+iLX1xtksoBVtdmgL+1IX0fC9BeU4QqFSuNdN/K+HUlhqOzEmSYYpZUVsLYcPqc9KX+60iDuninSQ=="],
