@@ -10,6 +10,7 @@ interface WsData { kind: WsKind; key: string; }
 
 export interface MakeServerOpts {
   db?: Db;
+  jwt_secret?: string;
   ias?: IasContext;
 }
 
@@ -43,6 +44,18 @@ export function makeServer(opts: MakeServerOpts = {}) {
         });
       } catch (e) {
         return new Response((e as Error).message, { status: 401 });
+      }
+    }
+
+    if (url.pathname === "/pair" && req.method === "POST") {
+      if (!opts.db || !opts.jwt_secret) return new Response("not configured", { status: 503 });
+      try {
+        const body = await req.json();
+        const { handlePair } = await import("./pair.ts");
+        const result = await handlePair(opts.db, opts.jwt_secret, body);
+        return Response.json(result);
+      } catch (e) {
+        return new Response((e as Error).message, { status: 400 });
       }
     }
 
