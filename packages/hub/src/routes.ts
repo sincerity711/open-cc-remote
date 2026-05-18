@@ -4,6 +4,7 @@ import type { Db } from "./db.ts";
 import { DaemonRegistry, PwaRegistry } from "./connections.ts";
 import { Router } from "./router.ts";
 import { startLogin, handleCallback, type IasContext } from "./auth/ias.ts";
+import type { PushHelper } from "./push.ts";
 
 type WsKind = "daemon" | "pwa";
 interface WsData { kind: WsKind; key: string; }
@@ -14,6 +15,7 @@ export interface MakeServerOpts {
   ias?: IasContext;
   disable_auth?: boolean;
   pwa_url?: string;
+  push?: PushHelper;
 }
 
 export function makeServer(opts: MakeServerOpts = {}) {
@@ -47,6 +49,24 @@ export function makeServer(opts: MakeServerOpts = {}) {
         });
       } catch (e) {
         return new Response((e as Error).message, { status: 401 });
+      }
+    }
+
+    if (url.pathname === "/push/subscribe" && req.method === "POST") {
+      if (!opts.db) return new Response("not configured", { status: 503 });
+      const { authenticatePwa } = await import("./auth/pwa-auth.ts");
+      const auth = authenticatePwa(opts.db, req);
+      if ("error" in auth) return new Response(auth.error, { status: 401 });
+      try {
+        const body = await req.json() as { endpoint?: string; keys?: { p256dh?: string; auth?: string } };
+        if (!body.endpoint || !body.keys?.p256dh || !body.keys?.auth) {
+          return new Response("bad request", { status: 400 });
+        }
+        const { addPushSub } = await import("./repos/push-subs.ts");
+        addPushSub(opts.db, auth.device_id, body.endpoint, body.keys.p256dh, body.keys.auth);
+        return new Response(null, { status: 204 });
+      } catch (e) {
+        return new Response((e as Error).message, { status: 400 });
       }
     }
 
