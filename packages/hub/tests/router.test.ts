@@ -557,3 +557,69 @@ test("task_completed does not push when prefs.completed is not set", async () =>
     db.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("idle frame fans out to PWAs with daemon_id", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const broadcasts: unknown[] = [];
+  preg.add({}, (f) => broadcasts.push(f));
+  const router = new Router(dreg, preg);
+  router.onDaemonFrame("d-1", { type: "hello", daemon_id: "d-1", epoch: 1,
+    hostname: "h", agent_version: "0", sessions: [] });
+  broadcasts.length = 0;
+  router.onDaemonFrame("d-1", {
+    type: "idle", session_id: "s1", ts: 9999,
+  });
+  expect(broadcasts).toEqual([{
+    type: "idle", daemon_id: "d-1", session_id: "s1", ts: 9999,
+  }]);
+});
+
+test("idle pushes to subs with prefs.idle === true", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ccr-idl-"));
+  try {
+    const db = openDb(join(dir, "h.sqlite"));
+    db.prepare("INSERT INTO users (sub, created_at) VALUES (?, ?)").run("u1", 1);
+    pairDaemon(db, "d-1", "u1", "{}", null);
+    const dev = createDevice(db, "u1", "iPhone", null, 60_000);
+    addPushSub(db, dev.device_id, "https://x", "p", "a");
+    db.prepare("UPDATE push_subs SET preferences = ? WHERE device_id = ?").run(
+      JSON.stringify({ idle: true }),
+      dev.device_id,
+    );
+    const sentTo: Array<{ payload: any }> = [];
+    const push = { async sendTo(subs: unknown[], payload: any) { sentTo.push({ payload }); } };
+    const dreg = new DaemonRegistry<unknown>();
+    const preg = new PwaRegistry<unknown>();
+    const router = new Router(dreg, preg, db, push);
+    router.onDaemonFrame("d-1", { type: "hello", daemon_id: "d-1", epoch: 1,
+      hostname: "h", agent_version: "0", sessions: [] });
+    router.onDaemonFrame("d-1", { type: "idle", session_id: "s1", ts: 1 });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(sentTo).toHaveLength(1);
+    expect(sentTo[0]!.payload.kind).toBe("idle");
+    db.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("idle does not push when prefs.idle is not set", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ccr-idn-"));
+  try {
+    const db = openDb(join(dir, "h.sqlite"));
+    db.prepare("INSERT INTO users (sub, created_at) VALUES (?, ?)").run("u1", 1);
+    pairDaemon(db, "d-1", "u1", "{}", null);
+    const dev = createDevice(db, "u1", "iPhone", null, 60_000);
+    addPushSub(db, dev.device_id, "https://x", "p", "a");
+    const sentTo: unknown[] = [];
+    const push = { async sendTo(subs: unknown[], payload: unknown) { sentTo.push({ payload }); } };
+    const dreg = new DaemonRegistry<unknown>();
+    const preg = new PwaRegistry<unknown>();
+    const router = new Router(dreg, preg, db, push);
+    router.onDaemonFrame("d-1", { type: "hello", daemon_id: "d-1", epoch: 1,
+      hostname: "h", agent_version: "0", sessions: [] });
+    router.onDaemonFrame("d-1", { type: "idle", session_id: "s1", ts: 1 });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(sentTo).toHaveLength(0);
+    db.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

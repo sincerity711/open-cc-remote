@@ -4,6 +4,7 @@ export interface PushPreferences {
   permission?: boolean;
   offline?: boolean;
   completed?: boolean;
+  idle?: boolean;
 }
 
 export interface PushSubRow {

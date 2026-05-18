@@ -71,3 +71,19 @@ test("loadConfig allow_start + allowed_cwd_prefix + spawn_command have defaults;
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("loadConfig idle_window_ms defaults to 30000; honors override", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ccr-c4-"));
+  try {
+    writeFileSync(join(dir, "config.json"), JSON.stringify({
+      daemon_id: "d", hub_url: "ws://x",
+    }));
+    expect(loadConfig(dir).idle_window_ms).toBe(30000);
+
+    writeFileSync(join(dir, "config.json"), JSON.stringify({
+      daemon_id: "d", hub_url: "ws://x", idle_window_ms: 500,
+    }));
+    expect(loadConfig(dir).idle_window_ms).toBe(500);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+

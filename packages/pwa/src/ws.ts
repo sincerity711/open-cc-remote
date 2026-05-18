@@ -119,6 +119,8 @@ export function useHub(hubUrl: string, bearer: string | null): UseHubResult {
               completedCounts: { ...prev.completedCounts, [k]: prevCount + 1 },
             };
           }
+          case "idle":
+            return prev; // wired in P15-T2
         }
         return prev;
       });

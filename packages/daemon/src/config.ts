@@ -12,6 +12,7 @@ export interface DaemonConfig {
   allow_start: boolean;
   allowed_cwd_prefix: string[];
   spawn_command: string;
+  idle_window_ms: number;
 }
 
 export function defaultStateDir(): string {
@@ -29,6 +30,7 @@ export function loadConfig(stateDir: string = defaultStateDir()): DaemonConfig {
   const data = JSON.parse(raw) as {
     daemon_id?: string; hub_url?: string; allow_kill?: boolean;
     allow_start?: boolean; allowed_cwd_prefix?: string[]; spawn_command?: string;
+    idle_window_ms?: number;
   };
   if (!data.daemon_id) throw new Error(`config.json missing daemon_id`);
   if (!data.hub_url) throw new Error(`config.json missing hub_url`);
@@ -42,5 +44,6 @@ export function loadConfig(stateDir: string = defaultStateDir()): DaemonConfig {
     allow_start: data.allow_start === true,
     allowed_cwd_prefix: data.allowed_cwd_prefix ?? [],
     spawn_command: data.spawn_command ?? "claude --channels plugin:cc-remote@local",
+    idle_window_ms: typeof data.idle_window_ms === "number" ? data.idle_window_ms : 30_000,
   };
 }

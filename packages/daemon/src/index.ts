@@ -41,6 +41,7 @@ if (existsSync(cfg.state_path)) {
 }
 
 const watchers = new Map<string, WatcherHandle>();
+const idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const clientToSession = new Map<Socket, string>();
 const sessionToClient = new Map<string, Socket>();
 const requestToClient = new Map<string, Socket>();
@@ -157,6 +158,10 @@ sessions.onAdd((s: SessionSnapshot) => {
   const watcher = startWatcher({
     path,
     onLine: (line, offset) => {
+      // Cancel any pending idle timer; new line = activity.
+      const existing = idleTimers.get(s.session_id);
+      if (existing) { clearTimeout(existing); idleTimers.delete(s.session_id); }
+
       let payload: unknown;
       try { payload = JSON.parse(line); } catch { payload = { raw: line }; }
       hub.send({
@@ -178,6 +183,19 @@ sessions.onAdd((s: SessionSnapshot) => {
             session_id: s.session_id,
             ts: Date.now(),
           });
+          // Schedule idle event.
+          const t = setTimeout(() => {
+            idleTimers.delete(s.session_id);
+            hub.send({
+              type: "idle",
+              session_id: s.session_id,
+              ts: Date.now(),
+            });
+          }, cfg.idle_window_ms);
+          if (typeof (t as { unref?: () => void }).unref === "function") {
+            (t as { unref: () => void }).unref();
+          }
+          idleTimers.set(s.session_id, t);
         }
       }
     },
@@ -195,6 +213,8 @@ sessions.onRemove((session_id: string) => {
     w.close();
     watchers.delete(session_id);
   }
+  const t = idleTimers.get(session_id);
+  if (t) { clearTimeout(t); idleTimers.delete(session_id); }
 });
 
 const sockServer = startSocketServer({
@@ -247,6 +267,8 @@ console.log(`daemon ${cfg.daemon_id} ready; socket=${cfg.socket_path}; hub=${cfg
 const shutdown = () => {
   for (const w of watchers.values()) w.close();
   watchers.clear();
+  for (const t of idleTimers.values()) clearTimeout(t);
+  idleTimers.clear();
   sockServer.close();
   hub.close();
   db.close();

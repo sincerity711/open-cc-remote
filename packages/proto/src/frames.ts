@@ -48,7 +48,8 @@ export type DaemonToHub =
   | DaemonPermissionRequest
   | DaemonPermissionResolved
   | DaemonHistoryChunk
-  | TaskCompletedFrame;
+  | TaskCompletedFrame
+  | IdleFrame;
 
 export type HubToDaemon =
   | { type: "ping"; ts: number }
@@ -76,7 +77,8 @@ export type HubToPwa =
   | PwaPermissionRequest
   | PwaPermissionResolved
   | PwaHistoryChunk
-  | PwaTaskCompletedFrame;
+  | PwaTaskCompletedFrame
+  | PwaIdleFrame;
 
 export type PwaToHub =
   | { type: "subscribe" }  // Plan 1 PWA only subscribes; commands come in Plan 4
@@ -229,6 +231,21 @@ export interface TaskCompletedFrame {
 
 export interface PwaTaskCompletedFrame {
   type: "task_completed";
+  daemon_id: string;
+  session_id: string;
+  ts: number;
+}
+
+// ─── idle (Claude waiting for user input) ─────────────────────────────
+
+export interface IdleFrame {
+  type: "idle";
+  session_id: string;
+  ts: number;
+}
+
+export interface PwaIdleFrame {
+  type: "idle";
   daemon_id: string;
   session_id: string;
   ts: number;
