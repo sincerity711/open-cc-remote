@@ -90,3 +90,49 @@ test("PWA subscribe receives current snapshot", () => {
     daemons: [{ daemon_id: "d-1", hostname: "h", online: true, sessions: [] }]
   }]);
 });
+
+test("event frame is broadcast to PWAs with daemon_id added", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const broadcasts: unknown[] = [];
+  preg.add({}, (f) => broadcasts.push(f));
+  const router = new Router(dreg, preg);
+
+  router.onDaemonFrame("d-1", { type: "hello", daemon_id: "d-1", epoch: 1,
+    hostname: "h", agent_version: "0", sessions: [] });
+  broadcasts.length = 0;
+
+  router.onDaemonFrame("d-1", {
+    type: "event",
+    session_id: "s1",
+    jsonl_offset: 42,
+    ts: 1000,
+    payload: { type: "user", message: { content: "hi" } },
+  });
+
+  expect(broadcasts).toEqual([{
+    type: "event",
+    daemon_id: "d-1",
+    session_id: "s1",
+    jsonl_offset: 42,
+    ts: 1000,
+    payload: { type: "user", message: { content: "hi" } },
+  }]);
+});
+
+test("ring buffer caps at 200", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+  router.onDaemonFrame("d-1", { type: "hello", daemon_id: "d-1", epoch: 1,
+    hostname: "h", agent_version: "0", sessions: [] });
+  for (let i = 0; i < 250; i++) {
+    router.onDaemonFrame("d-1", {
+      type: "event", session_id: "s1", jsonl_offset: i, ts: i, payload: { i },
+    });
+  }
+  const buf = router.bufferOf("d-1");
+  expect(buf.length).toBe(200);
+  expect(buf[0]!.jsonl_offset).toBe(50);
+  expect(buf[199]!.jsonl_offset).toBe(249);
+});
