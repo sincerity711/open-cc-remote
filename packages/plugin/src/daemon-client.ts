@@ -18,7 +18,7 @@ export async function connectDaemon(socketPath: string, timeoutMs = 5000): Promi
   const decoder = new FrameDecoder();
   const queue: Array<(f: DaemonToPlugin) => void> = [];
 
-  sock.on("data", (chunk) => {
+  sock.on("data", (chunk: Buffer) => {
     try {
       for (const f of decoder.push(chunk)) {
         const cb = queue.shift();

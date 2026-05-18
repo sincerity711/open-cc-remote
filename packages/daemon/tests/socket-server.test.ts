@@ -26,7 +26,7 @@ test("plugin register frame triggers handler and ack reply", async () => {
     const client = connect(t.path);
     const decoder = new FrameDecoder();
     const acks: DaemonToPlugin[] = [];
-    client.on("data", (chunk) => {
+    client.on("data", (chunk: Buffer) => {
       for (const f of decoder.push(chunk)) acks.push(f as DaemonToPlugin);
     });
     await new Promise<void>((res) => client.once("connect", () => res()));

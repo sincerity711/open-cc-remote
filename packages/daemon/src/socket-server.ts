@@ -20,7 +20,7 @@ export function startSocketServer(opts: SocketServerOptions): SocketServerHandle
 
   const server: Server = createServer((sock) => {
     const decoder = new FrameDecoder();
-    sock.on("data", (chunk) => {
+    sock.on("data", (chunk: Buffer) => {
       try {
         for (const frame of decoder.push(chunk)) {
           opts.onFrame(frame as PluginToDaemon, sock);
