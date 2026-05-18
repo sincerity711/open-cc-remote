@@ -3,7 +3,7 @@
 Remote control plane for local Claude Code sessions. See the
 [design spec](docs/superpowers/specs/2026-05-18-open-cc-remote-design.md).
 
-**Status:** Plan 5 (Web Push notifications) complete. Plan 6 (ops) ahead.
+**Status:** Plan 6 (operational polish) complete.
 
 ## Prerequisites
 
@@ -106,25 +106,28 @@ bun test e2e/         # end-to-end only
 bun run typecheck     # 5 packages
 ```
 
-## What Plans 1–5 cover
+## What Plans 1–6 cover
 
 - Plan 1: vertical slice — plugin/daemon/hub/PWA wired up, sessions visible in PWA
 - Plan 2: auth — IAS OIDC for PWA, DPoP-bound JWT for daemons, `cc-remote pair` CLI
 - Plan 3: real-time conversation streaming — daemon tails Claude Code's session JSONL and streams every line to the PWA's per-session pane
 - Plan 4: permission relay — when Claude Code asks to run a tool, an amber banner appears in the PWA with Allow/Deny buttons; the decision flows back to the plugin and is recorded in the daemon's SQLite audit table
 - Plan 5: Web Push notifications — when a permission request arrives, all of the user's registered browsers/PWAs receive a push notification via VAPID-signed Web Push, with a service worker showing an OS-level notification
+- Plan 6: operational polish — "My devices" settings panel (list/rename/revoke), `cc-remote daemon rotate-token` for periodic credential rotation, hub `/pair/refresh` endpoint
 
 Click any session row in the PWA to open its live event log on the right.
 When a permission prompt arrives it shows at the top of the PWA across all sessions.
 With VAPID keys configured, your phone or laptop's PWA gets a push notification too — even when the tab isn't focused.
+The Settings button in the header lets you manage all your registered devices.
 
-## What Plans 1–5 do NOT cover yet
+## Known gaps for Plan 7+
 
-- "My devices" UI / token rotation / push preferences (Plan 6)
-- request_history / scroll-back to past sessions (Plan 6 or later)
-- launchd / systemd installer (Plan 6)
-- Hardware-bound keys (Plan 6)
-- Real Claude Code permission protocol integration (channel-permissions wire format) — for now, fake-claude with `CC_REMOTE_FAKE_PERMISSION` exercises the chain
+- **Acceptance suite** — P95 < 1s permission round-trip; 30s offline detection; 3+ daemons concurrently
+- **Hardware-bound keys** — keystore abstraction layer is in place, but only file-backed Ed25519 ships; macOS Keychain (Security framework) and Linux libsecret bindings are deferred
+- **Install scripts** — `cc-remote install` for launchd / systemd user units
+- **Real Claude Code channel-permissions wire format** — for now `CC_REMOTE_FAKE_PERMISSION` simulates the chain; integrating with Claude Code's actual `--channels` permission protocol is open work
+- **request_history** — daemon-side reads JSONL backwards on demand; PWA scroll-back UI; not yet implemented
+- **Push preferences UI** — per-event toggles (idle, completed, daemon_offline); only `permission_request` triggers push today
 
 ## License
 
