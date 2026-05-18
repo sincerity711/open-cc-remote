@@ -1,4 +1,4 @@
-import type { DaemonToHub, HubToPwa, SessionSnapshot, DaemonView, EventFrameForPwa } from "@cc-remote/proto";
+import type { DaemonToHub, HubToPwa, SessionSnapshot, DaemonView, EventFrameForPwa, PwaToHub } from "@cc-remote/proto";
 import type { DaemonRegistry, PwaRegistry } from "./connections.ts";
 
 const RING_BUFFER_SIZE = 200;
@@ -63,10 +63,33 @@ export class Router {
       }
       case "pong":
         return; // Plan 1: heartbeat ignored
-      case "permission_request":
-        return; // wired in P4-T4
-      case "permission_resolved":
-        return; // wired in P4-T4
+      case "permission_request": {
+        const state = this.daemons.get(daemon_id);
+        if (!state) return;
+        this.pwaReg.broadcast({
+          type: "permission_request",
+          daemon_id,
+          session_id: frame.session_id,
+          request_id: frame.request_id,
+          tool: frame.tool,
+          args_summary: frame.args_summary,
+          expires_at: frame.expires_at,
+        });
+        return;
+      }
+      case "permission_resolved": {
+        const state = this.daemons.get(daemon_id);
+        if (!state) return;
+        this.pwaReg.broadcast({
+          type: "permission_resolved",
+          daemon_id,
+          session_id: frame.session_id,
+          request_id: frame.request_id,
+          decision: frame.decision,
+          decided_via: frame.decided_via,
+        });
+        return;
+      }
       case "event": {
         const state = this.daemons.get(daemon_id);
         if (!state) return;
@@ -94,6 +117,18 @@ export class Router {
 
   onPwaSubscribe(send: (f: HubToPwa) => void): void {
     send({ type: "snapshot", daemons: this.snapshot() });
+  }
+
+  onPwaCommand(frame: PwaToHub): void {
+    if (frame.type === "permission_reply") {
+      this.daemonReg.send(frame.daemon_id, {
+        type: "permission_reply",
+        session_id: frame.session_id,
+        request_id: frame.request_id,
+        decision: frame.decision,
+      });
+    }
+    // "subscribe" is handled via onPwaSubscribe; ignore here.
   }
 
   snapshot(): DaemonView[] {

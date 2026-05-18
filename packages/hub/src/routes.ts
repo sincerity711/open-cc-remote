@@ -117,7 +117,11 @@ export function makeServer(opts: MakeServerOpts = {}) {
         router.onDaemonFrame(ws.data.key, frame as DaemonToHub);
       } else {
         const pf = frame as PwaToHub;
-        if (pf.type === "subscribe") router.onPwaSubscribe((f) => ws.send(JSON.stringify(f)));
+        if (pf.type === "subscribe") {
+          router.onPwaSubscribe((f) => ws.send(JSON.stringify(f)));
+        } else if (pf.type === "permission_reply") {
+          router.onPwaCommand(pf);
+        }
       }
     },
     close(ws: ServerWebSocket<WsData>) {

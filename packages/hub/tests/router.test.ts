@@ -136,3 +136,85 @@ test("ring buffer caps at 200", () => {
   expect(buf[0]!.jsonl_offset).toBe(50);
   expect(buf[199]!.jsonl_offset).toBe(249);
 });
+
+test("permission_request frame fans out to PWAs with daemon_id", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const broadcasts: unknown[] = [];
+  preg.add({}, (f) => broadcasts.push(f));
+  const router = new Router(dreg, preg);
+
+  router.onDaemonFrame("d-1", { type: "hello", daemon_id: "d-1", epoch: 1,
+    hostname: "h", agent_version: "0", sessions: [] });
+  broadcasts.length = 0;
+
+  router.onDaemonFrame("d-1", {
+    type: "permission_request",
+    session_id: "s1",
+    request_id: "r1",
+    tool: "Bash",
+    args_summary: "rm -rf /",
+    expires_at: 9999,
+  });
+  expect(broadcasts).toEqual([{
+    type: "permission_request",
+    daemon_id: "d-1",
+    session_id: "s1",
+    request_id: "r1",
+    tool: "Bash",
+    args_summary: "rm -rf /",
+    expires_at: 9999,
+  }]);
+});
+
+test("permission_resolved frame fans out to PWAs with daemon_id", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const broadcasts: unknown[] = [];
+  preg.add({}, (f) => broadcasts.push(f));
+  const router = new Router(dreg, preg);
+
+  router.onDaemonFrame("d-1", { type: "hello", daemon_id: "d-1", epoch: 1,
+    hostname: "h", agent_version: "0", sessions: [] });
+  broadcasts.length = 0;
+
+  router.onDaemonFrame("d-1", {
+    type: "permission_resolved",
+    session_id: "s1",
+    request_id: "r1",
+    decision: "allow",
+    decided_via: "pwa",
+  });
+  expect(broadcasts).toEqual([{
+    type: "permission_resolved",
+    daemon_id: "d-1",
+    session_id: "s1",
+    request_id: "r1",
+    decision: "allow",
+    decided_via: "pwa",
+  }]);
+});
+
+test("onPwaCommand forwards permission_reply to addressed daemon", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+
+  const sentToDaemon: unknown[] = [];
+  dreg.add("d-1", {}, (f) => sentToDaemon.push(f));
+
+  router.onPwaCommand({
+    type: "permission_reply",
+    daemon_id: "d-1",
+    session_id: "s1",
+    request_id: "r1",
+    decision: "allow",
+  });
+
+  expect(sentToDaemon).toEqual([{
+    type: "permission_reply",
+    session_id: "s1",
+    request_id: "r1",
+    decision: "allow",
+  }]);
+});
