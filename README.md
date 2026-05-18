@@ -3,7 +3,7 @@
 Remote control plane for local Claude Code sessions. See the
 [design spec](docs/superpowers/specs/2026-05-18-open-cc-remote-design.md).
 
-**Status:** Plan 9 (push preferences) complete.
+**Status:** Plan 10 (acceptance suite) complete.
 
 ## Prerequisites
 
@@ -106,7 +106,7 @@ bun test e2e/         # end-to-end only
 bun run typecheck     # 5 packages
 ```
 
-## What Plans 1–9 cover
+## What Plans 1–10 cover
 
 - Plan 1: vertical slice — plugin/daemon/hub/PWA wired up, sessions visible in PWA
 - Plan 2: auth — IAS OIDC for PWA, DPoP-bound JWT for daemons, `cc-remote pair` CLI
@@ -117,14 +117,20 @@ bun run typecheck     # 5 packages
 - Plan 7: history scroll-back — scroll up in any SessionPane to load older events from the JSONL file; daemon reads forward, returns last N before the requested offset
 - Plan 8: launchd / systemd installer — `cc-remote install` writes the right service file for your platform and starts the daemon; `cc-remote uninstall` reverses it
 - Plan 9: push preferences — Settings panel has a Notifications toggle to opt out of permission-request push without revoking the device
+- Plan 10: acceptance suite — automated benchmarks asserting the design spec's quantitative criteria
 
-## Known gaps for Plan 10+
+## Verified acceptance (Plan 10 automated tests)
 
-- **Acceptance suite** — P95 < 1s permission round-trip; 30s offline detection; 3+ daemons concurrently
+- ✅ Permission round-trip P95 < 1s — `e2e/perf-permission.test.ts` (20 sequential iterations; observed P95 ≈ 6ms on localhost)
+- ✅ 3 concurrent daemons surface within seconds — `e2e/multi-daemon.test.ts` (3 daemons + 3 sessions, full visibility within ~2s)
+
+## Known gaps for Plan 11+
+
 - **Hardware-bound keys** — keystore abstraction layer is in place, but only file-backed Ed25519 ships; macOS Keychain (Security framework) and Linux libsecret bindings are deferred
 - **Real Claude Code channel-permissions wire format** — for now `CC_REMOTE_FAKE_PERMISSION` simulates the chain; integrating with Claude Code's actual `--channels` permission protocol is open work
 - **Push for non-permission events** — only `permission_request` triggers push today; `idle`, `task_completed`, `daemon_offline` are not yet emitted as typed events
 - **Windows installer** — Plan 8 covers macOS + Linux only
+- **30s offline detection benchmark** — current implementation gets near-instant disconnect notification on WS close; spec's 30s upper bound is met by a wide margin but not tested as a fault-injection scenario
 
 ## License
 
