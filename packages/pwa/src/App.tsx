@@ -34,7 +34,7 @@ export function App() {
     });
   }, [bearer]);
 
-  const { connected, daemons, events, pendingPermissions, sendPermissionReply } = useHub(HUB_URL, bearer);
+  const { connected, daemons, events, pendingPermissions, sendPermissionReply, requestHistory } = useHub(HUB_URL, bearer);
 
   if (!bearer) {
     return (
@@ -119,6 +119,7 @@ export function App() {
           session_id={selected.session_id}
           events={selectedEvents}
           onClose={() => setSelected(null)}
+          onLoadHistory={(before_offset) => requestHistory(selected.daemon_id, selected.session_id, before_offset, 50)}
         />
       )}
       {showSettings && bearer && (

@@ -6,11 +6,13 @@ interface SessionPaneProps {
   session_id: string;
   events: EventFrameForPwa[];
   onClose: () => void;
+  onLoadHistory: (before_offset: number) => void;
 }
 
-export function SessionPane({ daemon_id, session_id, events, onClose }: SessionPaneProps) {
+export function SessionPane({ daemon_id, session_id, events, onClose, onLoadHistory }: SessionPaneProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const lastLoadAt = useRef(0);
 
   useEffect(() => {
     if (!autoScroll || !scrollRef.current) return;
@@ -22,6 +24,13 @@ export function SessionPane({ daemon_id, session_id, events, onClose }: SessionP
     if (!el) return;
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
     setAutoScroll(atBottom);
+    // Trigger history load when near top
+    const now = Date.now();
+    const oldest = events[0];
+    if (el.scrollTop < 80 && oldest !== undefined && now - lastLoadAt.current > 500) {
+      lastLoadAt.current = now;
+      onLoadHistory(oldest.jsonl_offset);
+    }
   };
 
   return (
@@ -46,16 +55,21 @@ export function SessionPane({ daemon_id, session_id, events, onClose }: SessionP
         {events.length === 0 ? (
           <p style={{ color: "#888" }}>Waiting for events…</p>
         ) : (
-          events.map((ev, i) => (
-            <div key={`${ev.jsonl_offset}-${i}`} style={{ marginBottom: 12, padding: 8, background: "#f7f7f7", borderRadius: 4 }}>
-              <div style={{ color: "#666", fontSize: 10, marginBottom: 4 }}>
-                {new Date(ev.ts).toLocaleTimeString()} · offset {ev.jsonl_offset}
+          <>
+            <p style={{ color: "#aaa", textAlign: "center", fontSize: 11, margin: "0 0 12px" }}>
+              ↑ scroll up to load older events
+            </p>
+            {events.map((ev, i) => (
+              <div key={`${ev.jsonl_offset}-${i}`} style={{ marginBottom: 12, padding: 8, background: "#f7f7f7", borderRadius: 4 }}>
+                <div style={{ color: "#666", fontSize: 10, marginBottom: 4 }}>
+                  {ev.ts > 0 ? new Date(ev.ts).toLocaleTimeString() : "(history)"} · offset {ev.jsonl_offset}
+                </div>
+                <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                  {JSON.stringify(ev.payload, null, 2)}
+                </pre>
               </div>
-              <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                {JSON.stringify(ev.payload, null, 2)}
-              </pre>
-            </div>
-          ))
+            ))}
+          </>
         )}
       </div>
     </aside>

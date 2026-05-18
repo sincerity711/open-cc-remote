@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import type { HubToPwa, PwaToHub, DaemonView, EventFrameForPwa, PwaPermissionRequest } from "@cc-remote/proto";
+import type {
+  HubToPwa, PwaToHub, DaemonView, EventFrameForPwa, PwaPermissionRequest,
+} from "@cc-remote/proto";
 
-const PER_SESSION_BUFFER = 500;
+const PER_SESSION_BUFFER = 2000;
 
 export interface HubState {
   connected: boolean;
@@ -16,6 +18,7 @@ export function eventKey(daemon_id: string, session_id: string): string {
 
 export interface UseHubResult extends HubState {
   sendPermissionReply: (req: PwaPermissionRequest, decision: "allow" | "deny") => void;
+  requestHistory: (daemon_id: string, session_id: string, before_offset: number, limit: number) => void;
 }
 
 export function useHub(hubUrl: string, bearer: string | null): UseHubResult {
@@ -73,6 +76,27 @@ export function useHub(hubUrl: string, bearer: string | null): UseHubResult {
               : next;
             return { ...prev, events: { ...prev.events, [k]: trimmed } };
           }
+          case "history_chunk": {
+            const k = eventKey(frame.daemon_id, frame.session_id);
+            const existing = prev.events[k] ?? [];
+            const seen = new Set(existing.map((e) => e.jsonl_offset));
+            const incoming: EventFrameForPwa[] = frame.events
+              .filter((e) => !seen.has(e.jsonl_offset))
+              .map((e) => ({
+                type: "event",
+                daemon_id: frame.daemon_id,
+                session_id: frame.session_id,
+                jsonl_offset: e.jsonl_offset,
+                ts: 0,
+                payload: e.payload,
+              }));
+            if (incoming.length === 0) return prev;
+            const merged = [...incoming, ...existing].sort((a, b) => a.jsonl_offset - b.jsonl_offset);
+            const trimmed = merged.length > PER_SESSION_BUFFER
+              ? merged.slice(merged.length - PER_SESSION_BUFFER)
+              : merged;
+            return { ...prev, events: { ...prev.events, [k]: trimmed } };
+          }
           case "permission_request":
             return {
               ...prev,
@@ -84,8 +108,6 @@ export function useHub(hubUrl: string, bearer: string | null): UseHubResult {
             delete next[frame.request_id];
             return { ...prev, pendingPermissions: next };
           }
-          case "history_chunk":
-            return prev; // wired in P7-T5
         }
         return prev;
       });
@@ -137,7 +159,6 @@ export function useHub(hubUrl: string, bearer: string | null): UseHubResult {
         decision,
       };
       ws.send(JSON.stringify(msg));
-      // Optimistically remove from pending — hub will confirm via permission_resolved.
       setState((prev) => {
         if (!prev.pendingPermissions[req.request_id]) return prev;
         const next = { ...prev.pendingPermissions };
@@ -148,5 +169,20 @@ export function useHub(hubUrl: string, bearer: string | null): UseHubResult {
     [],
   );
 
-  return { ...state, sendPermissionReply };
+  const requestHistory = useCallback(
+    (daemon_id: string, session_id: string, before_offset: number, limit: number) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const msg: PwaToHub = {
+        type: "request_history",
+        daemon_id, session_id,
+        request_id: `rh-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        before_offset, limit,
+      };
+      ws.send(JSON.stringify(msg));
+    },
+    [],
+  );
+
+  return { ...state, sendPermissionReply, requestHistory };
 }
