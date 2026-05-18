@@ -64,3 +64,31 @@ export async function handlePair(
   setJwtId(db, body.daemon_id, jti, exp);
   return { jwt, daemon_id: body.daemon_id, exp };
 }
+
+export async function refreshJwt(
+  db: Db,
+  jwt_secret: string,
+  daemon_id: string,
+): Promise<PairResponse> {
+  const daemon = findDaemon(db, daemon_id);
+  if (!daemon) throw new Error("daemon not found");
+  if (daemon.revoked_at) throw new Error("daemon revoked");
+
+  const now = Math.floor(Date.now() / 1000);
+  const exp = now + JWT_TTL_SEC;
+  const jti = randomBytes(16).toString("base64url");
+  const secret = new TextEncoder().encode(jwt_secret);
+  const publicKey = JSON.parse(daemon.public_key_jwk);
+  const jkt = await calculateJwkThumbprint(publicKey);
+
+  const jwt = await new SignJWT({ cnf: { jkt } })
+    .setProtectedHeader({ alg: "HS256" })
+    .setSubject(daemon_id)
+    .setIssuedAt(now)
+    .setExpirationTime(exp)
+    .setJti(jti)
+    .sign(secret);
+
+  setJwtId(db, daemon_id, jti, exp);
+  return { jwt, daemon_id, exp };
+}

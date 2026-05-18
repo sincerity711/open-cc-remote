@@ -82,6 +82,36 @@ export function makeServer(opts: MakeServerOpts = {}) {
       }
     }
 
+    if (url.pathname === "/pair/refresh" && req.method === "POST") {
+      if (!opts.db || !opts.jwt_secret) return new Response("not configured", { status: 503 });
+      const auth = req.headers.get("authorization");
+      const dpopHeader = req.headers.get("dpop");
+      if (!auth?.startsWith("DPoP ") || !dpopHeader) {
+        return new Response("DPoP required", { status: 401 });
+      }
+      const oldJwt = auth.slice(5);
+      let daemon_id: string;
+      try {
+        const { decodeJwt } = await import("jose");
+        const claims = decodeJwt(oldJwt);
+        if (!claims.sub) return new Response("JWT missing sub", { status: 401 });
+        daemon_id = claims.sub;
+        const { verifyDaemonAuth } = await import("./auth/dpop-verify.ts");
+        await verifyDaemonAuth(
+          opts.db, opts.jwt_secret, daemon_id, oldJwt, dpopHeader, req.url, req.method,
+        );
+      } catch (e) {
+        return new Response((e as Error).message, { status: 401 });
+      }
+      try {
+        const { refreshJwt } = await import("./pair.ts");
+        const result = await refreshJwt(opts.db, opts.jwt_secret, daemon_id);
+        return Response.json(result);
+      } catch (e) {
+        return new Response((e as Error).message, { status: 400 });
+      }
+    }
+
     if (url.pathname === "/ws/daemon") {
       const id = url.searchParams.get("daemon_id");
       if (!id) return new Response("daemon_id required", { status: 400 });

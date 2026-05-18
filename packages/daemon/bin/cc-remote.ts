@@ -72,22 +72,61 @@ async function cmdDaemon(): Promise<void> {
   await import("../src/index.ts");
 }
 
+async function cmdDaemonRotateToken(): Promise<void> {
+  const { existsSync, readFileSync, writeFileSync, chmodSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { signDpop } = await import("../src/dpop.ts");
+  const { loadConfig } = await import("../src/config.ts");
+
+  const cfg = loadConfig();
+  const statePath = cfg.state_path;
+  if (!existsSync(statePath)) throw new Error(`no state.json at ${statePath}; run 'cc-remote pair' first`);
+  const state = JSON.parse(readFileSync(statePath, "utf8")) as { jwt?: string };
+  if (!state.jwt) throw new Error("state.json missing jwt");
+
+  const kp = await getOrCreateKeypair(cfg.state_dir);
+  const httpHub = cfg.hub_url.replace(/^ws(s?):\/\//, "http$1://");
+  const refreshUrl = `${httpHub}/pair/refresh`;
+  const dpop = await signDpop(kp.privateJwk, "POST", refreshUrl);
+
+  const res = await fetch(refreshUrl, {
+    method: "POST",
+    headers: {
+      authorization: `DPoP ${state.jwt}`,
+      dpop,
+    },
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`refresh failed: ${res.status} ${body}`);
+  }
+  const result = await res.json() as { jwt: string; exp: number };
+
+  writeFileSync(statePath, JSON.stringify({ jwt: result.jwt, paired_at: Date.now(), exp: result.exp }, null, 2) + "\n");
+  try { chmodSync(statePath, 0o600); } catch {}
+
+  process.stdout.write(`token rotated; new exp ${new Date(result.exp * 1000).toISOString()}\n`);
+}
+
 function usage(): string {
   return [
     "usage: cc-remote <command> [options]",
     "",
     "commands:",
     "  daemon                       run the long-lived daemon",
+    "  daemon rotate-token          rotate the DPoP-bound JWT",
     "  pair --hub <url> --code <c>  bind this machine to the hub",
     "    [--daemon-id <id>]         override default (hostname)",
   ].join("\n");
 }
 
 const cmd = process.argv[2];
-const args = parseArgs(process.argv.slice(3));
+const sub = process.argv[3];
+const args = parseArgs(process.argv.slice(sub && !sub.startsWith("--") ? 4 : 3));
 
 try {
   if (cmd === "pair") await cmdPair(args);
+  else if (cmd === "daemon" && sub === "rotate-token") await cmdDaemonRotateToken();
   else if (cmd === "daemon") await cmdDaemon();
   else {
     process.stderr.write(usage() + "\n");
