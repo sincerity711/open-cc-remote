@@ -20,7 +20,7 @@ export interface FakeIasHandle {
 export async function startFakeIas(opts: FakeIasOptions = {}): Promise<FakeIasHandle> {
   const sub = opts.sub ?? "i060912@sap.com";
   const { publicKey, privateKey } = await generateKeyPair("ES256");
-  const pubJwk = await exportJWK(publicKey) as Record<string, unknown>;
+  const pubJwk = (await exportJWK(publicKey)) as unknown as Record<string, unknown>;
   pubJwk.kid = "fake-ias-key-1";
   pubJwk.alg = "ES256";
   pubJwk.use = "sig";
@@ -105,8 +105,8 @@ export async function startFakeIas(opts: FakeIasOptions = {}): Promise<FakeIasHa
   });
 
   return {
-    url: `http://localhost:${server.port}`,
-    port: server.port,
+    url: `http://localhost:${server.port!}`,
+    port: server.port!,
     publicJwk: pubJwk,
     stop() { server.stop(true); },
   };
