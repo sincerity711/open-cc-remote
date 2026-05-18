@@ -8,6 +8,17 @@
         "typescript": "^5.4.0",
       },
     },
+    "packages/daemon": {
+      "name": "@cc-remote/daemon",
+      "version": "0.0.1",
+      "dependencies": {
+        "@cc-remote/proto": "workspace:*",
+      },
+      "devDependencies": {
+        "bun-types": "latest",
+        "typescript": "^5.4.0",
+      },
+    },
     "packages/hub": {
       "name": "@cc-remote/hub",
       "version": "0.0.1",
@@ -29,6 +40,8 @@
     },
   },
   "packages": {
+    "@cc-remote/daemon": ["@cc-remote/daemon@workspace:packages/daemon"],
+
     "@cc-remote/hub": ["@cc-remote/hub@workspace:packages/hub"],
 
     "@cc-remote/proto": ["@cc-remote/proto@workspace:packages/proto"],
