@@ -63,6 +63,10 @@ export class Router {
       }
       case "pong":
         return; // Plan 1: heartbeat ignored
+      case "permission_request":
+        return; // wired in P4-T4
+      case "permission_resolved":
+        return; // wired in P4-T4
       case "event": {
         const state = this.daemons.get(daemon_id);
         if (!state) return;

@@ -13,7 +13,7 @@ test("connect, register, bye, close round-trip", async () => {
     const seen: PluginToDaemon[] = [];
     const server = startSocketServer({
       path: sockPath,
-      onFrame: (f, c) => { seen.push(f); server.replyTo(c, { type: "ack", ref: f.type }); },
+      onFrame: (f, c) => { seen.push(f); server.replyTo(c, { type: "ack", ref: f.type as "register" | "bye" }); },
     });
     await server.ready;
 

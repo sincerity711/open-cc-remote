@@ -15,10 +15,12 @@ export interface SessionSnapshot {
 
 export type PluginToDaemon =
   | { type: "register"; session: SessionSnapshot }
-  | { type: "bye"; session_id: string };
+  | { type: "bye"; session_id: string }
+  | PluginPermissionRequest;
 
 export type DaemonToPlugin =
-  | { type: "ack"; ref: "register" | "bye" };
+  | { type: "ack"; ref: "register" | "bye" }
+  | PluginPermissionReply;
 
 // ─── daemon ↔ hub (WSS) ───────────────────────────────────────────────
 
@@ -42,10 +44,13 @@ export type DaemonToHub =
   | { type: "session_open"; session: SessionSnapshot }
   | { type: "session_close"; session_id: string; reason: string }
   | { type: "pong"; ts: number }
-  | EventFrame;
+  | EventFrame
+  | DaemonPermissionRequest
+  | DaemonPermissionResolved;
 
 export type HubToDaemon =
-  | { type: "ping"; ts: number };
+  | { type: "ping"; ts: number }
+  | HubPermissionReply;
 
 // ─── hub ↔ PWA (WSS) ──────────────────────────────────────────────────
 
@@ -62,7 +67,77 @@ export type HubToPwa =
   | { type: "daemon_offline"; daemon_id: string }
   | { type: "session_open"; daemon_id: string; session: SessionSnapshot }
   | { type: "session_close"; daemon_id: string; session_id: string; reason: string }
-  | EventFrameForPwa;
+  | EventFrameForPwa
+  | PwaPermissionRequest
+  | PwaPermissionResolved;
 
 export type PwaToHub =
-  | { type: "subscribe" };  // Plan 1 PWA only subscribes; commands come in Plan 4
+  | { type: "subscribe" }  // Plan 1 PWA only subscribes; commands come in Plan 4
+  | PwaToHubPermissionReply;
+
+// ─── permission relay ─────────────────────────────────────────────────
+
+export interface PluginPermissionRequest {
+  type: "permission_request";
+  request_id: string;
+  tool: string;
+  args_summary: string;
+  expires_at: number;
+}
+
+export interface PluginPermissionReply {
+  type: "permission_reply";
+  request_id: string;
+  decision: "allow" | "deny";
+}
+
+export interface DaemonPermissionRequest {
+  type: "permission_request";
+  session_id: string;
+  request_id: string;
+  tool: string;
+  args_summary: string;
+  expires_at: number;
+}
+
+export interface DaemonPermissionResolved {
+  type: "permission_resolved";
+  session_id: string;
+  request_id: string;
+  decision: "allow" | "deny" | "expired" | "terminal";
+  decided_via: string;
+}
+
+export interface HubPermissionReply {
+  type: "permission_reply";
+  session_id: string;
+  request_id: string;
+  decision: "allow" | "deny";
+}
+
+export interface PwaPermissionRequest {
+  type: "permission_request";
+  daemon_id: string;
+  session_id: string;
+  request_id: string;
+  tool: string;
+  args_summary: string;
+  expires_at: number;
+}
+
+export interface PwaPermissionResolved {
+  type: "permission_resolved";
+  daemon_id: string;
+  session_id: string;
+  request_id: string;
+  decision: "allow" | "deny" | "expired" | "terminal";
+  decided_via: string;
+}
+
+export interface PwaToHubPermissionReply {
+  type: "permission_reply";
+  daemon_id: string;
+  session_id: string;
+  request_id: string;
+  decision: "allow" | "deny";
+}

@@ -67,6 +67,10 @@ export function useHub(hubUrl: string, bearer: string | null): HubState {
               : next;
             return { ...prev, events: { ...prev.events, [k]: trimmed } };
           }
+          case "permission_request":
+            return prev; // wired in P4-T5
+          case "permission_resolved":
+            return prev; // wired in P4-T5
         }
         return prev;
       });
