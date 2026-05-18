@@ -47,3 +47,30 @@ export function revokeDevice(db: Db, device_id: string): void {
 export function touchDevice(db: Db, device_id: string): void {
   db.prepare("UPDATE devices SET last_seen_at = ? WHERE device_id = ?").run(Date.now(), device_id);
 }
+
+export interface DeviceListItem {
+  device_id: string;
+  display_name: string | null;
+  paired_at: number;
+  last_seen_at: number | null;
+}
+
+export function listDevicesByOwner(db: Db, owner_sub: string): DeviceListItem[] {
+  return db.query(
+    "SELECT device_id, display_name, paired_at, last_seen_at FROM devices WHERE owner_sub = ? AND revoked_at IS NULL ORDER BY paired_at DESC",
+  ).all(owner_sub) as DeviceListItem[];
+}
+
+export function renameDevice(db: Db, owner_sub: string, device_id: string, display_name: string): boolean {
+  const result = db.prepare(
+    "UPDATE devices SET display_name = ? WHERE device_id = ? AND owner_sub = ? AND revoked_at IS NULL",
+  ).run(display_name, device_id, owner_sub);
+  return result.changes === 1;
+}
+
+export function revokeDeviceAuthorized(db: Db, owner_sub: string, device_id: string): boolean {
+  const result = db.prepare(
+    "UPDATE devices SET revoked_at = ? WHERE device_id = ? AND owner_sub = ? AND revoked_at IS NULL",
+  ).run(Date.now(), device_id, owner_sub);
+  return result.changes === 1;
+}

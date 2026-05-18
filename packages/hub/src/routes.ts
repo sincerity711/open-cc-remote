@@ -106,6 +106,45 @@ export function makeServer(opts: MakeServerOpts = {}) {
       const ok = server.upgrade(req, { data: { kind: "daemon", key: id } satisfies WsData });
       return ok ? undefined : new Response("upgrade failed", { status: 500 });
     }
+    if (url.pathname === "/devices" && req.method === "GET") {
+      if (!opts.db) return new Response("not configured", { status: 503 });
+      const { authenticatePwa } = await import("./auth/pwa-auth.ts");
+      const auth = authenticatePwa(opts.db, req);
+      if ("error" in auth) return new Response(auth.error, { status: 401 });
+      const { listDevicesByOwner } = await import("./repos/devices.ts");
+      return Response.json(listDevicesByOwner(opts.db, auth.owner_sub));
+    }
+
+    {
+      const m = url.pathname.match(/^\/devices\/([^/]+)$/);
+      if (m && (req.method === "PATCH" || req.method === "DELETE")) {
+        if (!opts.db) return new Response("not configured", { status: 503 });
+        const { authenticatePwa } = await import("./auth/pwa-auth.ts");
+        const auth = authenticatePwa(opts.db, req);
+        if ("error" in auth) return new Response(auth.error, { status: 401 });
+        const device_id = decodeURIComponent(m[1]!);
+        if (req.method === "PATCH") {
+          try {
+            const body = await req.json() as { display_name?: string };
+            if (typeof body.display_name !== "string") {
+              return new Response("bad request", { status: 400 });
+            }
+            const { renameDevice } = await import("./repos/devices.ts");
+            const ok = renameDevice(opts.db, auth.owner_sub, device_id, body.display_name);
+            return new Response(null, { status: ok ? 204 : 404 });
+          } catch (e) {
+            return new Response((e as Error).message, { status: 400 });
+          }
+        } else {
+          const { revokeDeviceAuthorized } = await import("./repos/devices.ts");
+          const { removePushSub } = await import("./repos/push-subs.ts");
+          const ok = revokeDeviceAuthorized(opts.db, auth.owner_sub, device_id);
+          if (ok) removePushSub(opts.db, device_id);
+          return new Response(null, { status: ok ? 204 : 404 });
+        }
+      }
+    }
+
     if (url.pathname === "/ws/pwa") {
       if (!opts.disable_auth) {
         if (!opts.db) return new Response("auth not configured", { status: 503 });
