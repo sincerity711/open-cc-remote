@@ -14,6 +14,7 @@ export function App() {
   const [bearer, setBearer] = useState<string | null>(null);
   const [selected, setSelected] = useState<Selected | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [newSessionCwd, setNewSessionCwd] = useState<Record<string, string>>({});
 
   useEffect(() => {
     consumeFragment();
@@ -34,7 +35,7 @@ export function App() {
     });
   }, [bearer]);
 
-  const { connected, daemons, events, pendingPermissions, sendPermissionReply, requestHistory, killSession } = useHub(HUB_URL, bearer);
+  const { connected, daemons, events, pendingPermissions, sendPermissionReply, requestHistory, killSession, startSession } = useHub(HUB_URL, bearer);
 
   if (!bearer) {
     return (
@@ -80,6 +81,27 @@ export function App() {
                   ({d.daemon_id} · {d.online ? "online" : "offline"})
                 </small>
               </h2>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const cwd = newSessionCwd[d.daemon_id]?.trim();
+                  if (!cwd) return;
+                  startSession(d.daemon_id, cwd);
+                  setNewSessionCwd((prev) => ({ ...prev, [d.daemon_id]: "" }));
+                }}
+                style={{ display: "flex", gap: 6, margin: "0 0 8px", padding: 8, background: "#f0f8ff", border: "1px solid #cde", borderRadius: 4 }}
+              >
+                <input
+                  type="text"
+                  placeholder="cwd (e.g. /Users/me/project)"
+                  value={newSessionCwd[d.daemon_id] ?? ""}
+                  onChange={(e) => setNewSessionCwd((prev) => ({ ...prev, [d.daemon_id]: e.target.value }))}
+                  style={{ flex: 1, padding: "4px 8px", fontFamily: "ui-monospace, monospace", fontSize: 12 }}
+                />
+                <button type="submit" style={{ padding: "4px 12px", background: "#08c", color: "#fff", border: "none", borderRadius: 3, cursor: "pointer" }}>
+                  Start session
+                </button>
+              </form>
               {d.sessions.length === 0 ? (
                 <p style={{ color: "#666" }}>No active sessions.</p>
               ) : (
