@@ -1,7 +1,12 @@
+import { loadConfig } from "./config.ts";
+import { openDb } from "./db.ts";
+import { loadIas } from "./auth/ias.ts";
 import { makeServer } from "./routes.ts";
 
-const PORT = Number(process.env.HUB_PORT ?? 7745);
-const { fetch, websocket } = makeServer();
+const cfg = loadConfig();
+const db = openDb(cfg.db_path);
+const ias = cfg.ias ? await loadIas(cfg.ias) : undefined;
 
-const server = Bun.serve({ port: PORT, fetch, websocket });
-console.log(`hub listening on http://localhost:${server.port}`);
+const { fetch, websocket } = makeServer({ db, ias });
+const server = Bun.serve({ port: cfg.port, fetch, websocket });
+console.log(`hub listening on http://localhost:${server.port}${ias ? " (IAS enabled)" : " (no auth)"}`);

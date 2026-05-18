@@ -1,19 +1,51 @@
 import type { ServerWebSocket } from "bun";
 import type { DaemonToHub, PwaToHub } from "@cc-remote/proto";
+import type { Db } from "./db.ts";
 import { DaemonRegistry, PwaRegistry } from "./connections.ts";
 import { Router } from "./router.ts";
+import { startLogin, handleCallback, type IasContext } from "./auth/ias.ts";
 
 type WsKind = "daemon" | "pwa";
 interface WsData { kind: WsKind; key: string; }
 
-export function makeServer() {
+export interface MakeServerOpts {
+  db?: Db;
+  ias?: IasContext;
+}
+
+export function makeServer(opts: MakeServerOpts = {}) {
   const daemonReg = new DaemonRegistry<ServerWebSocket<WsData>>();
   const pwaReg = new PwaRegistry<ServerWebSocket<WsData>>();
   const router = new Router(daemonReg, pwaReg);
 
-  const fetch = (req: Request, server: ReturnType<typeof Bun.serve>) => {
+  const fetch = async (req: Request, server: ReturnType<typeof Bun.serve>) => {
     const url = new URL(req.url);
+
     if (url.pathname === "/healthz") return new Response("ok");
+
+    if (url.pathname === "/auth/login") {
+      if (!opts.ias) return new Response("IAS not configured", { status: 503 });
+      const { url: dest } = startLogin(opts.ias);
+      return Response.redirect(dest, 302);
+    }
+
+    if (url.pathname === "/auth/callback") {
+      if (!opts.ias) return new Response("IAS not configured", { status: 503 });
+      if (!opts.db) return new Response("db not configured", { status: 503 });
+      try {
+        const result = await handleCallback(
+          opts.ias, opts.db, url.searchParams, req.headers.get("user-agent"),
+        );
+        const cookie = `cc_session=${result.bearer}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${30 * 24 * 3600}`;
+        return new Response(null, {
+          status: 302,
+          headers: { Location: "/", "Set-Cookie": cookie },
+        });
+      } catch (e) {
+        return new Response((e as Error).message, { status: 401 });
+      }
+    }
+
     if (url.pathname === "/ws/daemon") {
       const id = url.searchParams.get("daemon_id");
       if (!id) return new Response("daemon_id required", { status: 400 });
@@ -61,7 +93,7 @@ export function makeServer() {
   return { fetch, websocket };
 }
 
-// Legacy export kept for Task 3 unit test stability.
+// Legacy export kept for the routes.test.ts unit test that pre-dates makeServer.
 export async function handle(req: Request): Promise<Response> {
   const url = new URL(req.url);
   if (url.pathname === "/healthz" && req.method === "GET") return new Response("ok");
