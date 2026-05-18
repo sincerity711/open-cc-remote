@@ -36,3 +36,19 @@ export async function revokeDevice(hubUrl: string, bearer: string, device_id: st
     method: "DELETE",
   });
 }
+
+export interface PushPreferences {
+  permission?: boolean;
+}
+
+export async function getPushPreferences(hubUrl: string, bearer: string): Promise<PushPreferences> {
+  return jsonFetch<PushPreferences>(`${httpHub(hubUrl)}/push/preferences`, bearer);
+}
+
+export async function setPushPreferences(hubUrl: string, bearer: string, prefs: PushPreferences): Promise<void> {
+  await jsonFetch<void>(`${httpHub(hubUrl)}/push/preferences`, bearer, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(prefs),
+  });
+}
