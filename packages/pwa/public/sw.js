@@ -9,6 +9,9 @@ self.addEventListener("push", (event) => {
   let body = "";
   if (data.kind === "permission") {
     body = `${data.daemon_id || "daemon"} wants to run ${data.tool || "?"}\n${data.args_summary || ""}`;
+  } else if (data.kind === "offline") {
+    const seconds = Math.round((data.since_ms || 0) / 1000);
+    body = `${data.hostname || data.daemon_id} has been offline for ${seconds}s`;
   } else {
     body = JSON.stringify(data);
   }

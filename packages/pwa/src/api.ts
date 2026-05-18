@@ -39,6 +39,7 @@ export async function revokeDevice(hubUrl: string, bearer: string, device_id: st
 
 export interface PushPreferences {
   permission?: boolean;
+  offline?: boolean;
 }
 
 export async function getPushPreferences(hubUrl: string, bearer: string): Promise<PushPreferences> {
