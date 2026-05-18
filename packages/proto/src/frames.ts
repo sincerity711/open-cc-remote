@@ -46,11 +46,13 @@ export type DaemonToHub =
   | { type: "pong"; ts: number }
   | EventFrame
   | DaemonPermissionRequest
-  | DaemonPermissionResolved;
+  | DaemonPermissionResolved
+  | DaemonHistoryChunk;
 
 export type HubToDaemon =
   | { type: "ping"; ts: number }
-  | HubPermissionReply;
+  | HubPermissionReply
+  | HubToDaemonRequestHistory;
 
 // ─── hub ↔ PWA (WSS) ──────────────────────────────────────────────────
 
@@ -69,11 +71,52 @@ export type HubToPwa =
   | { type: "session_close"; daemon_id: string; session_id: string; reason: string }
   | EventFrameForPwa
   | PwaPermissionRequest
-  | PwaPermissionResolved;
+  | PwaPermissionResolved
+  | PwaHistoryChunk;
 
 export type PwaToHub =
   | { type: "subscribe" }  // Plan 1 PWA only subscribes; commands come in Plan 4
-  | PwaToHubPermissionReply;
+  | PwaToHubPermissionReply
+  | PwaToHubRequestHistory;
+
+// ─── history (scroll-back) ────────────────────────────────────────────
+
+export interface PwaToHubRequestHistory {
+  type: "request_history";
+  daemon_id: string;
+  session_id: string;
+  request_id: string;
+  before_offset: number;
+  limit: number;
+}
+
+export interface HubToDaemonRequestHistory {
+  type: "request_history";
+  session_id: string;
+  request_id: string;
+  before_offset: number;
+  limit: number;
+}
+
+export interface HistoryEvent {
+  jsonl_offset: number;
+  payload: unknown;
+}
+
+export interface DaemonHistoryChunk {
+  type: "history_chunk";
+  session_id: string;
+  request_id: string;
+  events: HistoryEvent[];
+}
+
+export interface PwaHistoryChunk {
+  type: "history_chunk";
+  daemon_id: string;
+  session_id: string;
+  request_id: string;
+  events: HistoryEvent[];
+}
 
 // ─── permission relay ─────────────────────────────────────────────────
 

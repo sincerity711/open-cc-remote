@@ -98,6 +98,8 @@ export class Router {
         });
         return;
       }
+      case "history_chunk":
+        return; // wired in P7-T4
       case "event": {
         const state = this.daemons.get(daemon_id);
         if (!state) return;

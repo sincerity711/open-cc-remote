@@ -84,6 +84,8 @@ export function useHub(hubUrl: string, bearer: string | null): UseHubResult {
             delete next[frame.request_id];
             return { ...prev, pendingPermissions: next };
           }
+          case "history_chunk":
+            return prev; // wired in P7-T5
         }
         return prev;
       });
