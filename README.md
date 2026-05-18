@@ -3,7 +3,7 @@
 Remote control plane for local Claude Code sessions. See the
 [design spec](docs/superpowers/specs/2026-05-18-open-cc-remote-design.md).
 
-**Status:** Plan 13 (remote start_session) complete.
+**Status:** Plan 14 (task_completed events) complete.
 
 ## Prerequisites
 
@@ -108,7 +108,7 @@ bun test e2e/         # end-to-end only
 bun run typecheck     # 5 packages
 ```
 
-## What Plans 1–13 cover
+## What Plans 1–14 cover
 
 - Plan 1: vertical slice — plugin/daemon/hub/PWA wired up, sessions visible in PWA
 - Plan 2: auth — IAS OIDC for PWA, DPoP-bound JWT for daemons, `cc-remote pair` CLI
@@ -121,8 +121,9 @@ bun run typecheck     # 5 packages
 - Plan 9: push preferences — Settings panel has a Notifications toggle to opt out of permission-request push without revoking the device
 - Plan 10: acceptance suite — automated benchmarks asserting the design spec's quantitative criteria
 - Plan 11: daemon-offline push — opt-in notification when a daemon stays offline ≥ 30s; cancelled if the daemon reconnects in time
-- Plan 12: remote kill_session — opt-in dangerous action: ✕ button per session in the PWA terminates the plugin (and Claude Code with it). Requires `allow_kill: true` in `~/.cc-remote/config.json`
-- Plan 13: remote start_session — opt-in dangerous action: launches a new tmux session running the configured `spawn_command` in a chosen cwd. Gated by `allow_start: true` and `allowed_cwd_prefix: [...]`
+- Plan 12: remote kill_session — opt-in dangerous action: ✕ button per session in the PWA terminates the plugin (and Claude Code with it). Requires `allow_kill: true`
+- Plan 13: remote start_session — opt-in dangerous action: launches a new tmux session running `spawn_command` in a chosen cwd. Gated by `allow_start: true` and `allowed_cwd_prefix: [...]`
+- Plan 14: task-completed events — daemon detects `assistant` lines with `stop_reason: "end_turn"` and emits a typed `task_completed` event. Optional push notification "X finished a turn"
 
 ## Verified acceptance
 
@@ -133,12 +134,14 @@ bun run typecheck     # 5 packages
 - ✅ kill_session is ignored when allow_kill is false (default) — `e2e/kill.test.ts`
 - ✅ start_session spawns via tmux when allowed — `e2e/start.test.ts`
 - ✅ start_session is ignored when allow_start is false (default) — `e2e/start.test.ts`
+- ✅ task_completed emitted on assistant + end_turn — `e2e/completed.test.ts`
+- ✅ task_completed NOT emitted on stop_reason: tool_use — `e2e/completed.test.ts`
 
-## Known gaps for Plan 14+
+## Known gaps for Plan 15+
 
 - **Hardware-bound keys** — keystore abstraction layer is in place, but only file-backed Ed25519 ships; macOS Keychain (Security framework) and Linux libsecret bindings are deferred
 - **Real Claude Code channel-permissions wire format** — for now `CC_REMOTE_FAKE_PERMISSION` simulates the chain; integrating with Claude Code's actual `--channels` permission protocol is open work
-- **Push for idle / task_completed events** — only `permission_request` and `daemon_offline` trigger push today
+- **idle event** — task_completed handles "Claude finished a turn" but not "Claude has been waiting on user input for N seconds"
 - **Windows installer** — Plan 8 covers macOS + Linux only
 
 ## License
