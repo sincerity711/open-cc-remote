@@ -1,18 +1,22 @@
 import { useEffect, useState } from "react";
-import { useHub } from "./ws.ts";
+import { useHub, eventKey } from "./ws.ts";
 import { consumeFragment, getBearer, loginUrl, clearBearer } from "./auth.ts";
+import { SessionPane } from "./SessionPane.tsx";
 
 const HUB_URL = (import.meta.env.VITE_HUB_URL as string) ?? "ws://localhost:7745";
 
+interface Selected { daemon_id: string; session_id: string }
+
 export function App() {
   const [bearer, setBearer] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Selected | null>(null);
 
   useEffect(() => {
     consumeFragment();
     setBearer(getBearer());
   }, []);
 
-  const { connected, daemons } = useHub(HUB_URL, bearer);
+  const { connected, daemons, events } = useHub(HUB_URL, bearer);
 
   if (!bearer) {
     return (
@@ -26,47 +30,75 @@ export function App() {
     );
   }
 
-  return (
-    <main style={{ fontFamily: "system-ui, sans-serif", padding: 24, maxWidth: 720 }}>
-      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <h1 style={{ margin: 0 }}>cc-remote</h1>
-        <span>
-          <span data-testid="conn-status" style={{ color: connected ? "#0a0" : "#a00", marginRight: 12 }}>
-            {connected ? "connected" : "disconnected"}
-          </span>
-          <button onClick={() => { clearBearer(); setBearer(null); }} style={{ fontSize: 12, padding: "4px 8px" }}>
-            Sign out
-          </button>
-        </span>
-      </header>
+  const selectedEvents = selected ? (events[eventKey(selected.daemon_id, selected.session_id)] ?? []) : [];
 
-      {daemons.length === 0 ? (
-        <p>No daemons connected yet. Run `cc-remote pair` and then `cc-remote daemon`.</p>
-      ) : (
-        daemons.map((d) => (
-          <section key={d.daemon_id} style={{ marginTop: 24 }}>
-            <h2 style={{ margin: "0 0 8px" }}>
-              {d.hostname}{" "}
-              <small style={{ color: d.online ? "#0a0" : "#888" }}>
-                ({d.daemon_id} · {d.online ? "online" : "offline"})
-              </small>
-            </h2>
-            {d.sessions.length === 0 ? (
-              <p style={{ color: "#666" }}>No active sessions.</p>
-            ) : (
-              <ul data-testid={`sessions-${d.daemon_id}`}>
-                {d.sessions.map((s) => (
-                  <li key={s.session_id}>
-                    <code>{s.session_id}</code>{" — "}
-                    {s.tmux_session ? <span>tmux:{s.tmux_session} · </span> : null}
-                    cwd: <code>{s.cwd}</code> · model: <code>{s.model}</code>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        ))
+  return (
+    <>
+      <main style={{ fontFamily: "system-ui, sans-serif", padding: 24, maxWidth: 720, paddingRight: selected ? "min(720px, 90vw)" : 24 }}>
+        <header style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+          <h1 style={{ margin: 0 }}>cc-remote</h1>
+          <span>
+            <span data-testid="conn-status" style={{ color: connected ? "#0a0" : "#a00", marginRight: 12 }}>
+              {connected ? "connected" : "disconnected"}
+            </span>
+            <button onClick={() => { clearBearer(); setBearer(null); }} style={{ fontSize: 12, padding: "4px 8px" }}>
+              Sign out
+            </button>
+          </span>
+        </header>
+
+        {daemons.length === 0 ? (
+          <p>No daemons connected yet. Run `cc-remote pair` and then `cc-remote daemon`.</p>
+        ) : (
+          daemons.map((d) => (
+            <section key={d.daemon_id} style={{ marginTop: 24 }}>
+              <h2 style={{ margin: "0 0 8px" }}>
+                {d.hostname}{" "}
+                <small style={{ color: d.online ? "#0a0" : "#888" }}>
+                  ({d.daemon_id} · {d.online ? "online" : "offline"})
+                </small>
+              </h2>
+              {d.sessions.length === 0 ? (
+                <p style={{ color: "#666" }}>No active sessions.</p>
+              ) : (
+                <ul data-testid={`sessions-${d.daemon_id}`} style={{ paddingLeft: 0, listStyle: "none" }}>
+                  {d.sessions.map((s) => {
+                    const isSel = selected?.daemon_id === d.daemon_id && selected?.session_id === s.session_id;
+                    const evtCount = (events[eventKey(d.daemon_id, s.session_id)] ?? []).length;
+                    return (
+                      <li
+                        key={s.session_id}
+                        onClick={() => setSelected({ daemon_id: d.daemon_id, session_id: s.session_id })}
+                        style={{
+                          padding: "8px 12px",
+                          marginBottom: 4,
+                          background: isSel ? "#e8f5e8" : "#fafafa",
+                          border: isSel ? "1px solid #0a0" : "1px solid #eee",
+                          borderRadius: 4,
+                          cursor: "pointer",
+                        }}
+                      >
+                        <code>{s.session_id}</code>{" — "}
+                        {s.tmux_session ? <span>tmux:{s.tmux_session} · </span> : null}
+                        cwd: <code>{s.cwd}</code> · model: <code>{s.model}</code>
+                        {evtCount > 0 && <span style={{ marginLeft: 8, color: "#0a0" }}>{evtCount}↓</span>}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+          ))
+        )}
+      </main>
+      {selected && (
+        <SessionPane
+          daemon_id={selected.daemon_id}
+          session_id={selected.session_id}
+          events={selectedEvents}
+          onClose={() => setSelected(null)}
+        />
       )}
-    </main>
+    </>
   );
 }

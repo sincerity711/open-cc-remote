@@ -1,13 +1,21 @@
 import { useEffect, useRef, useState } from "react";
-import type { HubToPwa, PwaToHub, DaemonView } from "@cc-remote/proto";
+import type { HubToPwa, PwaToHub, DaemonView, EventFrameForPwa } from "@cc-remote/proto";
+
+const PER_SESSION_BUFFER = 500;
 
 export interface HubState {
   connected: boolean;
   daemons: DaemonView[];
+  // Map from "daemon_id::session_id" to recent events for that session.
+  events: Record<string, EventFrameForPwa[]>;
+}
+
+export function eventKey(daemon_id: string, session_id: string): string {
+  return `${daemon_id}::${session_id}`;
 }
 
 export function useHub(hubUrl: string, bearer: string | null): HubState {
-  const [state, setState] = useState<HubState>({ connected: false, daemons: [] });
+  const [state, setState] = useState<HubState>({ connected: false, daemons: [], events: {} });
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -50,8 +58,15 @@ export function useHub(hubUrl: string, bearer: string | null): HubState {
                   ? { ...d, sessions: d.sessions.filter((s) => s.session_id !== frame.session_id) }
                   : d),
             };
-          case "event":
-            return prev; // Plan 3 T6: event display not yet implemented
+          case "event": {
+            const k = eventKey(frame.daemon_id, frame.session_id);
+            const existing = prev.events[k] ?? [];
+            const next = existing.concat([frame]);
+            const trimmed = next.length > PER_SESSION_BUFFER
+              ? next.slice(next.length - PER_SESSION_BUFFER)
+              : next;
+            return { ...prev, events: { ...prev.events, [k]: trimmed } };
+          }
         }
         return prev;
       });
