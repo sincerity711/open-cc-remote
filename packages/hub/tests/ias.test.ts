@@ -40,7 +40,7 @@ test("full IAS callback flow creates user+device and sets cookie", async () => {
       // 3. GET /auth/callback?code=... → expect 302 to / with cookie.
       const cbRes = await fetch_(callbackUrl, { headers: { "user-agent": "Test/1 Macintosh" } });
       expect(cbRes.status).toBe(302);
-      expect(cbRes.headers.get("location")).toBe("/");
+      expect(cbRes.headers.get("location")).toMatch(/^\/#bearer=/);
       const cookie = cbRes.headers.get("set-cookie")!;
       expect(cookie).toMatch(/^cc_session=ccr_/);
       expect(cookie).toContain("HttpOnly");

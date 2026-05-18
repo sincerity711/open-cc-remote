@@ -13,6 +13,7 @@ export interface HubConfig {
   db_path: string;
   jwt_secret: string;
   disable_auth: boolean;
+  pwa_url: string;
   ias?: IasOidcConfig;
 }
 
@@ -26,6 +27,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
     );
   }
   const disable_auth = env.HUB_DISABLE_AUTH === "1" || env.HUB_DISABLE_AUTH === "true";
+  const pwa_url = env.HUB_PWA_URL ?? "/";
 
   const issuer_url = env.HUB_IAS_ISSUER;
   const client_id = env.HUB_IAS_CLIENT_ID;
@@ -35,12 +37,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
 
   if (issuer_url && client_id && client_secret && redirect_uri && allowed) {
     return {
-      port, db_path, jwt_secret, disable_auth,
+      port, db_path, jwt_secret, disable_auth, pwa_url,
       ias: {
         issuer_url, client_id, client_secret, redirect_uri,
         allowed_subjects: allowed.split(",").map((s) => s.trim()).filter(Boolean),
       },
     };
   }
-  return { port, db_path, jwt_secret, disable_auth };
+  return { port, db_path, jwt_secret, disable_auth, pwa_url };
 }

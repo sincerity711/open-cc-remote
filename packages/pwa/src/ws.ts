@@ -6,7 +6,7 @@ export interface HubState {
   daemons: DaemonView[];
 }
 
-export function useHub(hubUrl: string): HubState {
+export function useHub(hubUrl: string, bearer: string | null): HubState {
   const [state, setState] = useState<HubState>({ connected: false, daemons: [] });
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -57,7 +57,11 @@ export function useHub(hubUrl: string): HubState {
 
     const connect = () => {
       if (stopped) return;
-      const ws = new WebSocket(hubUrl + "/ws/pwa");
+      const sep = hubUrl.includes("?") ? "&" : "?";
+      const wsUrl = bearer
+        ? `${hubUrl}/ws/pwa${sep}bearer=${encodeURIComponent(bearer)}`
+        : `${hubUrl}/ws/pwa`;
+      const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -83,7 +87,7 @@ export function useHub(hubUrl: string): HubState {
 
     connect();
     return () => { stopped = true; try { wsRef.current?.close(); } catch {} };
-  }, [hubUrl]);
+  }, [hubUrl, bearer]);
 
   return state;
 }

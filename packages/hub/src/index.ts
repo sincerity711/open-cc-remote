@@ -8,7 +8,7 @@ const db = openDb(cfg.db_path);
 const ias = cfg.ias ? await loadIas(cfg.ias) : undefined;
 
 const { fetch, websocket } = makeServer({
-  db, ias, jwt_secret: cfg.jwt_secret, disable_auth: cfg.disable_auth,
+  db, ias, jwt_secret: cfg.jwt_secret, disable_auth: cfg.disable_auth, pwa_url: cfg.pwa_url,
 });
 const server = Bun.serve({ port: cfg.port, fetch, websocket });
 const flags = [

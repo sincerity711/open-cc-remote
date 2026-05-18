@@ -13,6 +13,7 @@ export interface MakeServerOpts {
   jwt_secret?: string;
   ias?: IasContext;
   disable_auth?: boolean;
+  pwa_url?: string;
 }
 
 export function makeServer(opts: MakeServerOpts = {}) {
@@ -39,9 +40,10 @@ export function makeServer(opts: MakeServerOpts = {}) {
           opts.ias, opts.db, url.searchParams, req.headers.get("user-agent"),
         );
         const cookie = `cc_session=${result.bearer}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${30 * 24 * 3600}`;
+        const redirectTo = `${opts.pwa_url ?? "/"}#bearer=${encodeURIComponent(result.bearer)}`;
         return new Response(null, {
           status: 302,
-          headers: { Location: "/", "Set-Cookie": cookie },
+          headers: { Location: redirectTo, "Set-Cookie": cookie },
         });
       } catch (e) {
         return new Response((e as Error).message, { status: 401 });
