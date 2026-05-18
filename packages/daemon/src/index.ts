@@ -1,7 +1,9 @@
 import { hostname } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import type { Socket } from "node:net";
 import type { JWK } from "jose";
-import type { DaemonToHub, PluginToDaemon, SessionSnapshot } from "@cc-remote/proto";
+import type { DaemonToHub, HubToDaemon, PluginToDaemon, SessionSnapshot } from "@cc-remote/proto";
 import { loadConfig } from "./config.ts";
 import { LiveSessions } from "./registry.ts";
 import { startSocketServer } from "./socket-server.ts";
@@ -9,10 +11,13 @@ import { startHubClient } from "./hub-client.ts";
 import { getOrCreateKeypair } from "./keystore.ts";
 import { jsonlPath } from "./jsonl-paths.ts";
 import { startWatcher, type WatcherHandle } from "./jsonl-watcher.ts";
+import { openDb } from "./db.ts";
+import { recordRequest, resolveRequest } from "./repos/permissions.ts";
 
 const cfg = loadConfig();
 const epoch = Math.floor(Date.now() / 1000);
 const sessions = new LiveSessions();
+const db = openDb(join(cfg.state_dir, "db.sqlite"));
 
 const kp = await getOrCreateKeypair(cfg.state_dir);
 
@@ -33,6 +38,10 @@ if (existsSync(cfg.state_path)) {
   process.stderr.write(`daemon: unauthenticated mode (no state.json — run 'cc-remote pair' to enable auth)\n`);
 }
 
+const watchers = new Map<string, WatcherHandle>();
+const clientToSession = new Map<Socket, string>();
+const requestToClient = new Map<string, Socket>();
+
 const hub = startHubClient({
   hub_url: cfg.hub_url,
   daemon_id: cfg.daemon_id,
@@ -44,17 +53,34 @@ const hub = startHubClient({
     agent_version: "0.1.0",
     sessions: sessions.list(),
   }),
-  onFrame: (_frame) => {},
+  onFrame: (frame: HubToDaemon) => {
+    if (frame.type === "permission_reply") {
+      const ok = resolveRequest(db, frame.request_id, frame.decision, "pwa");
+      if (!ok) return; // already resolved
+      const client = requestToClient.get(frame.request_id);
+      if (client) {
+        sockServer.replyTo(client, {
+          type: "permission_reply",
+          request_id: frame.request_id,
+          decision: frame.decision,
+        });
+        requestToClient.delete(frame.request_id);
+      }
+      hub.send({
+        type: "permission_resolved",
+        session_id: frame.session_id,
+        request_id: frame.request_id,
+        decision: frame.decision,
+        decided_via: "pwa",
+      });
+    }
+  },
   jwt,
   privateJwk,
 });
 
-const watchers = new Map<string, WatcherHandle>();
-
 sessions.onAdd((s: SessionSnapshot) => {
   hub.send({ type: "session_open", session: s });
-
-  // Start watching the session's JSONL.
   const path = jsonlPath(s.cwd, s.session_id);
   const watcher = startWatcher({
     path,
@@ -90,13 +116,36 @@ const sockServer = startSocketServer({
   onFrame: (frame: PluginToDaemon, client) => {
     if (frame.type === "register") {
       sessions.add(frame.session);
+      clientToSession.set(client, frame.session.session_id);
       sockServer.replyTo(client, { type: "ack", ref: "register" });
     } else if (frame.type === "bye") {
       sessions.remove(frame.session_id);
+      clientToSession.delete(client);
       sockServer.replyTo(client, { type: "ack", ref: "bye" });
+    } else if (frame.type === "permission_request") {
+      const session_id = clientToSession.get(client);
+      if (!session_id) {
+        process.stderr.write(`daemon: permission_request from unregistered plugin client\n`);
+        return;
+      }
+      recordRequest(db, frame.request_id, session_id, frame.tool, frame.args_summary);
+      requestToClient.set(frame.request_id, client);
+      hub.send({
+        type: "permission_request",
+        session_id,
+        request_id: frame.request_id,
+        tool: frame.tool,
+        args_summary: frame.args_summary,
+        expires_at: frame.expires_at,
+      });
     }
   },
-  onClose: () => {},
+  onClose: (client) => {
+    clientToSession.delete(client);
+    // Note: requestToClient entries from this client will leak until a hub
+    // permission_reply tries to deliver and fails silently. Acceptable for v1
+    // (Plan 4 doesn't include cleanup-on-disconnect; future plan can revisit).
+  },
 });
 
 await sockServer.ready;
@@ -107,6 +156,7 @@ const shutdown = () => {
   watchers.clear();
   sockServer.close();
   hub.close();
+  db.close();
   process.exit(0);
 };
 process.on("SIGINT", shutdown);
