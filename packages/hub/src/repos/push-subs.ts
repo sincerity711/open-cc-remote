@@ -3,6 +3,7 @@ import type { Db } from "../db.ts";
 export interface PushPreferences {
   permission?: boolean;
   offline?: boolean;
+  completed?: boolean;
 }
 
 export interface PushSubRow {

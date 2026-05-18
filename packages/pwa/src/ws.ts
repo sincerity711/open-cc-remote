@@ -110,6 +110,8 @@ export function useHub(hubUrl: string, bearer: string | null): UseHubResult {
             delete next[frame.request_id];
             return { ...prev, pendingPermissions: next };
           }
+          case "task_completed":
+            return prev; // wired in P14-T2
         }
         return prev;
       });

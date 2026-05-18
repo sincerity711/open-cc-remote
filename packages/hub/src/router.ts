@@ -116,6 +116,18 @@ export class Router {
       }
       case "pong":
         return;
+      case "task_completed": {
+        const state = this.daemons.get(daemon_id);
+        if (!state) return;
+        this.pwaReg.broadcast({
+          type: "task_completed",
+          daemon_id,
+          session_id: frame.session_id,
+          ts: frame.ts,
+        });
+        if (this.db && this.push) void this.dispatchCompletedPush(daemon_id, frame);
+        return;
+      }
     }
   }
 
@@ -150,6 +162,24 @@ export class Router {
     await this.push.sendTo(subs, {
       kind: "offline",
       daemon_id, hostname, since_ms: sinceMs,
+    });
+  }
+
+  private async dispatchCompletedPush(
+    daemon_id: string,
+    frame: { session_id: string },
+  ): Promise<void> {
+    if (!this.db || !this.push) return;
+    const { findDaemon } = await import("./repos/daemons.ts");
+    const { findSubsByOwner } = await import("./repos/push-subs.ts");
+    const daemon = findDaemon(this.db, daemon_id);
+    if (!daemon) return;
+    const allSubs = findSubsByOwner(this.db, daemon.owner_sub);
+    const subs = allSubs.filter((s) => s.preferences.completed === true);
+    if (subs.length === 0) return;
+    await this.push.sendTo(subs, {
+      kind: "completed",
+      daemon_id, session_id: frame.session_id,
     });
   }
 

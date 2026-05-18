@@ -166,6 +166,20 @@ sessions.onAdd((s: SessionSnapshot) => {
         ts: Date.now(),
         payload,
       });
+      // Detect task completion: assistant message with end_turn stop_reason.
+      if (
+        payload && typeof payload === "object" &&
+        (payload as { type?: string }).type === "assistant"
+      ) {
+        const message = (payload as { message?: { stop_reason?: string } }).message;
+        if (message && message.stop_reason === "end_turn") {
+          hub.send({
+            type: "task_completed",
+            session_id: s.session_id,
+            ts: Date.now(),
+          });
+        }
+      }
     },
     onError: (e) => {
       process.stderr.write(`daemon: watcher error for ${s.session_id}: ${e.message}\n`);

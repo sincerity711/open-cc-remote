@@ -47,7 +47,8 @@ export type DaemonToHub =
   | EventFrame
   | DaemonPermissionRequest
   | DaemonPermissionResolved
-  | DaemonHistoryChunk;
+  | DaemonHistoryChunk
+  | TaskCompletedFrame;
 
 export type HubToDaemon =
   | { type: "ping"; ts: number }
@@ -74,7 +75,8 @@ export type HubToPwa =
   | EventFrameForPwa
   | PwaPermissionRequest
   | PwaPermissionResolved
-  | PwaHistoryChunk;
+  | PwaHistoryChunk
+  | PwaTaskCompletedFrame;
 
 export type PwaToHub =
   | { type: "subscribe" }  // Plan 1 PWA only subscribes; commands come in Plan 4
@@ -215,4 +217,19 @@ export interface PwaToHubPermissionReply {
   session_id: string;
   request_id: string;
   decision: "allow" | "deny";
+}
+
+// ─── task_completed (Claude finished a turn) ──────────────────────────
+
+export interface TaskCompletedFrame {
+  type: "task_completed";
+  session_id: string;
+  ts: number;
+}
+
+export interface PwaTaskCompletedFrame {
+  type: "task_completed";
+  daemon_id: string;
+  session_id: string;
+  ts: number;
 }
