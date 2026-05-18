@@ -3,7 +3,7 @@
 Remote control plane for local Claude Code sessions. See the
 [design spec](docs/superpowers/specs/2026-05-18-open-cc-remote-design.md).
 
-**Status:** Plan 2 (auth) complete. Plans 3–6 (transcript streaming, permission relay,
+**Status:** Plan 3 (real-time JSONL streaming) complete. Plans 4–6 (permission relay,
 Web Push, ops) ahead.
 
 ## Prerequisites
@@ -103,20 +103,22 @@ bun test e2e/         # end-to-end only
 bun run typecheck     # 5 packages
 ```
 
-## What Plan 2 covers
+## What Plans 1–3 cover
 
-- IAS OIDC login flow with auto device-creation
-- Daemon DPoP-bound JWT auth (Ed25519, RFC 9449 shape)
-- `cc-remote pair` CLI for daemon onboarding
-- Hub SQLite persistence (users, daemons, devices, pairing codes)
+- Plan 1: vertical slice — plugin/daemon/hub/PWA wired up, sessions visible in PWA
+- Plan 2: auth — IAS OIDC for PWA, DPoP-bound JWT for daemons, `cc-remote pair` CLI
+- Plan 3: real-time conversation streaming — daemon tails Claude Code's session JSONL and streams every line to the PWA's per-session pane
 
-## What Plan 2 does NOT cover
+Click any session row in the PWA to open its live event log on the right.
 
-- Real Claude Code conversation streaming (sessions show up but transcript is empty) — Plan 3
-- Permission relay — Plan 4
-- Web Push — Plan 5
-- "My devices" UI / token rotation / launchd installer — Plan 5/6
-- Hardware-bound keys (Keychain/TPM) — Plan 6
+## What Plans 1–3 do NOT cover yet
+
+- Permission relay (Plan 4) — approve `Bash`/`Edit` from your phone
+- Web Push notifications (Plan 5) — lock-screen alerts when Claude needs you
+- "My devices" UI / token rotation (Plan 5)
+- request_history / scroll-back to past sessions (Plan 4 or later)
+- launchd / systemd installer (Plan 6)
+- Hardware-bound keys (Plan 6)
 
 ## License
 
