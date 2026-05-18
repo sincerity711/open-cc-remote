@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useHub, eventKey } from "./ws.ts";
 import { consumeFragment, getBearer, loginUrl, clearBearer } from "./auth.ts";
 import { SessionPane } from "./SessionPane.tsx";
+import { PermissionBanner } from "./PermissionBanner.tsx";
 
 const HUB_URL = (import.meta.env.VITE_HUB_URL as string) ?? "ws://localhost:7745";
 
@@ -16,7 +17,7 @@ export function App() {
     setBearer(getBearer());
   }, []);
 
-  const { connected, daemons, events } = useHub(HUB_URL, bearer);
+  const { connected, daemons, events, pendingPermissions, sendPermissionReply } = useHub(HUB_URL, bearer);
 
   if (!bearer) {
     return (
@@ -34,6 +35,7 @@ export function App() {
 
   return (
     <>
+      <PermissionBanner pending={pendingPermissions} onReply={sendPermissionReply} />
       <main style={{ fontFamily: "system-ui, sans-serif", padding: 24, maxWidth: 720, paddingRight: selected ? "min(720px, 90vw)" : 24 }}>
         <header style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
           <h1 style={{ margin: 0 }}>cc-remote</h1>

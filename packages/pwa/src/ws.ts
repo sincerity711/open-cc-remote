@@ -1,21 +1,27 @@
-import { useEffect, useRef, useState } from "react";
-import type { HubToPwa, PwaToHub, DaemonView, EventFrameForPwa } from "@cc-remote/proto";
+import { useEffect, useRef, useState, useCallback } from "react";
+import type { HubToPwa, PwaToHub, DaemonView, EventFrameForPwa, PwaPermissionRequest } from "@cc-remote/proto";
 
 const PER_SESSION_BUFFER = 500;
 
 export interface HubState {
   connected: boolean;
   daemons: DaemonView[];
-  // Map from "daemon_id::session_id" to recent events for that session.
   events: Record<string, EventFrameForPwa[]>;
+  pendingPermissions: Record<string, PwaPermissionRequest>;
 }
 
 export function eventKey(daemon_id: string, session_id: string): string {
   return `${daemon_id}::${session_id}`;
 }
 
-export function useHub(hubUrl: string, bearer: string | null): HubState {
-  const [state, setState] = useState<HubState>({ connected: false, daemons: [], events: {} });
+export interface UseHubResult extends HubState {
+  sendPermissionReply: (req: PwaPermissionRequest, decision: "allow" | "deny") => void;
+}
+
+export function useHub(hubUrl: string, bearer: string | null): UseHubResult {
+  const [state, setState] = useState<HubState>({
+    connected: false, daemons: [], events: {}, pendingPermissions: {},
+  });
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -68,9 +74,16 @@ export function useHub(hubUrl: string, bearer: string | null): HubState {
             return { ...prev, events: { ...prev.events, [k]: trimmed } };
           }
           case "permission_request":
-            return prev; // wired in P4-T5
-          case "permission_resolved":
-            return prev; // wired in P4-T5
+            return {
+              ...prev,
+              pendingPermissions: { ...prev.pendingPermissions, [frame.request_id]: frame },
+            };
+          case "permission_resolved": {
+            if (!prev.pendingPermissions[frame.request_id]) return prev;
+            const next = { ...prev.pendingPermissions };
+            delete next[frame.request_id];
+            return { ...prev, pendingPermissions: next };
+          }
         }
         return prev;
       });
@@ -110,5 +123,28 @@ export function useHub(hubUrl: string, bearer: string | null): HubState {
     return () => { stopped = true; try { wsRef.current?.close(); } catch {} };
   }, [hubUrl, bearer]);
 
-  return state;
+  const sendPermissionReply = useCallback(
+    (req: PwaPermissionRequest, decision: "allow" | "deny") => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const msg: PwaToHub = {
+        type: "permission_reply",
+        daemon_id: req.daemon_id,
+        session_id: req.session_id,
+        request_id: req.request_id,
+        decision,
+      };
+      ws.send(JSON.stringify(msg));
+      // Optimistically remove from pending — hub will confirm via permission_resolved.
+      setState((prev) => {
+        if (!prev.pendingPermissions[req.request_id]) return prev;
+        const next = { ...prev.pendingPermissions };
+        delete next[req.request_id];
+        return { ...prev, pendingPermissions: next };
+      });
+    },
+    [],
+  );
+
+  return { ...state, sendPermissionReply };
 }
