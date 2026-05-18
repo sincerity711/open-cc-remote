@@ -409,6 +409,24 @@ test("daemon offline push is cancelled on reconnect", async () => {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("onPwaCommand forwards kill_session to addressed daemon", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+  const sentToDaemon: unknown[] = [];
+  dreg.add("d-1", {}, (f) => sentToDaemon.push(f));
+
+  router.onPwaCommand({
+    type: "kill_session",
+    daemon_id: "d-1",
+    session_id: "s1",
+  });
+  expect(sentToDaemon).toEqual([{
+    type: "kill_session",
+    session_id: "s1",
+  }]);
+});
+
 test("daemon offline push respects opt-in (default off → no push)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "ccr-noop-"));
   try {

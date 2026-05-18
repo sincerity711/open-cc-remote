@@ -194,6 +194,11 @@ export class Router {
         type: "request_history", session_id: frame.session_id,
         request_id: frame.request_id, before_offset: frame.before_offset, limit: frame.limit,
       });
+    } else if (frame.type === "kill_session") {
+      this.daemonReg.send(frame.daemon_id, {
+        type: "kill_session",
+        session_id: frame.session_id,
+      });
     }
   }
 
