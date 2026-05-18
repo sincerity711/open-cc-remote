@@ -4,6 +4,7 @@ import { consumeFragment, getBearer, loginUrl, clearBearer } from "./auth.ts";
 import { SessionPane } from "./SessionPane.tsx";
 import { PermissionBanner } from "./PermissionBanner.tsx";
 import { registerPushSubscription } from "./push.ts";
+import { Settings } from "./Settings.tsx";
 
 const HUB_URL = (import.meta.env.VITE_HUB_URL as string) ?? "ws://localhost:7745";
 
@@ -12,6 +13,7 @@ interface Selected { daemon_id: string; session_id: string }
 export function App() {
   const [bearer, setBearer] = useState<string | null>(null);
   const [selected, setSelected] = useState<Selected | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
     consumeFragment();
@@ -58,6 +60,9 @@ export function App() {
             <span data-testid="conn-status" style={{ color: connected ? "#0a0" : "#a00", marginRight: 12 }}>
               {connected ? "connected" : "disconnected"}
             </span>
+            <button onClick={() => setShowSettings(true)} style={{ fontSize: 12, padding: "4px 8px", marginRight: 8 }}>
+              Settings
+            </button>
             <button onClick={() => { clearBearer(); setBearer(null); }} style={{ fontSize: 12, padding: "4px 8px" }}>
               Sign out
             </button>
@@ -115,6 +120,9 @@ export function App() {
           events={selectedEvents}
           onClose={() => setSelected(null)}
         />
+      )}
+      {showSettings && bearer && (
+        <Settings hubUrl={HUB_URL} bearer={bearer} onClose={() => setShowSettings(false)} />
       )}
     </>
   );
