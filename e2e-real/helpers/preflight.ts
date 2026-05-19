@@ -47,8 +47,13 @@ export function preflight(): PreflightResult {
     "install tmux (`brew install tmux` on macOS)"));
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  checks.push(check("ANTHROPIC_API_KEY set", !!apiKey,
-    "export ANTHROPIC_API_KEY in your shell before running e2e-real"));
+  const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
+  const baseUrl = process.env.ANTHROPIC_BASE_URL;
+  // Either ANTHROPIC_API_KEY *or* ANTHROPIC_AUTH_TOKEN+ANTHROPIC_BASE_URL must
+  // be set (the latter is the proxy-managed-credentials pattern).
+  const authOk = !!apiKey || (!!authToken && !!baseUrl);
+  checks.push(check("Anthropic auth env", authOk,
+    "set ANTHROPIC_API_KEY, or ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL"));
 
   // Soft check: claude version. Out-of-range only warns.
   if (which("claude")) {

@@ -59,8 +59,11 @@ async function dismissDialog(
 
 export async function startClaudeTmux(opts: StartClaudeTmuxOpts): Promise<ClaudeTmuxHandle> {
   const apiKey = opts.apiKey ?? process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error("startClaudeTmux: ANTHROPIC_API_KEY missing (and opts.apiKey not set)");
+  const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
+  const baseUrl = process.env.ANTHROPIC_BASE_URL;
+  const haveAuthToken = !!authToken && !!baseUrl;
+  if (!apiKey && !haveAuthToken) {
+    throw new Error("startClaudeTmux: no Anthropic auth — set ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN+ANTHROPIC_BASE_URL");
   }
   const model = opts.model ?? "claude-haiku-4-5";
   const bootTimeoutMs = opts.bootTimeoutMs ?? 15_000;
@@ -80,10 +83,13 @@ export async function startClaudeTmux(opts: StartClaudeTmuxOpts): Promise<Claude
   // 2. Boot tmux session.
   tmux.newSession(opts.sessionName, opts.cwd);
 
-  // 3. Compose claude command. ANTHROPIC_API_KEY is prefixed inline to be
-  //    crystal-clear for diagnostic capture-pane output.
+  // 3. Compose claude command. Auth env is prefixed inline so capture-pane
+  //    diagnostics show what auth path is in use.
+  const authPrefix = apiKey
+    ? `ANTHROPIC_API_KEY=${apiKey}`
+    : `ANTHROPIC_AUTH_TOKEN=${authToken} ANTHROPIC_BASE_URL=${baseUrl}`;
   const cmd = [
-    `ANTHROPIC_API_KEY=${apiKey}`,
+    authPrefix,
     `claude`,
     `--mcp-config ${opts.mcpConfigPath}`,
     `--dangerously-load-development-channels server:cc-remote`,
@@ -93,26 +99,27 @@ export async function startClaudeTmux(opts: StartClaudeTmuxOpts): Promise<Claude
 
   tmux.sendKeys(opts.sessionName, cmd, true);
 
-  // 4. Dev-channels confirmation. The exact text observed in the spike:
+  // 4. Dev-channels confirmation. Observed text in CC 2.1.144:
   //    "WARNING: Loading development channels … 1. I am using this for local
   //    development / 2. Exit". Default-1 highlighted; Enter accepts.
-  await dismissDialog(opts.sessionName, /Allow.*development.*channels/i, 10_000, true)
-    .then(async (hit) => {
-      if (!hit) {
-        // Try a wider net — the wording may be "loading development channels",
-        // "developer channels", etc.
-        await dismissDialog(opts.sessionName, /develop(ment|er).*channel/i, 5_000, true);
-      }
-    });
+  await dismissDialog(opts.sessionName, /Loading development channels|loading\s+development\s+channels/i, 12_000, false);
 
   // 5. Workspace-trust dialog (per-cwd, may already be remembered).
-  await dismissDialog(opts.sessionName, /trust.*workspace|trust.*folder|safety check.*trust/i, 8_000, true);
+  //    Observed text: "Quick safety check: Is this a project you created or
+  //    one you trust?" → 1. Yes / 2. No.
+  await dismissDialog(
+    opts.sessionName,
+    /trust.*workspace|trust.*folder|safety check|created or one you trust/i,
+    8_000,
+    true,
+  );
 
-  // 6. Wait for the interactive prompt. Claude shows a `>` cursor on a fresh
-  //    line once boot is complete.
+  // 6. Wait for the interactive prompt. Claude Code 2.1.144 shows a `❯` cursor
+  //    on a fresh line once boot is complete (preceded by "Try ..." placeholder
+  //    text, but appearing before that hint is reliable enough).
   await tmux.waitForPattern(
     opts.sessionName,
-    /(?:^|\n)\s*>\s*(?:\n|$)/m,
+    /❯\s+Try\s+|❯\s*$|>\s*$/m,
     bootTimeoutMs,
     "interactive prompt",
   );

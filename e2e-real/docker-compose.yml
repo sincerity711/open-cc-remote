@@ -9,7 +9,11 @@ services:
     ports:
       - "7770:7770"
     healthcheck:
-      test: ["CMD", "bun", "-e", "const r = await fetch('http://localhost:7770/.well-known/openid-configuration'); if (!r.ok) process.exit(1)"]
+      # TCP-only check via Node's net module — does NOT do HTTP, so it won't
+      # poison fake-ias's issuer-URL inference (the FIRST HTTP request to
+      # fake-ias sets the issuer to that request's origin, which must be
+      # http://fake-ias:7770 so the hub-to-token call works).
+      test: ["CMD", "bun", "-e", "import('node:net').then(m=>{const s=m.createConnection({host:'127.0.0.1',port:7770},()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1))})"]
       interval: 2s
       timeout: 5s
       retries: 15
