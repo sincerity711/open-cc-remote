@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
 import { LiveSessions } from "../src/registry.ts";
-import { fixtureSession } from "@cc-remote/proto";
+import { fixtureSession } from "../../proto/src/test-fixtures.ts";
 
 const make = (id: string) => fixtureSession({ session_id: id });
 

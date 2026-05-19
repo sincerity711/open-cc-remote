@@ -30,6 +30,7 @@ test("plugin chat: reply tool sends chat_out; chat_in becomes channel notificati
         seen.push(f);
         pluginSocket = c;
         if (f.type === "register" || f.type === "bye") server.replyTo(c, { type: "ack", ref: f.type });
+        if (f.type === "chat_out") server.replyTo(c, { type: "ack", ref: "chat_out" });
       },
     });
     await server.ready;

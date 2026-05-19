@@ -8,7 +8,7 @@ import { openDb } from "../src/db.ts";
 import { createDevice } from "../src/repos/devices.ts";
 import { addPushSub } from "../src/repos/push-subs.ts";
 import { pairDaemon } from "../src/repos/daemons.ts";
-import { fixtureSession } from "@cc-remote/proto";
+import { fixtureSession } from "../../proto/src/test-fixtures.ts";
 
 test("hello frame populates state and broadcasts daemon_online", () => {
   const dreg = new DaemonRegistry<unknown>();

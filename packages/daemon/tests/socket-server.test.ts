@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { connect, type Socket } from "node:net";
-import { encodeFrame, FrameDecoder, fixtureSession } from "@cc-remote/proto";
+import { encodeFrame, FrameDecoder } from "@cc-remote/proto";
+import { fixtureSession } from "../../proto/src/test-fixtures.ts";
 import type { PluginToDaemon, DaemonToPlugin } from "@cc-remote/proto";
 import { startSocketServer } from "../src/socket-server.ts";
 

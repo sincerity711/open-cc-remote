@@ -209,6 +209,7 @@ sessions.onAdd((s: SessionSnapshot) => {
             idleTimers.delete(s.session_id);
             hub.send({ type: "idle", session_id: s.session_id, ts: Date.now() });
           }, cfg.idle_window_ms);
+          t.unref();
           idleTimers.set(s.session_id, t);
         }
       },
@@ -260,6 +261,7 @@ const sockServer = startSocketServer({
       });
     } else if (frame.type === "chat_out") {
       process.stderr.write(`daemon: chat_out from ${frame.session_id}: ${frame.content.slice(0, 80)}\n`);
+      sockServer.replyTo(client, { type: "ack", ref: "chat_out" });
     }
   },
   onClose: (client) => {

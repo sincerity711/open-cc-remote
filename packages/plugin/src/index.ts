@@ -24,15 +24,36 @@ async function main() {
   const pluginVersion = (JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string }).version;
 
   const sockPath = process.env.CC_REMOTE_SOCKET ?? join(homedir(), ".cc-remote", "daemon.sock");
+
+  let registered = false;
+  let mcp: Server | null = null;
+
   let daemon;
   try {
-    daemon = await connectDaemon(sockPath, { timeoutMs: 3000 });
+    daemon = await connectDaemon(sockPath, {
+      timeoutMs: 3000,
+      onClose: () => {
+        process.stderr.write(`cc-remote plugin: daemon disconnected; exiting\n`);
+        if (!mcp) process.exit(0);
+        if (registered) {
+          // Best-effort: tell Claude the channel is gone.
+          void mcp.notification({
+            method: "notifications/claude/channel",
+            params: {
+              content: "cc-remote daemon disconnected",
+              meta: { chat_id: "pwa", message_id: `sys-${Date.now()}`, user: "system", user_id: "system", ts: Math.floor(Date.now() / 1000) },
+            },
+          }).catch(() => {});
+        }
+        process.exit(0);
+      },
+    });
   } catch (e) {
     process.stderr.write(`cc-remote plugin: cannot reach daemon at ${sockPath}: ${(e as Error).message}\n`);
     process.exit(1);
   }
 
-  const mcp = new Server(
+  mcp = new Server(
     { name: "cc-remote", version: pluginVersion },
     {
       capabilities: {
@@ -46,10 +67,11 @@ async function main() {
     },
   );
 
-  let registered = false;
   let pluginSessionId = "";
+  let initTimer: ReturnType<typeof setTimeout>;
 
   mcp.setRequestHandler(InitializeRequestSchema, async (req) => {
+    clearTimeout(initTimer);
     const claudeClientVersion = req.params.clientInfo?.version ?? "unknown";
 
     const session = buildSession({
@@ -70,15 +92,15 @@ async function main() {
       process.exit(1);
     }
 
-    installPermissionRelay({ mcp, daemon, pluginSessionId });
-    installChatRelay({ mcp, daemon, pluginSessionId });
-    installTools(mcp);
+    installPermissionRelay({ mcp: mcp!, daemon, pluginSessionId });
+    installChatRelay({ mcp: mcp!, daemon, pluginSessionId });
+    installTools(mcp!);
 
     daemon.onFrame((f) => {
       if (f.type === "permission_reply") {
-        emitPermissionDecision(mcp, f.request_id, f.decision);
+        emitPermissionDecision(mcp!, f.request_id, f.decision);
       } else if (f.type === "chat_in") {
-        emitChatIn(mcp, f);
+        emitChatIn(mcp!, f);
       }
     });
 
@@ -111,6 +133,11 @@ async function main() {
 
   process.on("SIGINT", () => goodbye(130));
   process.on("SIGTERM", () => goodbye(143));
+
+  initTimer = setTimeout(() => {
+    process.stderr.write(`cc-remote plugin: MCP initialize did not arrive within 5s; exiting\n`);
+    process.exit(1);
+  }, 5000);
 
   await mcp.connect(new StdioServerTransport());
 }

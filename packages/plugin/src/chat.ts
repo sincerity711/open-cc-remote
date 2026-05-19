@@ -18,13 +18,17 @@ export function installChatRelay({ mcp, daemon, pluginSessionId }: ChatRelayDeps
     if (!text) throw new Error("reply: 'text' is required and must be a non-empty string");
     const reply_to = typeof args.reply_to === "string" ? args.reply_to : null;
 
-    daemon.sendOneWay({
-      type: "chat_out",
-      session_id: pluginSessionId,
-      content: text,
-      ts: Math.floor(Date.now() / 1000),
-      reply_to,
-    });
+    try {
+      await daemon.send({
+        type: "chat_out",
+        session_id: pluginSessionId,
+        content: text,
+        ts: Math.floor(Date.now() / 1000),
+        reply_to,
+      });
+    } catch (e) {
+      throw new Error(`reply failed: cc-remote daemon write error: ${(e as Error).message}`);
+    }
 
     return { content: [{ type: "text", text: "delivered" }] };
   });

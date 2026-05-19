@@ -18,6 +18,10 @@ export interface PermissionRelayDeps {
   pluginSessionId: string;
 }
 
+// MCP SDK's TypeScript types don't extend NotificationSchema for custom
+// experimental methods like notifications/claude/channel/permission_request,
+// so we cast to suppress the schema check. The runtime z.object validates
+// the params shape correctly.
 export function installPermissionRelay({ mcp, daemon, pluginSessionId }: PermissionRelayDeps): void {
   // CC → plugin: permission_request → daemon
   mcp.setNotificationHandler(PermissionRequestNotification as any, async ({ params }) => {

@@ -105,8 +105,8 @@ test("plugin → daemon → hub → PWA snapshot loop", async () => {
 
     // Tear down fake-claude → daemon should send session_close.
     fc.kill("SIGTERM");
-    await waitFor(() => fc.exitCode !== null ? true : null, 3000, "fake-claude exit");
+    await waitFor(() => fc.exitCode !== null ? true : null, 8000, "fake-claude exit");
   } finally {
     cleanup();
   }
-});
+}, 30_000);

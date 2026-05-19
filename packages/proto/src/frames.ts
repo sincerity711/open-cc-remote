@@ -26,7 +26,7 @@ export type PluginToDaemon =
   | PluginChatOut;
 
 export type DaemonToPlugin =
-  | { type: "ack"; ref: "register" | "bye" }
+  | { type: "ack"; ref: "register" | "bye" | "chat_out" }
   | PluginPermissionReply
   | DaemonChatIn;
 

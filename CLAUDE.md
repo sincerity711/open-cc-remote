@@ -8,7 +8,7 @@ Project-local guidance for Claude Code working in this repo.
 
 ## Status
 
-- Plugin MCP rework in flight: `docs/superpowers/plans/2026-05-19-plugin-mcp-rework-plan.md` (spec: `docs/superpowers/specs/2026-05-19-plugin-mcp-rework-design.md`)
+- Plugin MCP rework complete (tag `plan-plugin-mcp-rework`): `docs/superpowers/plans/2026-05-19-plugin-mcp-rework-plan.md` (spec: `docs/superpowers/specs/2026-05-19-plugin-mcp-rework-design.md`)
 - 16 milestones tagged: `plan-01-foundation` through `plan-16-status`
 - Real-e2e plan (`docs/superpowers/plans/2026-05-19-real-e2e-plan.md`) is paused, unblocked once the rework lands
 
