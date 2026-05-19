@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bindJsonl } from "../src/jsonl-bind.ts";
 
-test("bindJsonl resolves with the first new .jsonl file's basename UUID", async () => {
+test("bindJsonl resolves with the first new .jsonl file's basename", async () => {
   const dir = mkdtempSync(join(tmpdir(), "ccr-bind-"));
   try {
     const expected = "11111111-1111-1111-1111-111111111111";

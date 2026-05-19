@@ -32,7 +32,13 @@ async function main() {
     plugin_version: "fake",
   };
 
-  const client = await connectDaemon(sockPath, { timeoutMs: 3000 });
+  const client = await connectDaemon(sockPath, {
+    timeoutMs: 3000,
+    onClose: () => {
+      process.stderr.write(`fake-claude: daemon closed connection, exiting\n`);
+      process.exit(0);
+    },
+  });
   await client.send({ type: "register", session });
   process.stderr.write(`fake-claude: registered ${session.session_id} cwd=${session.cwd}\n`);
 
