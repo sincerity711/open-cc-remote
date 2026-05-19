@@ -75,21 +75,16 @@ test("end-to-end permission relay: plugin → daemon → hub → PWA → reply b
     const sub: PwaToHub = { type: "subscribe" };
     ws.send(JSON.stringify(sub));
 
-    // fake-claude with CC_REMOTE_FAKE_PERMISSION set on plugin's env.
     const sockPath = join(stateDir, "daemon.sock");
     const fc = spawn("bun", [
       join(ROOT, "tools/fake-claude/fake-claude.ts"),
       "--session-id", "s_perm",
       "--cwd", "/tmp/perm",
       "--socket", sockPath,
+      "--inject-permission", "Bash:req-e2e-1:rm -rf /tmp/test",
     ], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        CC_REMOTE_FAKE_PERMISSION: "Bash",
-        CC_REMOTE_FAKE_REQUEST_ID: "req-e2e-1",
-        CC_REMOTE_FAKE_ARGS: "rm -rf /tmp/test",
-      },
+      env: { ...process.env },
     });
     procs.push(fc);
 
