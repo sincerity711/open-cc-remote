@@ -385,3 +385,255 @@ If real-CC permission coverage is later required, the only option is interactive
 ### Cost of the re-spike
 
 2 Haiku invocations: ~$0.045 + ~$0.0094 ≈ $0.054. Cumulative spike spend ~$0.34.
+
+---
+
+## Update 2026-05-20 (third spike) — tmux interactive **flips A2 → A1**
+
+### Summary
+
+**Path A is viable.** With the right hidden flags, real Claude Code 2.1.144 in
+an interactive tmux session **does** route permission requests through the
+plugin's `claude/channel/permission` capability, the plugin's daemon-client
+sees `permission_request` proto frames, and the daemon's reply is honored.
+The `-p`-mode dead-end was not just about the TTY — there are also two
+mandatory CLI flags (`--channels` / `--dangerously-load-development-channels`)
+that aren't in `claude --help` output but are required for channel
+notifications to fire at all. The `--channels plugin:cc-remote@local` pattern
+documented in the original v1 plan was correct in spirit; we just hadn't
+re-discovered it after the PMCP rework.
+
+### Workspace-trust dialog
+
+Yes, the trust dialog blocks startup the first time `claude` is run inside
+`/private/tmp`. Programmatic bypass: send `Enter` once.
+
+```bash
+tmux send-keys -t <session> Enter
+```
+
+After that, CC writes the trust decision to its trust store and subsequent
+runs in the same cwd skip the dialog. (The dialog text: *"Quick safety
+check: Is this a project you created or one you trust?"* → 1. Yes / 2. No.)
+
+### Smoking-gun debug line that unblocked the spike
+
+In an interactive run **without** `--channels`, even though the plugin
+connected and registered MCP capabilities including
+`claude/channel/permission`, the debug log says:
+
+```
+[DEBUG] MCP server "plugin:cc-remote:cc-remote":
+        Channel notifications skipped: server plugin:cc-remote:cc-remote
+        not in --channels list for this session
+```
+
+CC requires the operator to **explicitly opt-in** which MCP servers can
+receive channel notifications, even after capability negotiation succeeds.
+The `--channels` flag is hidden but errors helpfully when invoked
+incorrectly: `claude --channels cc-remote` returns
+
+```
+--channels entries must be tagged: cc-remote
+  plugin:<name>@<marketplace>  — plugin-provided channel (allowlist enforced)
+  server:<name>                — manually configured MCP server
+```
+
+So entries must be tagged `plugin:` or `server:`. With `--plugin-dir`
+(inline load), CC refuses to pair `--channels plugin:cc-remote@local`:
+
+```
+Channel notifications skipped: you asked for plugin:cc-remote@local
+but the installed cc-remote plugin is from inline
+```
+
+i.e., **`--plugin-dir`'s "inline" loading is incompatible with channels.**
+The plugin must be loaded as an MCP server via `--mcp-config` (a JSON file
+mapping `cc-remote` to a `command/args` invocation), then tagged
+`server:cc-remote` in `--channels`. And for non-allowlisted servers (which
+`cc-remote` is), pass `--dangerously-load-development-channels
+server:cc-remote`, which prompts a one-time terminal confirmation.
+
+### Working invocation
+
+MCP config (`/tmp/spike3-mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "cc-remote": {
+      "command": "bun",
+      "args": ["run", "/Users/i060912/SAPDevelop/channel/packages/plugin/src/index.ts"]
+    }
+  }
+}
+```
+
+Launch:
+
+```bash
+tmux new-session -d -s ccr -x 220 -y 50
+tmux send-keys -t ccr "ANTHROPIC_AUTH_TOKEN=PROXY_MANAGED \
+  ANTHROPIC_BASE_URL=http://127.0.0.1:5000 \
+  CC_REMOTE_SOCKET=/tmp/spike3-daemon.sock \
+  claude \
+    --mcp-config /tmp/spike3-mcp.json \
+    --dangerously-load-development-channels server:cc-remote \
+    --model claude-haiku-4-5 \
+    --setting-sources project,local \
+    --debug-file /tmp/cc-debug.log" Enter
+sleep 6
+tmux send-keys -t ccr Enter   # accept dev-channels confirmation
+sleep 6
+tmux send-keys -t ccr "Run bash: rm -rf /tmp/nonexistent-xyz-spike" Enter
+```
+
+### Frames observed
+
+Mock daemon log:
+
+```
+[13:50:09.431] LISTEN /tmp/spike3-daemon.sock
+[13:50:16.264] CONNECT
+[13:50:16.346] FRAME-IN  {"type":"register", ...}
+[13:50:16.346] FRAME-OUT {"type":"ack","ref":"register"}
+[13:50:57.238] FRAME-IN  {"type":"permission_request",
+                          "request_id":"rfcqc",
+                          "tool":"Bash",
+                          "args_summary":"{\"command\":\"rm -rf /tmp/nonexistent-xyz-spike\",
+                                            \"description\":\"Remove the /tmp/nonexistent-xyz-spike directory…\"}",
+                          "expires_at":1779198957238}
+[13:50:57.238] FRAME-OUT {"type":"permission_reply","request_id":"rfcqc","decision":"allow"}
+[13:51:17.279] DISCONNECT
+```
+
+CC debug log corroboration:
+
+```
+[DEBUG] MCP server "cc-remote": Channel notifications registered
+[DEBUG] executePermissionRequestHooks called for tool: Bash
+[DEBUG] MCP server "cc-remote": notifications/claude/channel/permission: rfcqc → allow (matched pending)
+[INFO]  [Stall] tool_dispatch_start tool=Bash permissionDecisionMs=59
+```
+
+Observations from the frame:
+
+- **`request_id="rfcqc"` matches the `[a-km-z]{5}` regex** confirmed in
+  `channel-permission-protocol.md`. Five lowercase letters from the
+  alphabet minus 'l'.
+- **`permissionDecisionMs=59`** — 59 ms round-trip (plugin → daemon →
+  plugin → CC). Non-channel path is 2–4 ms. Well within e2e budgets.
+- **`args_summary` for Bash is the JSON-stringified `{command, description}`
+  object**, not a plain string. Tests should `JSON.parse` or substring-match.
+  The plugin's `permission.ts` forwards `params.input_preview ||
+  params.description` from the MCP notification verbatim; whichever branch
+  fired here produced JSON. Consistent with CC sending `input_preview` as
+  a stringified object.
+
+### Final classification: **A1**
+
+Path A works in tmux interactive with the right flags. Specifically:
+
+1. Plugin must be loaded via `--mcp-config <file>`, NOT `--plugin-dir`.
+   `--plugin-dir`'s "inline" plugins are explicitly excluded from the
+   channels allowlist gate.
+2. `--dangerously-load-development-channels server:<name>` is required to
+   register the server in CC's per-session channel allowlist.
+3. The user must press Enter once at the dev-channels confirmation prompt
+   (text: *"WARNING: Loading development channels … 1. I am using this
+   for local development / 2. Exit"*).
+4. Workspace-trust dialog: one-time press Enter on first run in a cwd.
+5. The model needs to call a tool that CC considers permission-gated. Read
+   is always allowed. Plain `echo` Bash is allowed. `rm -rf` triggers the
+   gate. `Write` to new paths triggers it.
+
+### Updated recommendation for `helpers/claude.ts`
+
+Tests split into two paths:
+
+**Non-permission scenarios (chat, JSONL, kill, history, idle/task_completed)** —
+unchanged from spike 2:
+
+```bash
+claude \
+  --plugin-dir packages/plugin \
+  --model claude-haiku-4-5 \
+  --setting-sources project,local \
+  --max-budget-usd 0.10 \
+  -p "<prompt>" --output-format json
+```
+
+**Permission scenarios (02 / 03 / 10)** — Path A via tmux:
+
+```bash
+# Pre-step: write mcp-config (one per test):
+cat > $TMPDIR/ccr-mcp.json <<EOF
+{ "mcpServers": { "cc-remote": {
+    "command": "bun",
+    "args": ["run", "<repo>/packages/plugin/src/index.ts"]
+} } }
+EOF
+
+# tmux harness:
+tmux new-session -d -s $S -x 220 -y 50
+tmux send-keys -t $S "ANTHROPIC_AUTH_TOKEN=$TOKEN ANTHROPIC_BASE_URL=$BASE \
+  CC_REMOTE_SOCKET=$SOCK \
+  claude \
+    --mcp-config $TMPDIR/ccr-mcp.json \
+    --dangerously-load-development-channels server:cc-remote \
+    --model claude-haiku-4-5 \
+    --setting-sources project,local \
+    --max-budget-usd 0.20" Enter
+sleep 4 && tmux send-keys -t $S Enter   # dev-channels confirmation
+sleep 2 && tmux send-keys -t $S Enter   # workspace-trust (cold cwd only)
+tmux send-keys -t $S "Use the Write tool to create $TARGET with content 'foo'" Enter
+# Then poll the daemon for permission_request, reply via your fixture, capture-pane to verify CC continued.
+```
+
+### What the e2e plan author needs to know
+
+1. **`--plugin-dir` is fundamentally insufficient for permission tests.** Use
+   `--mcp-config` instead. Two separate loading mechanisms, different
+   capability scopes.
+2. **`--channels` and `--dangerously-load-development-channels` are hidden**
+   (not in `claude --help`). Document them in the helper's source so future
+   maintainers know why they're there.
+3. **The dev-channels confirmation is interactive** — there's no
+   `--yes-i-am-developing` env var visible in 2.1.144. Drive via
+   `tmux send-keys`. Keep an eye on future CC versions for an env override.
+4. **Permission gate is per-command, not per-tool.** `echo foo` does not
+   prompt; `rm -rf <path>` does (any path, even nonexistent); `Write` to a
+   new file does. Pick prompts accordingly.
+5. **`request_id` is `[a-km-z]{5}`** — matches the existing regex in
+   `channel-permission-protocol.md`. Tests can assert this format.
+6. **`args_summary` for Bash is JSON-stringified `{command, description}`,**
+   not a plain string. Tests should adjust.
+7. **Auth env**: with `--setting-sources project,local`, the user's
+   `~/.claude/settings.json` is excluded — that's where this developer's
+   `ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_BASE_URL` live. Helper must inject
+   those into `process.env` before spawn. CI can use `ANTHROPIC_API_KEY`.
+8. **Cost**: third spike spent ~$0.10 across ~3 Haiku turns. Permission
+   round-trip itself costs nothing (no extra API calls). A typical
+   permission scenario is 15–25 s wall time, ~$0.04 per run.
+
+### Plan B status
+
+Plan B (fake-claude `CC_REMOTE_FAKE_PERMISSION` injection) remains the
+**preferred path for fast unit / fake-only e2e tests**. Path A's tmux
+choreography is more expensive (cold-start ~10s for trust + dev-channels
+prompts, real Anthropic API). Use Path A for *coverage* (scenarios 02/03/10
+promoted to "real" mode); keep Plan B for *iteration* / regression on every
+commit.
+
+### Files referenced (third spike, all cleaned up)
+
+- `/tmp/spike3-mock-daemon.ts`, `/tmp/spike3-mcp.json`,
+  `/tmp/spike3-daemon.log`, `/tmp/spike3-debug-{1..5}.log`
+- Plugin source unchanged.
+- Earlier protocol research:
+  `docs/superpowers/research/channel-permission-protocol.md` — the
+  `--channels plugin:cc-remote@local` invocation documented there
+  (pre-PMCP-rework v1) was correct. The PMCP-rework spec correctly
+  identified that `--plugin-dir` doesn't pair with channels. This spike
+  found the workaround: `--mcp-config` +
+  `--dangerously-load-development-channels server:cc-remote`.
