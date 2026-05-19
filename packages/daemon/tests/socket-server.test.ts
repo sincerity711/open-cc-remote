@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { connect, type Socket } from "node:net";
-import { encodeFrame, FrameDecoder } from "@cc-remote/proto";
+import { encodeFrame, FrameDecoder, fixtureSession } from "@cc-remote/proto";
 import type { PluginToDaemon, DaemonToPlugin } from "@cc-remote/proto";
 import { startSocketServer } from "../src/socket-server.ts";
 
@@ -33,8 +33,7 @@ test("plugin register frame triggers handler and ack reply", async () => {
 
     const reg: PluginToDaemon = {
       type: "register",
-      session: { session_id: "s1", tmux_session: null, tmux_pane: null,
-                 cwd: "/x", model: "m", pid: 1, started_at: 1 }
+      session: fixtureSession({ session_id: "s1" }),
     };
     client.write(encodeFrame(reg));
 

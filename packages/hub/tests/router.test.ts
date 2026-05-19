@@ -8,6 +8,7 @@ import { openDb } from "../src/db.ts";
 import { createDevice } from "../src/repos/devices.ts";
 import { addPushSub } from "../src/repos/push-subs.ts";
 import { pairDaemon } from "../src/repos/daemons.ts";
+import { fixtureSession } from "@cc-remote/proto";
 
 test("hello frame populates state and broadcasts daemon_online", () => {
   const dreg = new DaemonRegistry<unknown>();
@@ -24,21 +25,18 @@ test("hello frame populates state and broadcasts daemon_online", () => {
     hostname: "macbook",
     agent_version: "0.1.0",
     sessions: [
-      { session_id: "s1", tmux_session: "work", tmux_pane: "%0",
-        cwd: "/x", model: "opus-4.7", pid: 1234, started_at: 1 }
+      fixtureSession({ session_id: "s1", tmux_session: "work", tmux_pane: "%0", model: "opus-4.7", pid: 1234 })
     ]
   });
 
   expect(router.snapshot()).toEqual([
     { daemon_id: "d-1", hostname: "macbook", online: true,
-      sessions: [{ session_id: "s1", tmux_session: "work", tmux_pane: "%0",
-                   cwd: "/x", model: "opus-4.7", pid: 1234, started_at: 1 }]
+      sessions: [fixtureSession({ session_id: "s1", tmux_session: "work", tmux_pane: "%0", model: "opus-4.7", pid: 1234 })]
     }
   ]);
   expect(broadcasts).toEqual([{
     type: "daemon_online", daemon_id: "d-1", hostname: "macbook",
-    sessions: [{ session_id: "s1", tmux_session: "work", tmux_pane: "%0",
-                 cwd: "/x", model: "opus-4.7", pid: 1234, started_at: 1 }]
+    sessions: [fixtureSession({ session_id: "s1", tmux_session: "work", tmux_pane: "%0", model: "opus-4.7", pid: 1234 })]
   }]);
 });
 
@@ -55,15 +53,13 @@ test("session_open broadcasts to PWAs", () => {
 
   router.onDaemonFrame("d-1", {
     type: "session_open",
-    session: { session_id: "s2", tmux_session: null, tmux_pane: null,
-               cwd: "/y", model: "sonnet", pid: 99, started_at: 2 }
+    session: fixtureSession({ session_id: "s2", cwd: "/y", model: "sonnet", pid: 99, started_at: 2 }),
   });
 
   expect(broadcasts).toEqual([{
     type: "session_open",
     daemon_id: "d-1",
-    session: { session_id: "s2", tmux_session: null, tmux_pane: null,
-               cwd: "/y", model: "sonnet", pid: 99, started_at: 2 }
+    session: fixtureSession({ session_id: "s2", cwd: "/y", model: "sonnet", pid: 99, started_at: 2 }),
   }]);
 });
 

@@ -1,12 +1,8 @@
 import { test, expect } from "bun:test";
 import { LiveSessions } from "../src/registry.ts";
-import type { SessionSnapshot } from "@cc-remote/proto";
+import { fixtureSession } from "@cc-remote/proto";
 
-const make = (id: string): SessionSnapshot => ({
-  session_id: id,
-  tmux_session: null, tmux_pane: null,
-  cwd: "/x", model: "opus-4.7", pid: 1, started_at: 1,
-});
+const make = (id: string) => fixtureSession({ session_id: id });
 
 test("add/get/remove", () => {
   const reg = new LiveSessions();
