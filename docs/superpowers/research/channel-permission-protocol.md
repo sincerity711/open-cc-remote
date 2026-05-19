@@ -264,3 +264,16 @@ CC                          plugin (MCP stdio)            PWA client
 - `behavior` must be the string `"allow"` or `"deny"` (lowercase)
 - Plugin must declare `experimental['claude/channel/permission']` to receive the request
 - Direction is: CC sends request → plugin → user → plugin → CC sends response
+
+---
+
+## Execution decision (2026-05-19)
+
+After T0 research and confirmation that `--channels` is removed in Claude Code 2.1.143, we adopt the **hybrid execution pattern** for tasks 13–18 of the real-e2e plan:
+
+- Real claude is launched via `claude -p "<prompt>"` (no plugin flags). It writes its real JSONL to `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`.
+- A fake-claude harness, started alongside, registers a synthetic `session_id` with the daemon AND we override `CLAUDE_PROJECTS_DIR` so daemon and real claude agree on the JSONL path. Daemon's watcher sees real Claude's writes under that session_id.
+- Permission scenarios (02/03/10) use `CC_REMOTE_FAKE_PERMISSION` env on fake-claude (Path B). Plugin↔Claude Code permission protocol stays unverified in this suite — to be addressed in a future "plugin MCP modernization" plan.
+- Scenario 09 (start_session) uses `sh -c "echo started"` as the spawn_command, not real claude. Verifies the spawn machinery without depending on plugin loading.
+
+This trades plugin-load realism for everything else (real Claude API, real JSONL, real docker hub, real OIDC flow, real DPoP auth, real watcher, real router, real PWA flow). Documented as the explicit boundary in the spec §10 ("out of scope: real Claude Code plugin loading via current `--plugin-dir`/`marketplace install` mechanism").
