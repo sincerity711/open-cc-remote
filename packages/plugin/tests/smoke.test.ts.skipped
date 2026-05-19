@@ -1,0 +1,42 @@
+// To run manually: rename to smoke.test.ts and ensure ANTHROPIC_API_KEY is set.
+// This test verifies the rework end-to-end against real Claude Code 2.1.143+.
+import { test, expect } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { spawn } from "node:child_process";
+import { startSocketServer } from "../../daemon/src/socket-server.ts";
+import type { PluginToDaemon } from "@cc-remote/proto";
+
+test("real claude --plugin-dir packages/plugin runs and registers a session", async () => {
+  if (!process.env.ANTHROPIC_API_KEY && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+    throw new Error("smoke test requires ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN");
+  }
+  const dir = mkdtempSync(join(tmpdir(), "ccr-smoke-"));
+  const sockPath = join(dir, "d.sock");
+  try {
+    const seen: PluginToDaemon[] = [];
+    const server = startSocketServer({
+      path: sockPath,
+      onFrame: (f, c) => {
+        seen.push(f);
+        if (f.type === "register" || f.type === "bye") server.replyTo(c, { type: "ack", ref: f.type });
+      },
+    });
+    await server.ready;
+
+    const pluginDir = resolve(import.meta.dir, "..");
+    const child = spawn("claude", ["--plugin-dir", pluginDir, "-p", "say one word", "--output-format", "json"], {
+      env: { ...process.env, CC_REMOTE_SOCKET: sockPath },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const exit = await new Promise<number>((res) => child.on("exit", (c) => res(c ?? 1)));
+    expect(exit).toBe(0);
+
+    const reg = seen.find((f) => f.type === "register");
+    expect(reg).toBeDefined();
+
+    server.close();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
