@@ -1,0 +1,47 @@
+services:
+  fake-ias:
+    build:
+      context: ..
+      dockerfile: e2e-real/fixtures/fake-ias.dockerfile
+    environment:
+      FAKE_IAS_PORT: "7770"
+      FAKE_IAS_SUB: "i060912@sap.com"
+    healthcheck:
+      test: ["CMD", "bun", "-e", "const r = await fetch('http://localhost:7770/.well-known/openid-configuration'); if (!r.ok) process.exit(1)"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 3s
+
+  hub:
+    build:
+      context: ..
+      dockerfile: e2e-real/fixtures/hub.dockerfile
+    depends_on:
+      fake-ias:
+        condition: service_healthy
+    environment:
+      HUB_PORT: "7745"
+      HUB_DB_PATH: "/data/hub.sqlite"
+      HUB_JWT_SECRET: "e2e-test-secret-not-for-prod"
+      HUB_PWA_URL: "http://localhost:7745/"
+      HUB_IAS_ISSUER: "http://fake-ias:7770"
+      HUB_IAS_CLIENT_ID: "cc-remote"
+      HUB_IAS_CLIENT_SECRET: "test-secret"
+      HUB_IAS_REDIRECT_URI: "http://localhost:7745/auth/callback"
+      HUB_IAS_ALLOWED_SUBJECTS: "i060912@sap.com"
+      HUB_TEST_MODE: "1"
+      HUB_OFFLINE_PUSH_DELAY_MS: "300"
+    ports:
+      - "7745:7745"
+    volumes:
+      - hub-data:/data
+    healthcheck:
+      test: ["CMD", "bun", "-e", "const r = await fetch('http://localhost:7745/healthz'); if (!r.ok) process.exit(1)"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+
+volumes:
+  hub-data:

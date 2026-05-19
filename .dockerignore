@@ -1,0 +1,13 @@
+**/node_modules
+**/dist
+**/.git
+**/*.log
+docs
+e2e
+e2e-real/tests
+e2e-real/helpers
+e2e-real/.dockerignore
+tools/fake-claude
+packages/daemon/node_modules
+packages/plugin/node_modules
+packages/pwa
