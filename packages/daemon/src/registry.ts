@@ -14,6 +14,12 @@ export class LiveSessions {
     for (const l of this.adds) l(s);
   }
 
+  update(session_id: string, patch: Partial<SessionSnapshot>): void {
+    const cur = this.sessions.get(session_id);
+    if (!cur) return;
+    this.sessions.set(session_id, { ...cur, ...patch });
+  }
+
   remove(session_id: string): void {
     if (!this.sessions.has(session_id)) return;
     this.sessions.delete(session_id);

@@ -1,6 +1,6 @@
 import { hostname } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import type { Socket } from "node:net";
 import { spawn as childSpawn } from "node:child_process";
 import type { JWK } from "jose";
@@ -11,6 +11,7 @@ import { startSocketServer } from "./socket-server.ts";
 import { startHubClient } from "./hub-client.ts";
 import { getOrCreateKeypair } from "./keystore.ts";
 import { jsonlPath } from "./jsonl-paths.ts";
+import { bindJsonl } from "./jsonl-bind.ts";
 import { readHistory } from "./jsonl-history.ts";
 import { startWatcher, type WatcherHandle } from "./jsonl-watcher.ts";
 import { openDb } from "./db.ts";
@@ -88,7 +89,17 @@ const hub = startHubClient({
         });
         return;
       }
-      const path = jsonlPath(session.cwd, frame.session_id);
+      const claudeId = session.claude_session_id;
+      if (!claudeId) {
+        hub.send({
+          type: "history_chunk",
+          session_id: frame.session_id,
+          request_id: frame.request_id,
+          events: [],
+        });
+        return;
+      }
+      const path = jsonlPath(session.cwd, claudeId);
       readHistory(path, frame.before_offset, frame.limit).then((events) => {
         hub.send({
           type: "history_chunk",
@@ -147,6 +158,15 @@ const hub = startHubClient({
         process.stderr.write(`daemon: start_session spawn threw: ${(e as Error).message}\n`);
       }
     }
+    else if (frame.type === "chat_in") {
+      // chat_in from hub → forward to plugin via the session's socket. Hub-side
+      // wiring lands in a follow-on chat-routing plan; this branch is
+      // forward-compatible.
+      const client = sessionToClient.get(frame.session_id);
+      if (client) {
+        sockServer.replyTo(client, frame);
+      }
+    }
   },
   jwt,
   privateJwk,
@@ -154,56 +174,48 @@ const hub = startHubClient({
 
 sessions.onAdd((s: SessionSnapshot) => {
   hub.send({ type: "session_open", session: s });
-  const path = jsonlPath(s.cwd, s.session_id);
-  const watcher = startWatcher({
-    path,
-    onLine: (line, offset) => {
-      // Cancel any pending idle timer; new line = activity.
-      const existing = idleTimers.get(s.session_id);
-      if (existing) { clearTimeout(existing); idleTimers.delete(s.session_id); }
 
-      let payload: unknown;
-      try { payload = JSON.parse(line); } catch { payload = { raw: line }; }
-      hub.send({
-        type: "event",
-        session_id: s.session_id,
-        jsonl_offset: offset,
-        ts: Date.now(),
-        payload,
-      });
-      // Detect task completion: assistant message with end_turn stop_reason.
-      if (
-        payload && typeof payload === "object" &&
-        (payload as { type?: string }).type === "assistant"
-      ) {
-        const message = (payload as { message?: { stop_reason?: string } }).message;
-        if (message && message.stop_reason === "end_turn") {
-          hub.send({
-            type: "task_completed",
-            session_id: s.session_id,
-            ts: Date.now(),
-          });
-          // Schedule idle event.
+  // Asynchronously bind the JSONL: discover the real claude_session_id
+  // by watching the cwd's projects dir for a new .jsonl file.
+  const projectsDirForCwd = dirname(jsonlPath(s.cwd, "_placeholder"));
+  void bindJsonl({ dir: projectsDirForCwd, registerTimeMs: Date.now(), timeoutMs: 30_000 }).then((claudeId) => {
+    if (!claudeId) {
+      process.stderr.write(`daemon: jsonl bind timed out for session ${s.session_id} (cwd=${s.cwd}); history will be unavailable\n`);
+      return;
+    }
+    sessions.update(s.session_id, { claude_session_id: claudeId });
+
+    const path = jsonlPath(s.cwd, claudeId);
+    const watcher = startWatcher({
+      path,
+      onLine: (line, jsonl_offset) => {
+        const existing = idleTimers.get(s.session_id);
+        if (existing) { clearTimeout(existing); idleTimers.delete(s.session_id); }
+
+        let payload: unknown;
+        try { payload = JSON.parse(line); } catch { payload = { raw: line }; }
+        hub.send({
+          type: "event",
+          session_id: s.session_id,
+          jsonl_offset,
+          ts: Date.now(),
+          payload,
+        });
+
+        const p = payload as { type?: string; message?: { stop_reason?: string } };
+        if (p.type === "assistant" && p.message?.stop_reason === "end_turn") {
+          hub.send({ type: "task_completed", session_id: s.session_id, ts: Date.now() });
           const t = setTimeout(() => {
             idleTimers.delete(s.session_id);
-            hub.send({
-              type: "idle",
-              session_id: s.session_id,
-              ts: Date.now(),
-            });
+            hub.send({ type: "idle", session_id: s.session_id, ts: Date.now() });
           }, cfg.idle_window_ms);
-          if (typeof (t as { unref?: () => void }).unref === "function") {
-            (t as { unref: () => void }).unref();
-          }
           idleTimers.set(s.session_id, t);
         }
-      }
-    },
-    onError: (e) => {
-      process.stderr.write(`daemon: watcher error for ${s.session_id}: ${e.message}\n`);
-    },
+      },
+      onError: (e: Error) => process.stderr.write(`daemon: watcher error for ${s.session_id}: ${e.message}\n`),
+    });
+    watchers.set(s.session_id, watcher);
   });
-  watchers.set(s.session_id, watcher);
 });
 
 sessions.onRemove((session_id: string) => {
@@ -246,6 +258,8 @@ const sockServer = startSocketServer({
         args_summary: frame.args_summary,
         expires_at: frame.expires_at,
       });
+    } else if (frame.type === "chat_out") {
+      process.stderr.write(`daemon: chat_out from ${frame.session_id}: ${frame.content.slice(0, 80)}\n`);
     }
   },
   onClose: (client) => {
