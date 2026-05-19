@@ -189,9 +189,6 @@ sessions.onAdd((s: SessionSnapshot) => {
     const watcher = startWatcher({
       path,
       onLine: (line, jsonl_offset) => {
-        const existing = idleTimers.get(s.session_id);
-        if (existing) { clearTimeout(existing); idleTimers.delete(s.session_id); }
-
         let payload: unknown;
         try { payload = JSON.parse(line); } catch { payload = { raw: line }; }
         hub.send({
@@ -202,15 +199,34 @@ sessions.onAdd((s: SessionSnapshot) => {
           payload,
         });
 
+        // Idle-timer state machine:
+        //   - `user` line               → new turn started, cancel any pending idle.
+        //   - `assistant` w/o end_turn  → mid-turn streaming, cancel any pending idle.
+        //   - `assistant` w/ end_turn   → fire task_completed + (re)arm idle timer.
+        //   - everything else (system, summary, ai-title, last-prompt,
+        //     permission-mode, …)      → leave the timer alone. Real Claude
+        //     writes these as trailing metadata after end_turn; clearing the
+        //     timer on them prevents idle from ever firing.
         const p = payload as { type?: string; message?: { stop_reason?: string } };
-        if (p.type === "assistant" && p.message?.stop_reason === "end_turn") {
-          hub.send({ type: "task_completed", session_id: s.session_id, ts: Date.now() });
-          const t = setTimeout(() => {
-            idleTimers.delete(s.session_id);
-            hub.send({ type: "idle", session_id: s.session_id, ts: Date.now() });
-          }, cfg.idle_window_ms);
-          t.unref();
-          idleTimers.set(s.session_id, t);
+        const cancelIdle = () => {
+          const existing = idleTimers.get(s.session_id);
+          if (existing) { clearTimeout(existing); idleTimers.delete(s.session_id); }
+        };
+        if (p.type === "user") {
+          cancelIdle();
+        } else if (p.type === "assistant") {
+          if (p.message?.stop_reason === "end_turn") {
+            cancelIdle();
+            hub.send({ type: "task_completed", session_id: s.session_id, ts: Date.now() });
+            const t = setTimeout(() => {
+              idleTimers.delete(s.session_id);
+              hub.send({ type: "idle", session_id: s.session_id, ts: Date.now() });
+            }, cfg.idle_window_ms);
+            t.unref();
+            idleTimers.set(s.session_id, t);
+          } else {
+            cancelIdle();
+          }
         }
       },
       onError: (e: Error) => process.stderr.write(`daemon: watcher error for ${s.session_id}: ${e.message}\n`),

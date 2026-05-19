@@ -1,13 +1,10 @@
 // Scenario 06 — task_completed + idle_window_ms quiet → idle frame surfaces.
 //
-// KNOWN ISSUE (2026-05-20): real Claude writes `system`, `last-prompt`,
-// `ai-title`, `permission-mode` JSONL entries AFTER `assistant end_turn`.
-// The daemon's idle-timer logic (packages/daemon/src/index.ts:192-214) only
-// arms the timer on end_turn and *clears it on every subsequent line*
-// without re-arming. So idle never fires when real Claude is the source.
-// This is a product-level gap that should be addressed in the daemon (e.g.
-// re-arm idle timer on each line, or only watch for terminal markers).
-// For now, this scenario is expected to fail until that fix lands.
+// Idle-timer semantics in the daemon (packages/daemon/src/index.ts):
+// real Claude writes trailing metadata (`system`, `last-prompt`, `ai-title`,
+// `permission-mode`, …) AFTER `assistant end_turn`. The daemon's idle timer
+// is armed on end_turn and is only cancelled by a NEW user/assistant turn,
+// not by trailing metadata — so idle fires reliably even under real Claude.
 
 import { test, expect, beforeAll, afterAll } from "bun:test";
 import { resolve, dirname } from "node:path";
