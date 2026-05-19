@@ -284,3 +284,104 @@ turn, no permission noise).
 - Plugin source (unchanged): `packages/plugin/src/index.ts`,
   `packages/plugin/src/permission.ts`
 - Earlier protocol research: `docs/superpowers/research/channel-permission-protocol.md`
+
+---
+
+## Update 2026-05-20 (later) — re-spike with isolated settings
+
+### Why re-spike
+
+The first spike's `[auto-mode] kickOutOfAutoIfNeeded applying: ctx.mode=bypassPermissions reason=model` log line was likely tainted by the investigator's `~/.claude/settings.json`, which contains:
+
+```json
+"permissions": { "defaultMode": "bypassPermissions", "deny": ["WebSearch"] },
+"skipDangerousModePermissionPrompt": true
+```
+
+That makes the `bypassPermissions` mode a property of *the operator's environment*, not of `-p` mode itself. The first spike's A2 verdict had to be re-validated with a clean settings stack.
+
+### Mechanism for isolating user settings
+
+Confirmed via `claude --help` (Claude Code 2.1.144):
+
+```
+--setting-sources <sources>  Comma-separated list of setting sources to load (user, project, local).
+```
+
+Source: `claude --help 2>&1 | grep setting-sources` — the flag accepts a subset of `{user, project, local}`. Passing `--setting-sources project,local` excludes `user` (i.e., `~/.claude/settings.json`).
+
+Other candidates considered and rejected:
+
+- `--settings <path>` only **adds** an additional settings file; it does not replace the user/project/local stack. Not a clean isolation mechanism on its own.
+- `--bare` is broader (skips hooks, LSP, plugin sync, attribution, auto-memory, CLAUDE.md auto-discovery) and changes auth behaviour. The help text does not say it skips user settings, and it conflicts with `--plugin-dir`'s expected behaviour. Not the right tool.
+- `CLAUDE_CONFIG_DIR` env var is not documented in `claude --help`. Untested in the re-spike.
+- A `--no-settings` flag does not exist in 2.1.144.
+
+`--setting-sources project,local` is the supported, documented mechanism.
+
+### Re-spike confirmation that isolation worked
+
+Run with `--setting-sources project,local --debug-file /tmp/spike2-debug-2.log` and **no** `~/.claude` user settings in scope:
+
+```
+[DEBUG] Broken symlink or missing file encountered for settings.json at path: /private/tmp/.claude/settings.json
+[DEBUG] Broken symlink or missing file encountered for settings.json at path: /private/tmp/.claude/settings.local.json
+[DEBUG] [auto-mode] kickOutOfAutoIfNeeded applying: ctx.mode=default ctx.prePlanMode=undefined reason=model
+[INFO]  [Stall] tool_dispatch_start tool=Bash toolUseId=... permissionDecisionMs=5
+```
+
+Compare with the first spike (user settings active): `ctx.mode=bypassPermissions`. Now: **`ctx.mode=default`**. Isolation is real and effective. The `bypassPermissions` from the first spike was indeed the user's `defaultMode: "bypassPermissions"` leaking through.
+
+Note: a `Watching for changes in setting files /Users/i060912/.claude/settings.json...` line still appears even with `--setting-sources project,local`. The user file is *watched* for changes but its values are *not loaded* — the effective `ctx.mode=default` proves that.
+
+### Re-spike results
+
+Two `claude` invocations with `--setting-sources project,local`, mock daemon at `/tmp/spike2-daemon.sock`, model `claude-haiku-4-5`:
+
+| # | Prompt | Tool used | `ctx.mode` | `permissionDecisionMs` | `permission_request` to plugin? | `permission_denials` |
+|---|--------|-----------|-----------|------------------------|----------------------------------|---------------------|
+| R1 | "Read /tmp/spike2-target.txt and tell me its first line verbatim." | Read | `default` | 5 ms | **No** | `[]` |
+| R2 | "Run the bash command: echo hello-from-clean-spike" | Bash | `default` | 5 ms | **No** | `[]` |
+
+Final tally: 2 plugin connections, **0 permission_request frames**, both runs succeeded.
+
+```
+$ grep -c CONNECT /tmp/spike2-daemon.log
+2
+$ grep -c '"permission_request"' /tmp/spike2-daemon.log
+0
+```
+
+### Updated classification: **A2 confirmed**
+
+Even with `ctx.mode=default` (the standard prompting mode, not bypass), `claude -p` dispatches Bash and Read in 5 ms with no plugin notification. The original A2 verdict stands; the user's tainted settings were a confounder for the *underlying mode label* but not for the *outcome* — the plugin never receives a `permission_request` notification in `-p` mode regardless of whether the effective mode is `bypassPermissions` or `default`.
+
+What this almost certainly means: the channel-permission relay is wired into the *interactive* permission UI in CC 2.1.144. `-p` mode skips the interactive permission UI by design (per `claude --help`'s `-p` blurb: "workspace trust dialog is skipped when Claude is run in non-interactive mode"). It appears the channel relay is part of the same skipped path. The plugin's `notifications/claude/channel/permission_request` handler will only fire from a TTY-attached `claude` process.
+
+### Updated recommendation for `helpers/claude.ts`
+
+For deterministic, settings-independent e2e behaviour, the helper should invoke:
+
+```bash
+claude \
+  --plugin-dir <plugin-path> \
+  --model claude-haiku-4-5 \
+  --setting-sources project,local \
+  --max-budget-usd 0.10 \
+  -p "<prompt>" \
+  --output-format json
+```
+
+Setting `--setting-sources project,local` makes the test independent of whatever the developer has in their `~/.claude/settings.json` (e.g., `bypassPermissions`, custom `deny` rules, custom model overrides, custom env injection). This is essential for CI and for running the suite on different developer machines.
+
+### Path A still unviable for `-p` — Plan B for permission scenarios
+
+The earlier conclusion stands: **scenarios 02 / 03 / 10 (permission allow / deny / expire) cannot use `claude -p` to drive a real channel-permission round-trip.** Use `CC_REMOTE_FAKE_PERMISSION` on fake-claude (Path B) for those scenarios.
+
+For chat / JSONL / kill / start_session / idle / task_completed scenarios (13–18), `claude -p` with `--setting-sources project,local` works fine and gives a real, settings-independent CC integration.
+
+If real-CC permission coverage is later required, the only option is interactive mode driven via PTY (`script -q`, `node-pty`, or similar). Untested but consistent with the "channel relay needs the interactive permission UI" hypothesis.
+
+### Cost of the re-spike
+
+2 Haiku invocations: ~$0.045 + ~$0.0094 ≈ $0.054. Cumulative spike spend ~$0.34.
