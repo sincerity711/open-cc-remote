@@ -40,7 +40,10 @@ export async function upCompose(): Promise<void> {
 }
 
 export async function downCompose(): Promise<void> {
-  const r = runCompose(["down", "-v"], { timeoutMs: 60_000 });
+  // Use a tight timeout (10s) and SIGKILL behaviour: tests that crash mid-run
+  // sometimes leave containers in a state that takes minutes to drain
+  // gracefully. Tests don't need a graceful drain.
+  const r = runCompose(["down", "-v", "-t", "5"], { timeoutMs: 30_000 });
   if (r.code !== 0) {
     process.stderr.write(`docker compose down -v failed: ${r.stderr}\n`);
   }
