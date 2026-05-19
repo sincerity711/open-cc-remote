@@ -1,0 +1,6 @@
+{
+  "name": "cc-remote",
+  "description": "open-cc-remote channel plugin: relays Claude Code permission prompts and chat to a remote PWA via the cc-remote daemon.",
+  "version": "0.1.0",
+  "keywords": ["channel", "remote", "mcp", "permission"]
+}
