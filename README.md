@@ -104,9 +104,20 @@ VITE_HUB_URL=ws://localhost:7745 bun run --filter=@cc-remote/pwa dev
 ```bash
 bun test               # all unit + e2e
 bun test packages/    # unit only
-bun test e2e/         # end-to-end only
-bun run typecheck     # 5 packages
+bun test e2e/         # end-to-end (in-process, fast — merge gate)
+bun test e2e-real/    # end-to-end (real components: docker hub, real claude under tmux)
+bun run typecheck     # all packages
 ```
+
+## Real-component end-to-end (`e2e-real/`)
+
+A second e2e suite that exercises the v1 acceptance checklist against real
+components: real hub binary in docker compose, real `cc-remote daemon` on host,
+real `claude` driven through tmux interactive mode, and a scripted
+PWA-equivalent client. Complements (does not replace) the in-process `e2e/`
+suite. See `e2e-real/README.md` and the
+[design spec](docs/superpowers/specs/2026-05-19-real-e2e-design.md). Cost:
+~$0.20 of Anthropic API per full suite at default Haiku.
 
 ## Loading the plugin into real Claude Code 2.1.143+
 

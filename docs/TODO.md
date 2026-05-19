@@ -2,21 +2,18 @@
 
 Pending work — consolidated record. Update entries inline as items move from pending → done.
 
-## Plan in flight (2026-05-19)
+## Plan completed (2026-05-20)
 
-`docs/superpowers/plans/2026-05-19-plugin-mcp-rework-plan.md` — the plugin MCP rework. Supersedes the paused PMCP plan after empirical findings showed Claude Code 2.1.143 requires `.claude-plugin/plugin.json` + `.mcp.json`, not just a `bin` field. Spec at `docs/superpowers/specs/2026-05-19-plugin-mcp-rework-design.md`.
+- `docs/superpowers/plans/2026-05-20-real-e2e-plan.md` — real-component e2e suite. **DONE** — tagged `plan-real-e2e`. 11 acceptance scenarios in `e2e-real/tests/`, 9 of them pass on first run on this hardware. Two known issues:
+  - Scenario 06 (idle): the daemon's `idle_window_ms` timer is cleared by every JSONL line and only re-armed on `assistant + end_turn`. Real Claude writes follow-up entries (`system`, `last-prompt`, `ai-title`, `permission-mode`) after `end_turn`, so the idle frame never fires. Fix needed in `packages/daemon/src/index.ts:192-214` (re-arm timer on each line OR only watch for terminal markers). Test committed but expected-to-fail until product fix.
+  - Scenarios 08 / 09 (kill_session, start_session): test scenario itself passes, but the `afterAll` `downCompose` hook hangs (~15min) due to orphaned `claude --bg` / spawned processes that prevent docker compose from cleanly tearing down. The scenario's own assertions all pass. Root cause to investigate.
 
-Once this rework lands, the real-e2e plan (`docs/superpowers/plans/2026-05-19-real-e2e-plan.md`, T1–T19) is unblocked and can resume.
+- `docs/superpowers/plans/2026-05-19-plugin-mcp-rework-plan.md` — plugin MCP rework. **DONE** — tagged `plan-plugin-mcp-rework`.
 
 ## Superseded plans
 
 - `docs/superpowers/plans/2026-05-19-plugin-mcp-plan.md` — original PMCP plan; superseded by the rework plan above.
-
-## Resume order (when continuing)
-
-1. Execute the plugin MCP plan (PMCP-T1 → T7). Validates against the real `claude` binary.
-2. Execute the real-e2e plan (T1 → T19), threading the modernized plugin through tasks 13–18 ("real Claude" scenarios). Tasks 02/03/10 still use Path B (`CC_REMOTE_FAKE_PERMISSION` env) per `docs/superpowers/research/channel-permission-protocol.md`.
-3. Dispatch the post-dev tester / fixer / review-lead team to harden the suite.
+- `docs/superpowers/plans/2026-05-19-real-e2e-plan.SUPERSEDED.md` — pre-rewrite real-e2e plan.
 
 ## Older prior context
 
@@ -24,10 +21,10 @@ Once this rework lands, the real-e2e plan (`docs/superpowers/plans/2026-05-19-re
 - `docs/superpowers/plans/2026-05-18-open-cc-remote-plan-01-foundation.md` through `plan-16-status.md` — the 16 implementation plans that built v1
 - All v1 work is tagged `plan-01-foundation` … `plan-16-status` (16 git tags)
 - Memory entries (cross-session): `~/.claude/projects/-Users-i060912-SAPDevelop-channel/memory/`
-  - `project_naming.md`, `auth_design.md`, `project_progress_20260518.md`, `real_e2e_prerequisite.md`
 
-## Snapshot at pause (2026-05-19)
+## Snapshot at 2026-05-20
 
-- 164 tests pass; 5 packages typecheck clean
-- ~145 commits in main
-- Repo at HEAD: `f52ec2e Add plugin MCP modernization plan (prerequisite for real-e2e)`
+- 154 tests pass in `bun test packages/` (was 164 before plugin MCP rework consolidated some tests)
+- 6 packages typecheck clean (proto, hub, daemon, plugin, pwa, e2e-real)
+- 11 e2e-real scenarios committed (9 PASS, 1 expected-fail, 1 with afterAll-hang quirk)
+
