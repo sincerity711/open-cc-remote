@@ -267,13 +267,15 @@ CC                          plugin (MCP stdio)            PWA client
 
 ---
 
-## Execution decision (2026-05-19)
+## Execution decision (2026-05-19) — SUPERSEDED
 
-After T0 research and confirmation that `--channels` is removed in Claude Code 2.1.143, we adopt the **hybrid execution pattern** for tasks 13–18 of the real-e2e plan:
+The "hybrid execution pattern" below was the original 2026-05-19 plan, written before the plugin MCP rework landed. **It is now obsolete.**
+
+After three rounds of T0 spike on 2026-05-20 (see `2026-05-20-p-mode-permission-spike.md`), the real-e2e suite goes Path A end-to-end: `claude --mcp-config <file> --dangerously-load-development-channels server:cc-remote` driven through tmux. All permission scenarios verify the real channel-permission protocol (real `notifications/claude/channel/permission_request` + `notifications/claude/channel/permission` MCP notifications). See `docs/superpowers/specs/2026-05-19-real-e2e-design.md` (rewritten 2026-05-20).
+
+The original hybrid pattern, kept here for historical reference:
 
 - Real claude is launched via `claude -p "<prompt>"` (no plugin flags). It writes its real JSONL to `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`.
 - A fake-claude harness, started alongside, registers a synthetic `session_id` with the daemon AND we override `CLAUDE_PROJECTS_DIR` so daemon and real claude agree on the JSONL path. Daemon's watcher sees real Claude's writes under that session_id.
 - Permission scenarios (02/03/10) use `CC_REMOTE_FAKE_PERMISSION` env on fake-claude (Path B). Plugin↔Claude Code permission protocol stays unverified in this suite — to be addressed in a future "plugin MCP modernization" plan.
 - Scenario 09 (start_session) uses `sh -c "echo started"` as the spawn_command, not real claude. Verifies the spawn machinery without depending on plugin loading.
-
-This trades plugin-load realism for everything else (real Claude API, real JSONL, real docker hub, real OIDC flow, real DPoP auth, real watcher, real router, real PWA flow). Documented as the explicit boundary in the spec §10 ("out of scope: real Claude Code plugin loading via current `--plugin-dir`/`marketplace install` mechanism").
