@@ -58,11 +58,15 @@ async function main() {
     }, 100);
   }
 
-  const goodbye = (code: number) => {
-    void client.send({ type: "bye", session_id: session.session_id }).finally(() => {
-      client.close();
-      process.exit(code);
-    });
+  const goodbye = async (code: number) => {
+    try {
+      await Promise.race([
+        client.send({ type: "bye", session_id: session.session_id }),
+        new Promise((r) => setTimeout(r, 500)),
+      ]);
+    } catch {}
+    client.close();
+    process.exit(code);
   };
   process.on("SIGINT", () => goodbye(130));
   process.on("SIGTERM", () => goodbye(143));
