@@ -48,10 +48,16 @@ async function dismissDialog(
 ): Promise<boolean> {
   try {
     await tmux.waitForPattern(name, re, timeoutMs, `dialog ${re}`);
-    // Press Enter to confirm the default highlighted choice.
+    if (process.env.CCR_E2E_DEBUG === "1") process.stderr.write(`[claude-tmux] dialog matched (${re}); sending Enter\n`);
+    // Settle delay: TUI may still be rendering when our regex first matches.
+    // Pressing Enter during a render frame can be dropped silently. 500ms is
+    // empirically enough on this machine without bloating boot time.
+    await new Promise((r) => setTimeout(r, 500));
     tmux.sendEnter(name);
+    if (process.env.CCR_E2E_DEBUG === "1") process.stderr.write(`[claude-tmux] Enter sent\n`);
     return true;
   } catch (e) {
+    if (process.env.CCR_E2E_DEBUG === "1") process.stderr.write(`[claude-tmux] dialog timeout (soft=${soft}): ${(e as Error).message.slice(0, 200)}\n`);
     if (soft) return false;
     throw e;
   }
@@ -101,8 +107,10 @@ export async function startClaudeTmux(opts: StartClaudeTmuxOpts): Promise<Claude
 
   // 4. Dev-channels confirmation. Observed text in CC 2.1.144:
   //    "WARNING: Loading development channels … 1. I am using this for local
-  //    development / 2. Exit". Default-1 highlighted; Enter accepts.
-  await dismissDialog(opts.sessionName, /Loading development channels|loading\s+development\s+channels/i, 12_000, false);
+  //    development / 2. Exit". Match on "Enter to confirm" which is the
+  //    button-row instruction and only renders once the dialog is fully
+  //    interactive.
+  await dismissDialog(opts.sessionName, /Enter to confirm/i, 20_000, true);
 
   // 5. Workspace-trust dialog (per-cwd, may already be remembered).
   //    Observed text: "Quick safety check: Is this a project you created or
@@ -125,8 +133,14 @@ export async function startClaudeTmux(opts: StartClaudeTmuxOpts): Promise<Claude
   );
 
   // 7. Send the prompt (unless the caller wants to drive it themselves).
+  //    For long/complex prompts we send the text first, settle for a beat, then
+  //    send Enter separately. This avoids a race observed in CC 2.1.144 where
+  //    a single send-keys 'text' + 'Enter' lands in the input box but the
+  //    Enter is not registered as a submit.
   if (opts.sendPrompt !== false) {
-    tmux.sendKeys(opts.sessionName, opts.prompt, true);
+    tmux.sendKeys(opts.sessionName, opts.prompt, false);
+    await new Promise((r) => setTimeout(r, 300));
+    tmux.sendEnter(opts.sessionName);
   }
 
   return {
