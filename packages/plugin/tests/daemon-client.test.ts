@@ -20,8 +20,9 @@ test("connect, register, bye, close round-trip", async () => {
     const client = await connectDaemon(sockPath);
     const ack1 = await client.send({
       type: "register",
-      session: { session_id: "s1", tmux_session: null, tmux_pane: null,
-                 cwd: "/x", model: "m", pid: 1, started_at: 1 }
+      session: { session_id: "s1", claude_session_id: null, tmux_session: null, tmux_pane: null,
+                 cwd: "/x", model: "m", pid: 1, started_at: 1,
+                 claude_client_version: "test", plugin_version: "0.0.0" }
     });
     expect(ack1).toEqual({ type: "ack", ref: "register" });
 
