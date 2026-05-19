@@ -1,14 +1,20 @@
 // Subset of frames implemented in Plan 1.
 // Auth, permission, history, file-transfer frames come in later plans.
 
+// Plugin-issued routing key (UUID generated at plugin startup) plus
+// derived metadata. claude_session_id is null until the daemon's JSONL
+// bind algorithm resolves it (see packages/daemon/src/jsonl-bind.ts).
 export interface SessionSnapshot {
-  session_id: string;
+  session_id: string;                   // plugin-issued UUID, stable for life of session
+  claude_session_id: string | null;     // resolved from JSONL filename post-bind
   tmux_session: string | null;
   tmux_pane: string | null;
   cwd: string;
-  model: string;
+  model: string | null;                 // null until enriched from JSONL header (future)
   pid: number;
-  started_at: number;
+  started_at: number;                   // unix seconds
+  claude_client_version: string;        // from MCP initialize.clientInfo.version
+  plugin_version: string;               // from packages/plugin/package.json
 }
 
 // ─── plugin ↔ daemon (Unix socket) ────────────────────────────────────
@@ -16,11 +22,13 @@ export interface SessionSnapshot {
 export type PluginToDaemon =
   | { type: "register"; session: SessionSnapshot }
   | { type: "bye"; session_id: string }
-  | PluginPermissionRequest;
+  | PluginPermissionRequest
+  | PluginChatOut;
 
 export type DaemonToPlugin =
   | { type: "ack"; ref: "register" | "bye" }
-  | PluginPermissionReply;
+  | PluginPermissionReply
+  | DaemonChatIn;
 
 // ─── daemon ↔ hub (WSS) ───────────────────────────────────────────────
 
@@ -56,7 +64,8 @@ export type HubToDaemon =
   | HubPermissionReply
   | HubToDaemonRequestHistory
   | HubToDaemonKillSession
-  | HubToDaemonStartSession;
+  | HubToDaemonStartSession
+  | DaemonChatIn;
 
 // ─── hub ↔ PWA (WSS) ──────────────────────────────────────────────────
 
@@ -168,6 +177,26 @@ export interface PluginPermissionReply {
   type: "permission_reply";
   request_id: string;
   decision: "allow" | "deny";
+}
+
+// ─── chat (PWA ↔ Claude via plugin) ───────────────────────────────────
+
+export interface PluginChatOut {
+  type: "chat_out";
+  session_id: string;          // plugin_session_id
+  content: string;
+  ts: number;                  // unix seconds
+  reply_to: string | null;
+}
+
+export interface DaemonChatIn {
+  type: "chat_in";
+  session_id: string;          // plugin_session_id
+  message_id: string;          // ULID-style for reply_to threading
+  user: string;                // PWA bearer subject (email)
+  user_id: string;             // PWA bearer sub claim
+  content: string;
+  ts: number;
 }
 
 export interface DaemonPermissionRequest {
