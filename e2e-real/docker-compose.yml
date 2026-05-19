@@ -6,6 +6,8 @@ services:
     environment:
       FAKE_IAS_PORT: "7770"
       FAKE_IAS_SUB: "i060912@sap.com"
+    ports:
+      - "7770:7770"
     healthcheck:
       test: ["CMD", "bun", "-e", "const r = await fetch('http://localhost:7770/.well-known/openid-configuration'); if (!r.ok) process.exit(1)"]
       interval: 2s
