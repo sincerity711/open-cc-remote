@@ -130,7 +130,7 @@ export function App() {
                         >
                           <code>{s.session_id}</code>{" — "}
                           {s.tmux_session ? <span>tmux:{s.tmux_session} · </span> : null}
-                          cwd: <code>{s.cwd}</code> · model: <code>{s.model}</code>
+                          cwd: <code>{s.cwd}</code> · model: <code>{s.model ?? "-"}</code>
                           {evtCount > 0 && <span style={{ marginLeft: 8, color: "#0a0" }}>{evtCount}↓</span>}
                           {(completedCounts[eventKey(d.daemon_id, s.session_id)] ?? 0) > 0 && (
                             <span style={{ marginLeft: 8, color: "#080" }} title="Tasks completed">
