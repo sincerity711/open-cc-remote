@@ -1,0 +1,19 @@
+{
+  "name": "@cc-remote/e2e-real",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test tests/",
+    "compose:up": "docker compose -f docker-compose.yml up -d --wait",
+    "compose:down": "docker compose -f docker-compose.yml down -v",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cc-remote/proto": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "bun-types": "latest"
+  }
+}

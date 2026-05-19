@@ -9,6 +9,17 @@
         "typescript": "^5.4.0",
       },
     },
+    "e2e-real": {
+      "name": "@cc-remote/e2e-real",
+      "version": "0.0.1",
+      "dependencies": {
+        "@cc-remote/proto": "workspace:*",
+      },
+      "devDependencies": {
+        "bun-types": "latest",
+        "typescript": "^5.4.0",
+      },
+    },
     "packages/daemon": {
       "name": "@cc-remote/daemon",
       "version": "0.0.1",
@@ -113,6 +124,8 @@
     "@babel/types": ["@babel/types@7.29.0", "", { "dependencies": { "@babel/helper-string-parser": "^7.27.1", "@babel/helper-validator-identifier": "^7.28.5" } }, "sha512-LwdZHpScM4Qz8Xw2iKSzS+cfglZzJGvofQICy7W7v4caru4EaAmyUuO6BGrbyQ2mYV11W0U8j5mBhd14dd3B0A=="],
 
     "@cc-remote/daemon": ["@cc-remote/daemon@workspace:packages/daemon"],
+
+    "@cc-remote/e2e-real": ["@cc-remote/e2e-real@workspace:e2e-real"],
 
     "@cc-remote/hub": ["@cc-remote/hub@workspace:packages/hub"],
 

@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "workspaces": ["packages/*"],
+  "workspaces": ["packages/*", "e2e-real"],
   "scripts": {
     "typecheck": "bun run --filter='*' typecheck",
     "test": "bun test",
