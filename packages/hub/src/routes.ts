@@ -16,12 +16,15 @@ export interface MakeServerOpts {
   disable_auth?: boolean;
   pwa_url?: string;
   push?: PushHelper;
+  offline_push_delay_ms?: number;
 }
 
 export function makeServer(opts: MakeServerOpts = {}) {
   const daemonReg = new DaemonRegistry<ServerWebSocket<WsData>>();
   const pwaReg = new PwaRegistry<ServerWebSocket<WsData>>();
-  const router = new Router(daemonReg, pwaReg, opts.db, opts.push);
+  const router = new Router(daemonReg, pwaReg, opts.db, opts.push, {
+    offline_push_delay_ms: opts.offline_push_delay_ms,
+  });
 
   const fetch = async (req: Request, server: ReturnType<typeof Bun.serve>) => {
     const url = new URL(req.url);
