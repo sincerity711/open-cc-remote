@@ -8,11 +8,9 @@ Project-local guidance for Claude Code working in this repo.
 
 ## Status
 
-- 164 tests pass across 5 packages (`proto`, `plugin`, `daemon`, `hub`, `pwa`); all typecheck clean
+- Plugin MCP rework in flight: `docs/superpowers/plans/2026-05-19-plugin-mcp-rework-plan.md` (spec: `docs/superpowers/specs/2026-05-19-plugin-mcp-rework-design.md`)
 - 16 milestones tagged: `plan-01-foundation` through `plan-16-status`
-- Two follow-on plans exist but are **paused**:
-  - `docs/superpowers/plans/2026-05-19-real-e2e-plan.md` — real-component e2e suite
-  - `docs/superpowers/plans/2026-05-19-plugin-mcp-plan.md` — plugin MCP modernization (prerequisite for real-e2e)
+- Real-e2e plan (`docs/superpowers/plans/2026-05-19-real-e2e-plan.md`) is paused, unblocked once the rework lands
 
 See `docs/TODO.md` for the unfinished work and the order to resume.
 

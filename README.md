@@ -108,6 +108,17 @@ bun test e2e/         # end-to-end only
 bun run typecheck     # 5 packages
 ```
 
+## Loading the plugin into real Claude Code 2.1.143+
+
+```bash
+# Pre-validate the plugin manifest.
+claude plugin validate packages/plugin
+
+# Run claude with the plugin loaded. Requires a running daemon
+# (cc-remote daemon at ~/.cc-remote/daemon.sock or $CC_REMOTE_SOCKET).
+claude --plugin-dir packages/plugin -p "your prompt"
+```
+
 ## What Plans 1–15 cover
 
 - Plan 1: vertical slice — plugin/daemon/hub/PWA wired up, sessions visible in PWA

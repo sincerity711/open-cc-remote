@@ -2,35 +2,15 @@
 
 Pending work — consolidated record. Update entries inline as items move from pending → done.
 
-## Active goal (paused 2026-05-19)
+## Plan in flight (2026-05-19)
 
-The original directive was: write the real-e2e plan, develop with an agent team, then deploy a post-dev team (tester / fixer / review-lead). Status:
+`docs/superpowers/plans/2026-05-19-plugin-mcp-rework-plan.md` — the plugin MCP rework. Supersedes the paused PMCP plan after empirical findings showed Claude Code 2.1.143 requires `.claude-plugin/plugin.json` + `.mcp.json`, not just a `bin` field. Spec at `docs/superpowers/specs/2026-05-19-plugin-mcp-rework-design.md`.
 
-- ✅ Plan written and committed: `docs/superpowers/plans/2026-05-19-real-e2e-plan.md` (commit `c34b503`)
-- ✅ Task 0 of that plan complete: protocol research at `docs/superpowers/research/channel-permission-protocol.md` (commits `6ad49d9`, `bfda5b7`)
-- ⛔ Tasks 1–19 of real-e2e: **blocked**
-- ⛔ Post-dev tester / fixer / review-lead team: **not dispatched**
+Once this rework lands, the real-e2e plan (`docs/superpowers/plans/2026-05-19-real-e2e-plan.md`, T1–T19) is unblocked and can resume.
 
-### Why blocked
+## Superseded plans
 
-Research confirmed that:
-1. Claude Code 2.1.143 removed the `--channels` flag (replaced by `--plugin-dir` and `claude plugin install`)
-2. Our `packages/plugin/` is not a real MCP stdio server — it can't be loaded by current Claude Code as a plugin
-3. The fake-claude harness in `tools/fake-claude/` masked this gap end-to-end across all 164 in-process tests
-
-Real e2e needs a working plugin first.
-
-## Prerequisite plan (also paused 2026-05-19)
-
-`docs/superpowers/plans/2026-05-19-plugin-mcp-plan.md` (commit `f52ec2e`) — 7 tasks:
-
-- ⛔ PMCP-T1: add `@modelcontextprotocol/sdk` dep + verify `bin`
-- ⛔ PMCP-T2: dual-transport plugin scaffold (MCP stdio + Unix socket)
-- ⛔ PMCP-T3: handle inbound `notifications/claude/channel/permission_request`
-- ⛔ PMCP-T4: emit outbound `notifications/claude/channel/permission` on daemon reply
-- ⛔ PMCP-T5: smoke test against real `claude --plugin-dir` invocation
-- ⛔ PMCP-T6: verify 164 existing tests still pass with dual-mode
-- ⛔ PMCP-T7: README + tag `plan-plugin-mcp`
+- `docs/superpowers/plans/2026-05-19-plugin-mcp-plan.md` — original PMCP plan; superseded by the rework plan above.
 
 ## Resume order (when continuing)
 

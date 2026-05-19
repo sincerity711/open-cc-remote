@@ -1,3 +1,5 @@
+> **DEPRECATED 2026-05-19** — Superseded by `docs/superpowers/plans/2026-05-19-plugin-mcp-rework-plan.md`. Do not implement this plan; it was based on an incomplete reading of Claude Code 2.1.143's plugin contract.
+
 # Plugin MCP modernization — Plan
 
 > **Prerequisite work** before resuming `2026-05-19-real-e2e-plan.md`. Source: `docs/superpowers/research/channel-permission-protocol.md` (T0 findings, commit 6ad49d9 + bfda5b7).
