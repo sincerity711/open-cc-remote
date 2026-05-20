@@ -16,6 +16,7 @@ import { readHistory } from "./jsonl-history.ts";
 import { startWatcher, type WatcherHandle } from "./jsonl-watcher.ts";
 import { openDb } from "./db.ts";
 import { recordRequest, resolveRequest } from "./repos/permissions.ts";
+import { handleHubChatSend, handlePluginChatOut } from "./chat.ts";
 
 const cfg = loadConfig();
 const epoch = Math.floor(Date.now() / 1000);
@@ -158,14 +159,13 @@ const hub = startHubClient({
         process.stderr.write(`daemon: start_session spawn threw: ${(e as Error).message}\n`);
       }
     }
-    else if (frame.type === "chat_in") {
-      // chat_in from hub → forward to plugin via the session's socket. Hub-side
-      // wiring lands in a follow-on chat-routing plan; this branch is
-      // forward-compatible.
-      const client = sessionToClient.get(frame.session_id);
-      if (client) {
-        sockServer.replyTo(client, frame);
-      }
+    else if (frame.type === "chat_send") {
+      // chat_send from hub → translate to chat_in and forward to the plugin's
+      // Unix socket for the target session. Unknown session logs + drops.
+      handleHubChatSend(frame, {
+        sessionToClient,
+        replyTo: (client, out) => sockServer.replyTo(client, out),
+      });
     }
   },
   jwt,
@@ -276,7 +276,8 @@ const sockServer = startSocketServer({
         expires_at: frame.expires_at,
       });
     } else if (frame.type === "chat_out") {
-      process.stderr.write(`daemon: chat_out from ${frame.session_id}: ${frame.content.slice(0, 80)}\n`);
+      // Forward plugin's chat_out to the hub; hub will mint message_id + broadcast.
+      handlePluginChatOut(frame, { send: (f) => hub.send(f) });
       sockServer.replyTo(client, { type: "ack", ref: "chat_out" });
     }
   },
