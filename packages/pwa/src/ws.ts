@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import type {
   HubToPwa, PwaToHub, DaemonView, EventFrameForPwa, PwaPermissionRequest,
+  PwaChatBroadcast,
 } from "@cc-remote/proto";
 
 const PER_SESSION_BUFFER = 2000;
+const PER_SESSION_CHAT_BUFFER = 500;
 
 export interface HubState {
   connected: boolean;
@@ -12,6 +14,8 @@ export interface HubState {
   pendingPermissions: Record<string, PwaPermissionRequest>;
   completedCounts: Record<string, number>;
   idleSessions: Record<string, true>;
+  chatMessages: Record<string, PwaChatBroadcast[]>;
+  chatErrors: Record<string, string>;  // keyed by eventKey, value = reason of last error
 }
 
 export function eventKey(daemon_id: string, session_id: string): string {
@@ -23,12 +27,14 @@ export interface UseHubResult extends HubState {
   requestHistory: (daemon_id: string, session_id: string, before_offset: number, limit: number) => void;
   killSession: (daemon_id: string, session_id: string) => void;
   startSession: (daemon_id: string, cwd: string, name?: string) => void;
+  sendChat: (daemon_id: string, session_id: string, content: string, reply_to?: string) => void;
 }
 
 export function useHub(hubUrl: string, bearer: string | null): UseHubResult {
   const [state, setState] = useState<HubState>({
     connected: false, daemons: [], events: {}, pendingPermissions: {},
     completedCounts: {}, idleSessions: {},
+    chatMessages: {}, chatErrors: {},
   });
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -135,6 +141,32 @@ export function useHub(hubUrl: string, bearer: string | null): UseHubResult {
               idleSessions: { ...prev.idleSessions, [k]: true },
             };
           }
+          case "chat": {
+            const k = eventKey(frame.daemon_id, frame.session_id);
+            const existing = prev.chatMessages[k] ?? [];
+            // Dedup by message_id (echo + broadcast may double-deliver in
+            // pathological cases).
+            if (existing.some((m) => m.message_id === frame.message_id)) return prev;
+            const next = existing.concat([frame]);
+            const trimmed = next.length > PER_SESSION_CHAT_BUFFER
+              ? next.slice(next.length - PER_SESSION_CHAT_BUFFER)
+              : next;
+            // Clear any prior chat error on successful broadcast.
+            const nextErrors = { ...prev.chatErrors };
+            delete nextErrors[k];
+            return {
+              ...prev,
+              chatMessages: { ...prev.chatMessages, [k]: trimmed },
+              chatErrors: nextErrors,
+            };
+          }
+          case "chat_error": {
+            const k = eventKey(frame.daemon_id, frame.session_id);
+            return {
+              ...prev,
+              chatErrors: { ...prev.chatErrors, [k]: frame.reason },
+            };
+          }
         }
         return prev;
       });
@@ -238,5 +270,19 @@ export function useHub(hubUrl: string, bearer: string | null): UseHubResult {
     [],
   );
 
-  return { ...state, sendPermissionReply, requestHistory, killSession, startSession };
+  const sendChat = useCallback(
+    (daemon_id: string, session_id: string, content: string, reply_to?: string) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const msg: PwaToHub = {
+        type: "chat_send",
+        daemon_id, session_id, content,
+        ...(reply_to ? { reply_to } : {}),
+      };
+      ws.send(JSON.stringify(msg));
+    },
+    [],
+  );
+
+  return { ...state, sendPermissionReply, requestHistory, killSession, startSession, sendChat };
 }

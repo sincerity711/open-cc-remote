@@ -1,23 +1,38 @@
 import { useEffect, useRef, useState } from "react";
-import type { EventFrameForPwa } from "@cc-remote/proto";
+import type { EventFrameForPwa, PwaChatBroadcast } from "@cc-remote/proto";
 
 interface SessionPaneProps {
   daemon_id: string;
   session_id: string;
   events: EventFrameForPwa[];
+  chatMessages: PwaChatBroadcast[];
+  chatError?: string;
+  sessionOnline: boolean;
   onClose: () => void;
   onLoadHistory: (before_offset: number) => void;
+  onSendChat: (content: string) => void;
 }
 
-export function SessionPane({ daemon_id, session_id, events, onClose, onLoadHistory }: SessionPaneProps) {
+export function SessionPane({
+  daemon_id, session_id, events, chatMessages, chatError, sessionOnline,
+  onClose, onLoadHistory, onSendChat,
+}: SessionPaneProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const lastLoadAt = useRef(0);
+  const [draft, setDraft] = useState("");
+  const chatLogRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!autoScroll || !scrollRef.current) return;
     scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [events, autoScroll]);
+
+  useEffect(() => {
+    if (chatLogRef.current) {
+      chatLogRef.current.scrollTop = chatLogRef.current.scrollHeight;
+    }
+  }, [chatMessages]);
 
   const onScroll = () => {
     const el = scrollRef.current;
@@ -31,6 +46,14 @@ export function SessionPane({ daemon_id, session_id, events, onClose, onLoadHist
       lastLoadAt.current = now;
       onLoadHistory(oldest.jsonl_offset);
     }
+  };
+
+  const handleSend = (e: React.FormEvent) => {
+    e.preventDefault();
+    const t = draft.trim();
+    if (!t) return;
+    onSendChat(t);
+    setDraft("");
   };
 
   return (
@@ -71,6 +94,73 @@ export function SessionPane({ daemon_id, session_id, events, onClose, onLoadHist
             ))}
           </>
         )}
+      </div>
+
+      {/* Chat composer + log */}
+      <div style={{ borderTop: "1px solid #eee", display: "flex", flexDirection: "column", maxHeight: "40%" }}>
+        <div
+          ref={chatLogRef}
+          data-testid="chat-log"
+          style={{ overflowY: "auto", padding: 8, fontSize: 12, background: "#fafbfc" }}
+        >
+          {chatMessages.length === 0 ? (
+            <p style={{ color: "#aaa", margin: 0, padding: 4, fontStyle: "italic" }}>
+              No chat messages yet.
+            </p>
+          ) : (
+            chatMessages.map((m) => (
+              <div
+                key={m.message_id}
+                className={`chat-msg from-${m.from}`}
+                style={{
+                  margin: "4px 0",
+                  padding: "4px 8px",
+                  background: m.from === "pwa" ? "#e8f0ff" : "#f0fff0",
+                  borderRadius: 4,
+                  display: "flex",
+                  gap: 8,
+                  alignItems: "baseline",
+                }}
+              >
+                <strong style={{ color: m.from === "pwa" ? "#06c" : "#080", fontSize: 11 }}>
+                  {m.from === "pwa" ? (m.user ?? "you") : "claude"}
+                </strong>
+                <span style={{ flex: 1, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                  {m.content}
+                </span>
+                <small style={{ color: "#888", fontSize: 10 }}>
+                  {new Date(m.ts * 1000).toLocaleTimeString()}
+                </small>
+              </div>
+            ))
+          )}
+          {chatError && (
+            <div style={{ margin: "4px 0", padding: "4px 8px", background: "#fee", color: "#a00", borderRadius: 4, fontSize: 11 }}>
+              chat error: {chatError}
+            </div>
+          )}
+        </div>
+        <form
+          onSubmit={handleSend}
+          style={{ display: "flex", gap: 6, padding: 8, borderTop: "1px solid #eee", background: "#fff" }}
+        >
+          <input
+            type="text"
+            placeholder={sessionOnline ? "Send a message to Claude…" : "session offline"}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            disabled={!sessionOnline}
+            data-testid="chat-input"
+            style={{ flex: 1, padding: "6px 10px", fontSize: 13, border: "1px solid #ccc", borderRadius: 3 }}
+          />
+          <button
+            type="submit"
+            disabled={!draft.trim() || !sessionOnline}
+            style={{ padding: "6px 14px", background: "#08c", color: "#fff", border: "none", borderRadius: 3, cursor: "pointer" }}
+          >
+            Send
+          </button>
+        </form>
       </div>
     </aside>
   );

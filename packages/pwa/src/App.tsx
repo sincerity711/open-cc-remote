@@ -35,7 +35,7 @@ export function App() {
     });
   }, [bearer]);
 
-  const { connected, daemons, events, pendingPermissions, sendPermissionReply, requestHistory, killSession, startSession, completedCounts, idleSessions } = useHub(HUB_URL, bearer);
+  const { connected, daemons, events, pendingPermissions, sendPermissionReply, requestHistory, killSession, startSession, completedCounts, idleSessions, chatMessages, chatErrors, sendChat } = useHub(HUB_URL, bearer);
 
   if (!bearer) {
     return (
@@ -50,6 +50,11 @@ export function App() {
   }
 
   const selectedEvents = selected ? (events[eventKey(selected.daemon_id, selected.session_id)] ?? []) : [];
+  const selectedChat = selected ? (chatMessages[eventKey(selected.daemon_id, selected.session_id)] ?? []) : [];
+  const selectedChatError = selected ? chatErrors[eventKey(selected.daemon_id, selected.session_id)] : undefined;
+  const selectedDaemon = selected ? daemons.find((d) => d.daemon_id === selected.daemon_id) : undefined;
+  const selectedSessionOnline = !!selectedDaemon?.online
+    && !!selectedDaemon?.sessions.some((s) => s.session_id === selected?.session_id);
 
   return (
     <>
@@ -173,8 +178,12 @@ export function App() {
           daemon_id={selected.daemon_id}
           session_id={selected.session_id}
           events={selectedEvents}
+          chatMessages={selectedChat}
+          chatError={selectedChatError}
+          sessionOnline={selectedSessionOnline}
           onClose={() => setSelected(null)}
           onLoadHistory={(before_offset) => requestHistory(selected.daemon_id, selected.session_id, before_offset, 50)}
+          onSendChat={(content) => sendChat(selected.daemon_id, selected.session_id, content)}
         />
       )}
       {showSettings && bearer && (
