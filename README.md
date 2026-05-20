@@ -115,7 +115,8 @@ A second e2e suite that exercises the v1 acceptance checklist against real
 components: real hub binary in docker compose, real `cc-remote daemon` on host,
 real `claude` driven through tmux interactive mode, and a scripted
 PWA-equivalent client. Complements (does not replace) the in-process `e2e/`
-suite. See `e2e-real/README.md` and the
+suite. Acceptance baseline: **12 pass / 0 fail in ~5.4 min** wall time. See
+`e2e-real/README.md` and the
 [design spec](docs/superpowers/specs/2026-05-19-real-e2e-design.md). Cost:
 ~$0.20 of Anthropic API per full suite at default Haiku.
 
@@ -129,6 +130,25 @@ claude plugin validate packages/plugin
 # (cc-remote daemon at ~/.cc-remote/daemon.sock or $CC_REMOTE_SOCKET).
 claude --plugin-dir packages/plugin -p "your prompt"
 ```
+
+`--plugin-dir` is fine for non-permission flows. For the **channel-permission relay** to engage end-to-end (PWA Allow/Deny banner driving real tool gating), Claude Code must be run interactively (no `-p`) AND loaded via `--mcp-config`, not `--plugin-dir`:
+
+```bash
+# Generate an mcp-config.json once:
+cat > /tmp/cc-remote-mcp.json <<'EOF'
+{ "mcpServers": { "cc-remote": {
+    "command": "bun",
+    "args": ["run", "/path/to/repo/packages/plugin/src/index.ts"]
+} } }
+EOF
+
+# Then launch interactively (any terminal — tmux not required for manual use):
+claude --mcp-config /tmp/cc-remote-mcp.json \
+       --dangerously-load-development-channels server:cc-remote \
+       --setting-sources project,local
+```
+
+Empirical findings + flag rationale: `docs/superpowers/research/2026-05-20-p-mode-permission-spike.md`.
 
 ## What Plans 1–15 cover
 
