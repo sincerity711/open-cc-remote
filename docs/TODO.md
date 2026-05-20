@@ -4,6 +4,8 @@ Pending work — consolidated record. Update entries inline as items move from p
 
 ## Plan completed (2026-05-20)
 
+- `docs/superpowers/plans/2026-05-20-chat-routing-plan.md` — chat routing PWA↔Claude. **DONE** — tagged `plan-chat-routing`. PWA chat composer + log; hub broadcasts chat both directions; daemon routes chat_send/chat_out between hub and plugin. 169 unit tests pass (was 154; +15 new). 13 e2e-real scenarios green incl. new `12-chat-roundtrip.test.ts`.
+
 - `docs/superpowers/plans/2026-05-20-real-e2e-plan.md` — real-component e2e suite. **DONE** — tagged `plan-real-e2e`. 11 acceptance scenarios in `e2e-real/tests/`. Full suite `bun test e2e-real/` runs in ~5.4 min wall time (under spec §8 < 6 min budget), 12 pass / 0 fail. Daemon idle-timer was fixed (`8b96dcc`) and inter-scenario compose lifecycle hardened (`b985c56`, `8cfa556`).
 
 - `docs/superpowers/plans/2026-05-19-plugin-mcp-rework-plan.md` — plugin MCP rework. **DONE** — tagged `plan-plugin-mcp-rework`.

@@ -3,7 +3,7 @@
 Remote control plane for local Claude Code sessions. See the
 [design spec](docs/superpowers/specs/2026-05-18-open-cc-remote-design.md).
 
-**Status:** Plan 16 (status CLI) complete.
+**Status:** chat routing live — PWA can chat with Claude in both directions (PWA composer → channel injection; Claude `reply` tool → PWA chat panel). Plan 16 + plugin MCP rework + chat-routing all green.
 
 ## Prerequisites
 
