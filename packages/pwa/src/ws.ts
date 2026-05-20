@@ -172,28 +172,47 @@ export function useHub(hubUrl: string, bearer: string | null): UseHubResult {
       });
     };
 
+    let epoch = 0;          // monotonic within this effect closure.
     const connect = () => {
       if (stopped) return;
+      const myEpoch = ++epoch;
       const sep = hubUrl.includes("?") ? "&" : "?";
       const wsUrl = bearer
         ? `${hubUrl}/ws/pwa${sep}bearer=${encodeURIComponent(bearer)}`
         : `${hubUrl}/ws/pwa`;
       const ws = new WebSocket(wsUrl);
+      // Take ownership of wsRef. A later connect() (within or across effect
+      // closures) may overwrite it; that's fine — we only operate on
+      // wsRef when it still equals our `ws`.
       wsRef.current = ws;
 
       ws.onopen = () => {
+        if (stopped) { try { ws.close(); } catch {} return; }
+        if (myEpoch !== epoch) { try { ws.close(); } catch {} return; }
+        // If a NEWER ws (from a different closure) has already taken over
+        // wsRef, this open is for an orphaned ws — close and bail.
+        if (wsRef.current !== ws) { try { ws.close(); } catch {} return; }
         backoff = 500;
         setState((s) => ({ ...s, connected: true }));
         const sub: PwaToHub = { type: "subscribe" };
         ws.send(JSON.stringify(sub));
       };
       ws.onmessage = (ev) => {
+        if (wsRef.current !== ws) return;   // stale frame from an orphan ws
         try { apply(JSON.parse(ev.data) as HubToPwa); } catch {}
       };
       const reconnect = () => {
-        wsRef.current = null;
-        setState((s) => ({ ...s, connected: false }));
+        // Only clear wsRef if THIS ws is still the active one. A newer ws
+        // (from a different effect closure or a later connect within the
+        // same closure) may already own wsRef; clobbering it to null here
+        // would orphan the live connection and make sendChat / sendCommand
+        // silently drop.
+        if (wsRef.current === ws) {
+          wsRef.current = null;
+          setState((s) => ({ ...s, connected: false }));
+        }
         if (stopped) return;
+        if (myEpoch !== epoch) return;
         const delay = backoff;
         backoff = Math.min(backoff * 2, 10_000);
         setTimeout(connect, delay);

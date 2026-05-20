@@ -10,10 +10,15 @@ export function PermissionBanner({ pending, onReply }: Props) {
   if (list.length === 0) return null;
   return (
     <div style={{
-      position: "sticky", top: 0, zIndex: 50,
+      // Fixed across the entire viewport (left:0 right:0) at z-index above
+      // SessionPane (which is position:fixed; right:0; width:min(720px,90vw))
+      // — without this, the SessionPane overlays the banner's Allow/Deny
+      // buttons and they become unclickable when a session is selected.
+      position: "fixed", top: 0, left: 0, right: 0, zIndex: 1000,
       background: "#fff8e1",
       borderBottom: "2px solid #ffb300",
       padding: 12,
+      boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
     }}>
       {list.map((req) => (
         <div key={req.request_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0" }}>
