@@ -4,9 +4,7 @@ Pending work — consolidated record. Update entries inline as items move from p
 
 ## Plan completed (2026-05-20)
 
-- `docs/superpowers/plans/2026-05-20-real-e2e-plan.md` — real-component e2e suite. **DONE** — tagged `plan-real-e2e`. 11 acceptance scenarios in `e2e-real/tests/`, 9 of them pass on first run on this hardware. Two known issues:
-  - Scenario 06 (idle): the daemon's `idle_window_ms` timer is cleared by every JSONL line and only re-armed on `assistant + end_turn`. Real Claude writes follow-up entries (`system`, `last-prompt`, `ai-title`, `permission-mode`) after `end_turn`, so the idle frame never fires. Fix needed in `packages/daemon/src/index.ts:192-214` (re-arm timer on each line OR only watch for terminal markers). Test committed but expected-to-fail until product fix.
-  - Scenarios 08 / 09 (kill_session, start_session): test scenario itself passes, but the `afterAll` `downCompose` hook hangs (~15min) due to orphaned `claude --bg` / spawned processes that prevent docker compose from cleanly tearing down. The scenario's own assertions all pass. Root cause to investigate.
+- `docs/superpowers/plans/2026-05-20-real-e2e-plan.md` — real-component e2e suite. **DONE** — tagged `plan-real-e2e`. 11 acceptance scenarios in `e2e-real/tests/`. Full suite `bun test e2e-real/` runs in ~5.4 min wall time (under spec §8 < 6 min budget), 12 pass / 0 fail. Daemon idle-timer was fixed (`8b96dcc`) and inter-scenario compose lifecycle hardened (`b985c56`, `8cfa556`).
 
 - `docs/superpowers/plans/2026-05-19-plugin-mcp-rework-plan.md` — plugin MCP rework. **DONE** — tagged `plan-plugin-mcp-rework`.
 
@@ -26,5 +24,5 @@ Pending work — consolidated record. Update entries inline as items move from p
 
 - 154 tests pass in `bun test packages/` (was 164 before plugin MCP rework consolidated some tests)
 - 6 packages typecheck clean (proto, hub, daemon, plugin, pwa, e2e-real)
-- 11 e2e-real scenarios committed (9 PASS, 1 expected-fail, 1 with afterAll-hang quirk)
+- 11 e2e-real scenarios committed; full suite `bun test e2e-real/` GREEN in ~5.4 min
 
