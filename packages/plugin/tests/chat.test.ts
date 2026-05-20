@@ -81,6 +81,13 @@ test("plugin chat: reply tool sends chat_out; chat_in becomes channel notificati
       expect(p.meta.message_id).toBe("m1");
       expect(p.meta.user).toBe("alice@sap.com");
       expect(p.meta.chat_id).toBe("pwa");
+      // meta.ts MUST be an ISO 8601 string — Claude Code's Zod schema for
+      // notifications/claude/channel rejects non-strings and silently drops
+      // the notification, breaking channel relay end-to-end. The frame ts
+      // input here is unix seconds (1700000000); the plugin must convert.
+      expect(typeof p.meta.ts).toBe("string");
+      expect(p.meta.ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+      expect(new Date(p.meta.ts).getTime()).toBe(1700000000 * 1000);
     } finally { child.kill("SIGTERM"); }
 
     server.close();

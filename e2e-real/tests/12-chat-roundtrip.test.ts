@@ -36,15 +36,19 @@ test("PWA chat_send → real claude reply tool → PWA chat broadcast", async ()
 
   let claude: { stop: () => void; capturePane: () => string; sessionName: string } | undefined;
   try {
+    // The chat content carries a UNIQUE token only present in the chat_send
+    // (not in the priming prompt and not in the tmux nudge). Claude must
+    // therefore have actually received the channel injection — including the
+    // unique token — to echo it back. This catches schema-validation drops
+    // that the previous "ACK" test missed (a Zod ts-type mismatch silently
+    // killed the entire channel relay until 2026-05-21).
+    const TOKEN = `KMR-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
+
     claude = await startClaudeTmux({
       cwd: "/tmp",
-      // Initial prompt primes claude to handle the next channel injection by
-      // calling the `reply` tool. The chat_send below piggybacks onto the
-      // turn this prompt triggers (channel notifications inject on the NEXT
-      // user turn — sending a chat_send before the prompt's turn ends ensures
-      // the same turn picks it up; if not, a follow-up Enter triggers another
-      // turn that picks it up then).
-      prompt: "You are connected to cc-remote. Whenever a remote user sends you a chat message, respond by calling the MCP tool `mcp__cc-remote__reply` with arguments {\"text\":\"ACK\"}. Do not write text replies; only call the tool. Acknowledge with the single word: ready.",
+      // Initial prompt does NOT contain the token. It only tells claude to
+      // forward whatever channel content arrives, by calling the reply tool.
+      prompt: "You are connected to cc-remote. When a `<channel source=\"cc-remote\">` message arrives, call the MCP tool `mcp__cc-remote__reply` with arguments {\"text\": <the exact channel content verbatim, no quotes, no prose>}. Acknowledge with the single word: ready.",
       sendPrompt: true,
       sessionName: `ccr-chat-${daemon_id}`,
       socketPath: handle.socket_path,
@@ -71,12 +75,12 @@ test("PWA chat_send → real claude reply tool → PWA chat broadcast", async ()
       throw new Error(`unexpected matched frame type: ${(opened as { type: string }).type}`);
     }
 
-    // Send chat_send. The `reply` tool wired to MCP forwards back to PWA.
+    // Send chat_send with the unique token as the content.
     pwa.send({
       type: "chat_send",
       daemon_id,
       session_id,
-      content: "Now reply ACK using the cc-remote reply tool.",
+      content: TOKEN,
     });
 
     // Echo (from=pwa) should be near-immediate.
@@ -85,14 +89,14 @@ test("PWA chat_send → real claude reply tool → PWA chat broadcast", async ()
       5_000, "chat echo from=pwa",
     );
     expect((echo as any).session_id).toBe(session_id);
+    expect((echo as any).content).toBe(TOKEN);
 
-    // The chat injection arrives on Claude's next turn. We trigger a turn by
-    // sending a follow-up user prompt via tmux that explicitly asks Claude to
-    // process any pending channel messages. We retry a couple times since the
-    // chat_in may not have reached the plugin before the first nudge.
+    // The chat injection arrives on Claude's next turn. Trigger a turn via
+    // tmux. The nudge prompt does NOT contain the token — claude must read
+    // it from the channel content to echo it back.
     const triggerTurn = async () => {
       try {
-        tmux.sendKeys(claude!.sessionName, "process pending channel messages now (call mcp__cc-remote__reply with text=ACK)", false);
+        tmux.sendKeys(claude!.sessionName, "process pending channel messages now", false);
         await new Promise((r) => setTimeout(r, 300));
         tmux.sendEnter(claude!.sessionName);
       } catch { /* ignore */ }
@@ -103,17 +107,20 @@ test("PWA chat_send → real claude reply tool → PWA chat broadcast", async ()
 
     // Claude calls reply tool → chat_out → broadcast (from=claude). Allow
     // generous time for a real model turn (plus possible re-nudges).
+    // The reply MUST contain the token, proving channel content actually
+    // reached the model.
     const reply = await pwa.waitFor(
       (f) => {
         if (f.type !== "chat") return false;
         const cf = f as any;
         if (cf.from !== "claude" || cf.daemon_id !== daemon_id) return false;
-        return /ACK/.test(String(cf.content)) ? f : false;
+        return String(cf.content).includes(TOKEN) ? f : false;
       },
-      120_000, "chat reply from=claude containing ACK",
+      120_000, `chat reply from=claude containing token ${TOKEN}`,
     );
     expect((reply as any).user).toBeNull();
     expect((reply as any).session_id).toBe(session_id);
+    expect((reply as any).content).toContain(TOKEN);
   } catch (e) {
     if (claude) {
       try {

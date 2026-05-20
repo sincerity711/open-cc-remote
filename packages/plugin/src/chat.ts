@@ -36,6 +36,13 @@ export function installChatRelay({ mcp, daemon, pluginSessionId }: ChatRelayDeps
 
 // Called by index.ts when a chat_in frame arrives on the daemon socket
 export function emitChatIn(mcp: Server, frame: { message_id: string; user: string; user_id: string; content: string; ts: number }): void {
+  // Claude Code's Zod schema for `notifications/claude/channel` requires
+  // `meta.ts` to be a STRING (ISO 8601). The daemon sends ts as unix
+  // seconds (number); convert here. Without this, claude silently drops
+  // the notification with a Zod "expected string, received number" error
+  // and the channel content never reaches the model — channel relay
+  // appears completely broken from the user's perspective.
+  const tsIso = new Date(frame.ts * 1000).toISOString();
   void mcp.notification({
     method: "notifications/claude/channel",
     params: {
@@ -45,7 +52,7 @@ export function emitChatIn(mcp: Server, frame: { message_id: string; user: strin
         message_id: frame.message_id,
         user: frame.user,
         user_id: frame.user_id,
-        ts: frame.ts,
+        ts: tsIso,
       },
     },
   });
