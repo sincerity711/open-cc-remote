@@ -89,64 +89,73 @@ export async function startClaudeTmux(opts: StartClaudeTmuxOpts): Promise<Claude
   // 2. Boot tmux session.
   tmux.newSession(opts.sessionName, opts.cwd);
 
-  // 3. Compose claude command. Auth env is prefixed inline so capture-pane
-  //    diagnostics show what auth path is in use.
-  const authPrefix = apiKey
-    ? `ANTHROPIC_API_KEY=${apiKey}`
-    : `ANTHROPIC_AUTH_TOKEN=${authToken} ANTHROPIC_BASE_URL=${baseUrl}`;
-  const cmd = [
-    authPrefix,
-    `claude`,
-    `--mcp-config ${opts.mcpConfigPath}`,
-    `--dangerously-load-development-channels server:cc-remote`,
-    `--model ${model}`,
-    `--setting-sources project,local`,
-  ].join(" ");
+  // From here on, any throw must kill the session we just created — otherwise
+  // a partially-booted session leaks across scenarios and the next scenario's
+  // `downCompose` sweep finds it long after the daemon socket has been ripped
+  // out from under the plugin (root cause of inter-scenario hangs).
+  try {
+    // 3. Compose claude command. Auth env is prefixed inline so capture-pane
+    //    diagnostics show what auth path is in use.
+    const authPrefix = apiKey
+      ? `ANTHROPIC_API_KEY=${apiKey}`
+      : `ANTHROPIC_AUTH_TOKEN=${authToken} ANTHROPIC_BASE_URL=${baseUrl}`;
+    const cmd = [
+      authPrefix,
+      `claude`,
+      `--mcp-config ${opts.mcpConfigPath}`,
+      `--dangerously-load-development-channels server:cc-remote`,
+      `--model ${model}`,
+      `--setting-sources project,local`,
+    ].join(" ");
 
-  tmux.sendKeys(opts.sessionName, cmd, true);
+    tmux.sendKeys(opts.sessionName, cmd, true);
 
-  // 4. Dev-channels confirmation. Observed text in CC 2.1.144:
-  //    "WARNING: Loading development channels … 1. I am using this for local
-  //    development / 2. Exit". Match on "Enter to confirm" which is the
-  //    button-row instruction and only renders once the dialog is fully
-  //    interactive.
-  await dismissDialog(opts.sessionName, /Enter to confirm/i, 20_000, true);
+    // 4. Dev-channels confirmation. Observed text in CC 2.1.144:
+    //    "WARNING: Loading development channels … 1. I am using this for local
+    //    development / 2. Exit". Match on "Enter to confirm" which is the
+    //    button-row instruction and only renders once the dialog is fully
+    //    interactive.
+    await dismissDialog(opts.sessionName, /Enter to confirm/i, 20_000, true);
 
-  // 5. Workspace-trust dialog (per-cwd, may already be remembered).
-  //    Observed text: "Quick safety check: Is this a project you created or
-  //    one you trust?" → 1. Yes / 2. No.
-  await dismissDialog(
-    opts.sessionName,
-    /trust.*workspace|trust.*folder|safety check|created or one you trust/i,
-    8_000,
-    true,
-  );
+    // 5. Workspace-trust dialog (per-cwd, may already be remembered).
+    //    Observed text: "Quick safety check: Is this a project you created or
+    //    one you trust?" → 1. Yes / 2. No.
+    await dismissDialog(
+      opts.sessionName,
+      /trust.*workspace|trust.*folder|safety check|created or one you trust/i,
+      8_000,
+      true,
+    );
 
-  // 6. Wait for the interactive prompt. Claude Code 2.1.144 shows a `❯` cursor
-  //    on a fresh line once boot is complete (preceded by "Try ..." placeholder
-  //    text, but appearing before that hint is reliable enough).
-  await tmux.waitForPattern(
-    opts.sessionName,
-    /❯\s+Try\s+|❯\s*$|>\s*$/m,
-    bootTimeoutMs,
-    "interactive prompt",
-  );
+    // 6. Wait for the interactive prompt. Claude Code 2.1.144 shows a `❯` cursor
+    //    on a fresh line once boot is complete (preceded by "Try ..." placeholder
+    //    text, but appearing before that hint is reliable enough).
+    await tmux.waitForPattern(
+      opts.sessionName,
+      /❯\s+Try\s+|❯\s*$|>\s*$/m,
+      bootTimeoutMs,
+      "interactive prompt",
+    );
 
-  // 7. Send the prompt (unless the caller wants to drive it themselves).
-  //    For long/complex prompts we send the text first, settle for a beat, then
-  //    send Enter separately. This avoids a race observed in CC 2.1.144 where
-  //    a single send-keys 'text' + 'Enter' lands in the input box but the
-  //    Enter is not registered as a submit.
-  if (opts.sendPrompt !== false) {
-    tmux.sendKeys(opts.sessionName, opts.prompt, false);
-    await new Promise((r) => setTimeout(r, 300));
-    tmux.sendEnter(opts.sessionName);
+    // 7. Send the prompt (unless the caller wants to drive it themselves).
+    //    For long/complex prompts we send the text first, settle for a beat, then
+    //    send Enter separately. This avoids a race observed in CC 2.1.144 where
+    //    a single send-keys 'text' + 'Enter' lands in the input box but the
+    //    Enter is not registered as a submit.
+    if (opts.sendPrompt !== false) {
+      tmux.sendKeys(opts.sessionName, opts.prompt, false);
+      await new Promise((r) => setTimeout(r, 300));
+      tmux.sendEnter(opts.sessionName);
+    }
+
+    return {
+      sessionName: opts.sessionName,
+      capturePane: () => tmux.capturePane(opts.sessionName),
+      stop: () => tmux.killSession(opts.sessionName),
+      isAlive: () => tmux.hasSession(opts.sessionName),
+    };
+  } catch (e) {
+    try { tmux.killSession(opts.sessionName); } catch { /* best-effort */ }
+    throw e;
   }
-
-  return {
-    sessionName: opts.sessionName,
-    capturePane: () => tmux.capturePane(opts.sessionName),
-    stop: () => tmux.killSession(opts.sessionName),
-    isAlive: () => tmux.hasSession(opts.sessionName),
-  };
 }

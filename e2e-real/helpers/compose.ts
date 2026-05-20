@@ -27,7 +27,47 @@ function dumpLogs(): string {
   return r.stdout + r.stderr;
 }
 
+/**
+ * Returns true if the host TCP port is currently bound by some process.
+ * Uses Node's net module — fast, no shell dependency.
+ */
+async function isPortBound(port: number, host = "127.0.0.1"): Promise<boolean> {
+  const net = await import("node:net");
+  return new Promise((resolveBound) => {
+    const sock = net.createConnection({ host, port });
+    sock.once("connect", () => { sock.end(); resolveBound(true); });
+    sock.once("error", () => resolveBound(false));
+    setTimeout(() => { try { sock.destroy(); } catch {} resolveBound(false); }, 500);
+  });
+}
+
+async function waitPortFree(port: number, deadlineMs: number): Promise<boolean> {
+  const deadline = Date.now() + deadlineMs;
+  while (Date.now() < deadline) {
+    if (!(await isPortBound(port))) return true;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return false;
+}
+
 export async function upCompose(): Promise<void> {
+  // Pre-flight: any leftover container/volume/tmux from a prior crashed
+  // scenario must be torn down before `up --wait` is meaningful. Without
+  // this, `up --wait` on a stale-but-unhealthy container hangs until the
+  // 300s timeout, killing the whole suite.
+  try {
+    const swept = sweepCcrTmuxSessions();
+    if (swept.length > 0) {
+      process.stderr.write(`[upCompose] swept ${swept.length} orphan tmux sessions before up: ${swept.join(", ")}\n`);
+    }
+  } catch { /* best-effort */ }
+
+  if (await isPortBound(7745)) {
+    process.stderr.write(`[upCompose] port 7745 still bound — running pre-emptive 'down -v'\n`);
+    runCompose(["down", "-v", "--remove-orphans", "-t", "1"], { timeoutMs: 30_000 });
+    await waitPortFree(7745, 10_000);
+  }
+
   const r = runCompose(["up", "-d", "--wait"], { timeoutMs: 300_000 });
   if (r.code !== 0) {
     const logs = dumpLogs();
@@ -73,12 +113,26 @@ export async function downCompose(): Promise<void> {
     process.stderr.write(`[downCompose] tmux sweep failed (continuing): ${(e as Error).message}\n`);
   }
 
-  // Use a tight timeout (10s) and SIGKILL behaviour: tests that crash mid-run
-  // sometimes leave containers in a state that takes minutes to drain
-  // gracefully. Tests don't need a graceful drain.
-  const r = runCompose(["down", "-v", "-t", "5"], { timeoutMs: 30_000 });
+  // Tight timeout (1s grace) and --remove-orphans: tests crashing mid-run can
+  // leave containers in states that take minutes to drain gracefully; tests
+  // don't need that drain.
+  let r = runCompose(["down", "-v", "--remove-orphans", "-t", "1"], { timeoutMs: 30_000 });
   if (r.code !== 0) {
-    process.stderr.write(`docker compose down -v failed: ${r.stderr}\n`);
+    // Race observed: `Container ... Error while Removing` — retry once after
+    // a short settle. If still failing, fall through and the next upCompose
+    // pre-flight will clean up.
+    process.stderr.write(`[downCompose] first 'down -v' failed (code ${r.code}): ${r.stderr}\nretrying after 1s\n`);
+    await new Promise((res) => setTimeout(res, 1_000));
+    r = runCompose(["down", "-v", "--remove-orphans", "-t", "1"], { timeoutMs: 30_000 });
+    if (r.code !== 0) {
+      process.stderr.write(`[downCompose] second 'down -v' also failed (code ${r.code}): ${r.stderr}\n`);
+    }
+  }
+
+  // Block briefly until the published port is no longer bound. Without this,
+  // the next scenario's upCompose can hit a transient EADDRINUSE.
+  if (!(await waitPortFree(7745, 10_000))) {
+    process.stderr.write(`[downCompose] WARNING: port 7745 still bound 10s after 'down -v'\n`);
   }
 }
 
