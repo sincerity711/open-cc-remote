@@ -1,9 +1,11 @@
 import type {
   DaemonToHub, HubToPwa, HubToDaemonStartSession, SessionSnapshot, DaemonView, EventFrameForPwa, PwaToHub,
+  PwaToHubChatSend, HubToDaemonChatSend,
 } from "@cc-remote/proto";
 import type { DaemonRegistry, PwaRegistry } from "./connections.ts";
 import type { Db } from "./db.ts";
 import type { PushHelper } from "./push.ts";
+import { ulid } from "./ulid.ts";
 
 const RING_BUFFER_SIZE = 200;
 const DEFAULT_OFFLINE_PUSH_DELAY_MS = 30_000;
@@ -140,6 +142,22 @@ export class Router {
         if (this.db && this.push) void this.dispatchIdlePush(daemon_id, frame);
         return;
       }
+      case "chat_out": {
+        const state = this.daemons.get(daemon_id);
+        if (!state) return;
+        this.pwaReg.broadcast({
+          type: "chat",
+          daemon_id,
+          session_id: frame.session_id,
+          message_id: ulid(),
+          from: "claude",
+          user: null,
+          content: frame.content,
+          reply_to: frame.reply_to,
+          ts: frame.ts,
+        });
+        return;
+      }
     }
   }
 
@@ -267,6 +285,55 @@ export class Router {
       if (frame.name !== undefined) out.name = frame.name;
       this.daemonReg.send(frame.daemon_id, out);
     }
+  }
+
+  /**
+   * Handle a PWA-issued chat_send: resolve user, generate message_id, forward
+   * to the addressed daemon, and broadcast the echo to all PWA subscribers.
+   * If the daemon is offline, send a chat_error back to the sender only.
+   */
+  onPwaChatSend(
+    frame: PwaToHubChatSend,
+    auth: { user: string; user_id: string },
+    senderSend: (f: HubToPwa) => void,
+  ): void {
+    const message_id = ulid();
+    const ts = Math.floor(Date.now() / 1000);
+    const reply_to = frame.reply_to ?? null;
+
+    if (!this.daemonReg.has(frame.daemon_id)) {
+      senderSend({
+        type: "chat_error",
+        daemon_id: frame.daemon_id,
+        session_id: frame.session_id,
+        reason: "daemon_offline",
+      });
+      return;
+    }
+
+    const out: HubToDaemonChatSend = {
+      type: "chat_send",
+      session_id: frame.session_id,
+      message_id,
+      user: auth.user,
+      user_id: auth.user_id,
+      content: frame.content,
+      reply_to,
+      ts,
+    };
+    this.daemonReg.send(frame.daemon_id, out);
+
+    this.pwaReg.broadcast({
+      type: "chat",
+      daemon_id: frame.daemon_id,
+      session_id: frame.session_id,
+      message_id,
+      from: "pwa",
+      user: auth.user,
+      content: frame.content,
+      reply_to,
+      ts,
+    });
   }
 
   snapshot(): DaemonView[] {

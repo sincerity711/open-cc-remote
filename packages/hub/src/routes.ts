@@ -7,7 +7,7 @@ import { startLogin, handleCallback, type IasContext } from "./auth/ias.ts";
 import type { PushHelper } from "./push.ts";
 
 type WsKind = "daemon" | "pwa";
-interface WsData { kind: WsKind; key: string; }
+interface WsData { kind: WsKind; key: string; user?: string; user_id?: string; }
 
 export interface MakeServerOpts {
   db?: Db;
@@ -203,13 +203,22 @@ export function makeServer(opts: MakeServerOpts = {}) {
     }
 
     if (url.pathname === "/ws/pwa") {
+      let wsUser: string | undefined;
+      let wsUserId: string | undefined;
       if (!opts.disable_auth) {
         if (!opts.db) return new Response("auth not configured", { status: 503 });
         const { authenticatePwa } = await import("./auth/pwa-auth.ts");
         const r = authenticatePwa(opts.db, req);
         if ("error" in r) return new Response(r.error, { status: 401 });
+        wsUserId = r.owner_sub;
+        // Look up email for `user` field on chat frames; fall back to sub.
+        const row = opts.db.prepare("SELECT email FROM users WHERE sub = ?").get(r.owner_sub) as { email: string | null } | undefined;
+        wsUser = row?.email ?? r.owner_sub;
+      } else {
+        wsUser = "anonymous";
+        wsUserId = "anonymous";
       }
-      const ok = server.upgrade(req, { data: { kind: "pwa", key: "" } satisfies WsData });
+      const ok = server.upgrade(req, { data: { kind: "pwa", key: "", user: wsUser, user_id: wsUserId } satisfies WsData });
       return ok ? undefined : new Response("upgrade failed", { status: 500 });
     }
     return new Response("not found", { status: 404 });
@@ -222,7 +231,7 @@ export function makeServer(opts: MakeServerOpts = {}) {
           () => ws.close(1000, "replaced"));
       } else {
         const id = pwaReg.add(ws, (f) => ws.send(JSON.stringify(f)));
-        ws.data = { kind: "pwa", key: id };
+        ws.data = { kind: "pwa", key: id, user: ws.data.user, user_id: ws.data.user_id };
       }
     },
     message(ws: ServerWebSocket<WsData>, msg: string | Buffer) {
@@ -237,6 +246,12 @@ export function makeServer(opts: MakeServerOpts = {}) {
           router.onPwaSubscribe((f) => ws.send(JSON.stringify(f)));
         } else if (pf.type === "permission_reply" || pf.type === "request_history" || pf.type === "kill_session" || pf.type === "start_session") {
           router.onPwaCommand(pf);
+        } else if (pf.type === "chat_send") {
+          router.onPwaChatSend(
+            pf,
+            { user: ws.data.user ?? "anonymous", user_id: ws.data.user_id ?? "anonymous" },
+            (f) => ws.send(JSON.stringify(f)),
+          );
         }
       }
     },

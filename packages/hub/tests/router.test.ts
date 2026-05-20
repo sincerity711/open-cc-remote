@@ -619,3 +619,137 @@ test("idle does not push when prefs.idle is not set", async () => {
     db.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ─── chat routing ──────────────────────────────────────────────────────
+
+test("onPwaChatSend forwards to daemon with message_id, user, ts populated", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+  const sentToDaemon: any[] = [];
+  dreg.add("d-1", {}, (f) => sentToDaemon.push(f));
+
+  const senderSent: unknown[] = [];
+  router.onPwaChatSend(
+    { type: "chat_send", daemon_id: "d-1", session_id: "s1", content: "hi" },
+    { user: "alice@example.com", user_id: "sub-123" },
+    (f) => senderSent.push(f),
+  );
+
+  expect(sentToDaemon).toHaveLength(1);
+  const out = sentToDaemon[0]!;
+  expect(out.type).toBe("chat_send");
+  expect(out.session_id).toBe("s1");
+  expect(out.user).toBe("alice@example.com");
+  expect(out.user_id).toBe("sub-123");
+  expect(out.content).toBe("hi");
+  expect(out.reply_to).toBeNull();
+  expect(typeof out.message_id).toBe("string");
+  expect(out.message_id.length).toBeGreaterThan(0);
+  expect(typeof out.ts).toBe("number");
+});
+
+test("onPwaChatSend broadcasts echo to all PWA subscribers with from=pwa", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+  dreg.add("d-1", {}, () => {});
+
+  const a: any[] = [];
+  const b: any[] = [];
+  preg.add({}, (f) => a.push(f));
+  preg.add({}, (f) => b.push(f));
+
+  router.onPwaChatSend(
+    { type: "chat_send", daemon_id: "d-1", session_id: "s1", content: "hello" },
+    { user: "alice@example.com", user_id: "sub-123" },
+    () => {},
+  );
+
+  // Both PWAs (sender + other tab) get the echo.
+  const aChat = a.find((f) => f.type === "chat");
+  const bChat = b.find((f) => f.type === "chat");
+  expect(aChat).toBeDefined();
+  expect(bChat).toBeDefined();
+  expect(aChat.from).toBe("pwa");
+  expect(aChat.user).toBe("alice@example.com");
+  expect(aChat.daemon_id).toBe("d-1");
+  expect(aChat.session_id).toBe("s1");
+  expect(aChat.content).toBe("hello");
+  expect(aChat.message_id).toBe(bChat.message_id);  // same message_id across tabs
+});
+
+test("daemon chat_out broadcasts to all PWA subscribers with from=claude and fresh message_id", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const broadcasts: any[] = [];
+  preg.add({}, (f) => broadcasts.push(f));
+  const router = new Router(dreg, preg);
+
+  router.onDaemonFrame("d-1", { type: "hello", daemon_id: "d-1", epoch: 1,
+    hostname: "h", agent_version: "0", sessions: [] });
+  broadcasts.length = 0;
+
+  router.onDaemonFrame("d-1", {
+    type: "chat_out",
+    session_id: "s1",
+    content: "ack from claude",
+    ts: 1716000020,
+    reply_to: "m_prev",
+  });
+
+  expect(broadcasts).toHaveLength(1);
+  const f = broadcasts[0]!;
+  expect(f.type).toBe("chat");
+  expect(f.daemon_id).toBe("d-1");
+  expect(f.session_id).toBe("s1");
+  expect(f.from).toBe("claude");
+  expect(f.user).toBeNull();
+  expect(f.content).toBe("ack from claude");
+  expect(f.reply_to).toBe("m_prev");
+  expect(f.ts).toBe(1716000020);
+  expect(typeof f.message_id).toBe("string");
+  expect(f.message_id.length).toBeGreaterThan(0);
+});
+
+test("onPwaChatSend to offline daemon returns chat_error to sender only, no broadcast", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+
+  const otherTab: any[] = [];
+  preg.add({}, (f) => otherTab.push(f));
+
+  const senderSent: any[] = [];
+  router.onPwaChatSend(
+    { type: "chat_send", daemon_id: "d-offline", session_id: "s1", content: "hi" },
+    { user: "alice@example.com", user_id: "sub-123" },
+    (f) => senderSent.push(f),
+  );
+
+  expect(senderSent).toHaveLength(1);
+  expect(senderSent[0]).toEqual({
+    type: "chat_error",
+    daemon_id: "d-offline",
+    session_id: "s1",
+    reason: "daemon_offline",
+  });
+  // No broadcast to other tabs (no daemon → no echo either).
+  expect(otherTab.find((f) => f.type === "chat")).toBeUndefined();
+});
+
+test("onPwaChatSend preserves reply_to when provided", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+  const sentToDaemon: any[] = [];
+  dreg.add("d-1", {}, (f) => sentToDaemon.push(f));
+
+  router.onPwaChatSend(
+    { type: "chat_send", daemon_id: "d-1", session_id: "s1", content: "re: hi", reply_to: "m_prior" },
+    { user: "alice@example.com", user_id: "sub-123" },
+    () => {},
+  );
+
+  expect(sentToDaemon[0]!.reply_to).toBe("m_prior");
+});
