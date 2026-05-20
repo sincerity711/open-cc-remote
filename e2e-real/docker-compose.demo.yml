@@ -1,0 +1,7 @@
+version: "3.9"
+# Demo override: point the hub's post-OIDC redirect at the PWA dev server (5173)
+# instead of the hub root (7745). Used only by tools/demo-channel.sh.
+services:
+  hub:
+    environment:
+      HUB_PWA_URL: "http://localhost:5173/"
