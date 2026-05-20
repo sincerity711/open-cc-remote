@@ -57,7 +57,8 @@ export type DaemonToHub =
   | DaemonPermissionResolved
   | DaemonHistoryChunk
   | TaskCompletedFrame
-  | IdleFrame;
+  | IdleFrame
+  | PluginChatOut;
 
 export type HubToDaemon =
   | { type: "ping"; ts: number }
@@ -65,7 +66,7 @@ export type HubToDaemon =
   | HubToDaemonRequestHistory
   | HubToDaemonKillSession
   | HubToDaemonStartSession
-  | DaemonChatIn;
+  | HubToDaemonChatSend;
 
 // ─── hub ↔ PWA (WSS) ──────────────────────────────────────────────────
 
@@ -87,14 +88,17 @@ export type HubToPwa =
   | PwaPermissionResolved
   | PwaHistoryChunk
   | PwaTaskCompletedFrame
-  | PwaIdleFrame;
+  | PwaIdleFrame
+  | PwaChatBroadcast
+  | HubChatErrorBroadcast;
 
 export type PwaToHub =
   | { type: "subscribe" }  // Plan 1 PWA only subscribes; commands come in Plan 4
   | PwaToHubPermissionReply
   | PwaToHubRequestHistory
   | PwaToHubKillSession
-  | PwaToHubStartSession;
+  | PwaToHubStartSession
+  | PwaToHubChatSend;
 
 // ─── kill_session (dangerous action) ──────────────────────────────────
 
@@ -197,6 +201,48 @@ export interface DaemonChatIn {
   user_id: string;             // PWA bearer sub claim
   content: string;
   ts: number;
+}
+
+// PWA → Hub
+export interface PwaToHubChatSend {
+  type: "chat_send";
+  daemon_id: string;
+  session_id: string;
+  content: string;
+  reply_to?: string;
+}
+
+// Hub → Daemon
+export interface HubToDaemonChatSend {
+  type: "chat_send";
+  session_id: string;
+  message_id: string;          // ULID, hub-generated
+  user: string;                // bearer subject (email)
+  user_id: string;             // bearer sub claim
+  content: string;
+  reply_to: string | null;
+  ts: number;                  // unix seconds
+}
+
+// Hub → PWA (broadcast)
+export interface PwaChatBroadcast {
+  type: "chat";
+  daemon_id: string;
+  session_id: string;
+  message_id: string;
+  from: "pwa" | "claude";
+  user: string | null;          // populated when from = "pwa"
+  content: string;
+  reply_to: string | null;
+  ts: number;
+}
+
+// Hub → PWA (chat error, e.g. daemon offline)
+export interface HubChatErrorBroadcast {
+  type: "chat_error";
+  daemon_id: string;
+  session_id: string;
+  reason: string;
 }
 
 export interface DaemonPermissionRequest {
