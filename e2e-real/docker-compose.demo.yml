@@ -1,16 +1,20 @@
 version: "3.9"
-# Demo override: high-port mapping + a host URL reachable from BOTH the
-# hub container AND host-side browsers.
+# Demo override: high-port mapping + a shared hostname both the hub container
+# AND host browsers can resolve to fake-ias.
 #
-# We use ${HOST_IP} (the Mac's LAN IP, set by tools/demo-channel.sh before
-# `docker compose up`). From inside hub: container's NAT can reach the host
-# at this IP, port 17770 is mapped to fake-ias. From the browser: same IP
-# resolves to the Mac itself, same port mapping. host.docker.internal does
-# NOT work for this purpose — Docker Desktop only adds it inside containers,
-# the host's resolver has it but routes to a non-reachable Docker bridge IP.
+# Why a shared hostname instead of an IP:
+# - LAN-IP approach (10.x / 192.168.x) breaks when the user's network blocks
+#   inbound on the LAN address (some Wi-Fi setups + macOS firewall do).
+# - host.docker.internal resolves inside containers but NOT reliably from host
+#   browsers (resolves to a Docker bridge IP that doesn't route from host).
+# - Shared hostname `cc-ias-demo` works both ways with one /etc/hosts entry:
+#     127.0.0.1 cc-ias-demo
+#   and `extra_hosts: ["cc-ias-demo:host-gateway"]` inside the hub container.
+#   Both sides hit the same URL → fake-ias's issuerUrl is consistent → JWT
+#   validation works.
 #
-# !override is required because docker-compose merges the `ports` list
-# by APPENDING entries; without override the base low-port bindings stay.
+# !override is required because docker-compose merges the `ports` list by
+# APPENDING entries; without override the base low-port bindings would stay.
 services:
   fake-ias:
     ports: !override
@@ -18,7 +22,9 @@ services:
   hub:
     ports: !override
       - "17745:7745"
+    extra_hosts:
+      - "cc-ias-demo:host-gateway"
     environment:
       HUB_PWA_URL: "http://localhost:15173/"
-      HUB_IAS_ISSUER: "http://${HOST_IP}:17770"
+      HUB_IAS_ISSUER: "http://cc-ias-demo:17770"
       HUB_IAS_REDIRECT_URI: "http://localhost:17745/auth/callback"

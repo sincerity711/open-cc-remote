@@ -41,20 +41,30 @@ fi
 stop || true
 mkdir -p "$DEMO_STATE_DIR"
 
-# Detect the Mac's primary LAN IP so both the hub container AND the host
-# browser can hit fake-ias at the same URL (HUB_IAS_ISSUER). Falls back to
-# 127.0.0.1 which works for the browser but breaks hub-side discovery —
-# the script will continue and the failure will surface as a 500 on /auth.
-HOST_IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)
-if [[ -z "${HOST_IP}" ]]; then
-  HOST_IP=$(ifconfig 2>/dev/null | awk '/inet / && $2 != "127.0.0.1" {print $2; exit}')
+# Verify /etc/hosts has the cc-ias-demo entry. The demo's IAS issuer URL is
+# `http://cc-ias-demo:17770` so the same URL works from inside the hub
+# container (extra_hosts → host-gateway) AND from a browser on the host
+# (127.0.0.1 via /etc/hosts). Refuse to start without it — better to fail
+# fast with a clear instruction than to bring everything up and have OIDC
+# callbacks dead-end.
+if ! grep -qE '^[^#]*\s+cc-ias-demo(\s|$)' /etc/hosts; then
+  cat <<'EOF' >&2
+
+[demo] /etc/hosts is missing an entry for cc-ias-demo (needed by the OIDC
+       callback flow so both the hub container and your browser can resolve
+       the IAS hostname to the same target).
+
+       One-time setup:
+
+         echo '127.0.0.1 cc-ias-demo' | sudo tee -a /etc/hosts
+
+       Then re-run this script.
+EOF
+  exit 2
 fi
-HOST_IP=${HOST_IP:-127.0.0.1}
-export HOST_IP
-echo "[demo] using HOST_IP=${HOST_IP} for IAS issuer URL"
 
 echo "[demo] bringing up hub + fake-ias (compose)..."
-(cd e2e-real && HOST_IP="${HOST_IP}" docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --wait)
+(cd e2e-real && docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --wait)
 
 echo "[demo] issuing pairing code..."
 PAIR_CODE=$(cd e2e-real && docker compose -f docker-compose.yml -f docker-compose.demo.yml exec -T hub \
