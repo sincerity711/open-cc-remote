@@ -45,6 +45,16 @@ export function hasSession(name: string): boolean {
 
 export function killSession(name: string): void {
   run(["kill-session", "-t", name], { ignoreFailure: true });
+  // tmux kill-session terminates the server's view of the session immediately
+  // but the child processes inside the pane (claude, the bun MCP plugin)
+  // may take a beat to actually exit. Poll briefly so callers can rely on a
+  // quiet process tree once this returns. Synchronous by design — teardown
+  // paths are sync-only.
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    if (!hasSession(name)) return;
+    spawnSync("sleep", ["0.05"]);
+  }
 }
 
 export function listCcrSessions(): string[] {

@@ -39,7 +39,40 @@ export async function upCompose(): Promise<void> {
   }
 }
 
+/**
+ * Spec §9 #7: kill any tmux sessions whose name starts with `ccr-` so a
+ * crashed scenario doesn't leave orphan claude processes behind. Safe to
+ * call when no such sessions exist (silently no-ops). Best-effort: never
+ * throws — teardown must always make progress.
+ */
+export function sweepCcrTmuxSessions(): string[] {
+  const ls = spawnSync("tmux", ["list-sessions", "-F", "#S"], { encoding: "utf8" });
+  if ((ls.status ?? -1) !== 0) return [];
+  const names = (ls.stdout ?? "")
+    .split("\n")
+    .map((s) => s.trim())
+    .filter((s) => s.startsWith("ccr-"));
+  for (const name of names) {
+    spawnSync("tmux", ["kill-session", "-t", name], { encoding: "utf8" });
+  }
+  return names;
+}
+
 export async function downCompose(): Promise<void> {
+  // Sweep orphan tmux sessions FIRST: if a scenario crashed mid-run with a
+  // claude+plugin still attached to the daemon, that plugin's socket holds
+  // the daemon socket open which can keep `docker compose down` waiting on
+  // network drain. Killing those tmux sessions releases everything cleanly.
+  // Best-effort, never throws.
+  try {
+    const swept = sweepCcrTmuxSessions();
+    if (swept.length > 0) {
+      process.stderr.write(`[downCompose] swept ${swept.length} orphan tmux sessions: ${swept.join(", ")}\n`);
+    }
+  } catch (e) {
+    process.stderr.write(`[downCompose] tmux sweep failed (continuing): ${(e as Error).message}\n`);
+  }
+
   // Use a tight timeout (10s) and SIGKILL behaviour: tests that crash mid-run
   // sometimes leave containers in a state that takes minutes to drain
   // gracefully. Tests don't need a graceful drain.
