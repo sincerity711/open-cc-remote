@@ -42,6 +42,25 @@ async function main() {
   await client.send({ type: "register", session });
   process.stderr.write(`fake-claude: registered ${session.session_id} cwd=${session.cwd}\n`);
 
+  // --auto-reply <text>: when this fake-claude receives a chat_in from the
+  // daemon, immediately emit a chat_out with `content: text`. Used by the
+  // chat round-trip e2e tests.
+  const autoReply = args["auto-reply"];
+  if (autoReply) {
+    client.onFrame((frame) => {
+      if (frame.type === "chat_in") {
+        client.sendOneWay({
+          type: "chat_out",
+          session_id: session.session_id,
+          content: autoReply,
+          ts: Math.floor(Date.now() / 1000),
+          reply_to: frame.message_id,
+        });
+        process.stderr.write(`fake-claude: chat_in received → emitted chat_out "${autoReply}"\n`);
+      }
+    });
+  }
+
   const inj = args["inject-permission"]; // format: tool:request_id:args_summary
   if (inj) {
     const [tool, request_id, ...rest] = inj.split(":");
