@@ -10,7 +10,7 @@ const HUB_URL = (import.meta.env.VITE_HUB_URL as string) ?? "ws://localhost:7745
 
 interface Selected { daemon_id: string; session_id: string }
 
-export function App() {
+export function RealApp() {
   const [bearer, setBearer] = useState<string | null>(null);
   const [selected, setSelected] = useState<Selected | null>(null);
   const [showSettings, setShowSettings] = useState(false);
