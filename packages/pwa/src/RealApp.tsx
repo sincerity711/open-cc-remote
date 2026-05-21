@@ -4,7 +4,8 @@ import { consumeFragment, getBearer, loginUrl, clearBearer } from "./auth.ts";
 import { SessionView } from "./screens/SessionView";
 import { useSessionTimeline } from "./hooks/useSessionTimeline";
 import { registerPushSubscription } from "./push.ts";
-import { Settings } from "./Settings.tsx";
+import { SettingsDrawer, type Appearance } from "./screens/SettingsDrawer";
+import { useDevices } from "./hooks/useDevices";
 import { computeDaemonViewModels, totalPendingApprovals } from "./lib/daemonViewModel";
 import { AppShell } from "./screens/AppShell";
 import { HomeScreen } from "./screens/HomeScreen";
@@ -57,6 +58,8 @@ export function RealApp() {
   );
   const permissionQueue = usePermissionQueue(pendingPermissions);
   const pendingApprovalsCount = totalPendingApprovals(pendingPermissions);
+  const deviceData = useDevices(HUB_URL, bearer);
+  const [appearance, setAppearance] = useState<Appearance>("system");
   const topPending = Object.values(pendingPermissions)[0];
   const topPendingPreview = topPending
     ? {
@@ -136,7 +139,26 @@ export function RealApp() {
         }
       />
       {showSettings && bearer && (
-        <Settings hubUrl={HUB_URL} bearer={bearer} onClose={() => setShowSettings(false)} />
+        <SettingsDrawer
+          device={device}
+          account={{
+            email: getEmailFromBearer(bearer) ?? "signed in",
+            onSignOut: () => {
+              clearBearer();
+              setBearer(null);
+              setShowSettings(false);
+            },
+          }}
+          devices={deviceData.devices}
+          onRenameDevice={(id, name) => { void deviceData.rename(id, name); }}
+          onRevokeDevice={(id) => { void deviceData.revoke(id); }}
+          pushPrefs={deviceData.pushPrefs}
+          onTogglePref={(key) => { void deviceData.togglePushPref(key); }}
+          appearance={appearance}
+          onSetAppearance={setAppearance}
+          error={deviceData.error}
+          onClose={() => setShowSettings(false)}
+        />
       )}
       {permissionQueue.open && permissionQueue.active && (() => {
         const active = permissionQueue.active;
@@ -172,4 +194,17 @@ export function RealApp() {
       )}
     </>
   );
+}
+
+function getEmailFromBearer(bearer: string): string | null {
+  try {
+    const payload = bearer.split(".")[1];
+    if (!payload) return null;
+    const json = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
+    if (typeof json.email === "string") return json.email;
+    if (typeof json.sub === "string") return json.sub;
+    return null;
+  } catch {
+    return null;
+  }
 }
