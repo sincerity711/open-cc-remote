@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useHub, eventKey } from "./hooks/useHub";
-import { consumeFragment, getBearer, loginUrl, clearBearer } from "./auth.ts";
+import { clearBearer, useAuth } from "./hooks/useAuth";
 import { SessionView } from "./screens/SessionView";
 import { useSessionTimeline } from "./hooks/useSessionTimeline";
 import { registerPushSubscription } from "./push.ts";
@@ -19,15 +19,10 @@ const HUB_URL = (import.meta.env.VITE_HUB_URL as string) ?? "ws://localhost:7745
 interface Selected { daemon_id: string; session_id: string }
 
 export function RealApp() {
-  const [bearer, setBearer] = useState<string | null>(null);
+  const { bearer, setBearer, signInHref, signOut } = useAuth(HUB_URL);
   const [selected, setSelected] = useState<Selected | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [authNotice, setAuthNotice] = useState<string | null>(null);
-
-  useEffect(() => {
-    consumeFragment();
-    setBearer(getBearer());
-  }, []);
 
   useEffect(() => {
     if (bearer) setAuthNotice(null);
@@ -85,7 +80,7 @@ export function RealApp() {
     : undefined;
 
   if (!bearer) {
-    return <SignInScreen loginHref={loginUrl(HUB_URL)} notice={authNotice ?? undefined} />;
+    return <SignInScreen loginHref={signInHref} notice={authNotice ?? undefined} />;
   }
 
   const selectedChatError = selected ? chatErrors[eventKey(selected.daemon_id, selected.session_id)] : undefined;
@@ -102,7 +97,7 @@ export function RealApp() {
         pendingApprovalsCount={pendingApprovalsCount}
         onOpenSettings={() => setShowSettings(true)}
         onOpenPermission={permissionQueue.openSurface}
-        onSignOut={() => { clearBearer(); setBearer(null); }}
+        onSignOut={() => signOut()}
         sessionActiveOnMobile={!!selected}
         home={
           <HomeScreen
@@ -143,8 +138,7 @@ export function RealApp() {
           account={{
             email: getEmailFromBearer(bearer) ?? "signed in",
             onSignOut: () => {
-              clearBearer();
-              setBearer(null);
+              signOut();
               setShowSettings(false);
             },
           }}

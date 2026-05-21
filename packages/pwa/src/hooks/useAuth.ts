@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+
 const BEARER_KEY = "cc_remote_bearer";
 
 export function consumeFragment(): void {
@@ -25,4 +27,30 @@ export function clearBearer(): void {
 export function loginUrl(hubBaseUrl: string): string {
   const httpHub = hubBaseUrl.replace(/^ws(s?):\/\//, "http$1://");
   return `${httpHub}/auth/login`;
+}
+
+export interface UseAuthResult {
+  bearer: string | null;
+  setBearer: (b: string | null) => void;
+  signInHref: string;
+  signOut: () => void;
+}
+
+export function useAuth(hubUrl: string): UseAuthResult {
+  const [bearer, setBearer] = useState<string | null>(null);
+
+  useEffect(() => {
+    consumeFragment();
+    setBearer(getBearer());
+  }, []);
+
+  return {
+    bearer,
+    setBearer,
+    signInHref: loginUrl(hubUrl),
+    signOut: () => {
+      clearBearer();
+      setBearer(null);
+    },
+  };
 }
