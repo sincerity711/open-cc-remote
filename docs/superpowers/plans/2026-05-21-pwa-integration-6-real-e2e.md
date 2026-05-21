@@ -41,6 +41,10 @@ Each plan dispatched subagents that explicitly skipped the manual `bun run dev` 
 | P5 Task 3 Step 3 — Settings drawer end-to-end (rename / revoke / push-pref toggle / appearance) | Task 9: scenario `13-settings-drawer` (new) |
 | P5 Task 5 Step 5 — stale-bearer 3-consecutive-401 guard | Task 8: scenario `14-auth-failure` (new) |
 | P5 Task 10 Step 4 — full-flow smoke | natural superset of Tasks 5–10 once they all land |
+| P3 Task 7 Step 4 — connection-lost banner + queued chat flush (P5.5 hotfix) | Task 7: scenario `12-chat-roundtrip` extended with disconnect step |
+| Spec §1 invariant 2 — idle synthetic-last item (P5.5 hotfix) | Task 10: scenario `06-idle` asserts the IdleWaitingCard renders |
+| Spec — `/demo` is the regression baseline | Task 10b: scenario `16-demo-cards` (new) drives `/demo`'s Cards step on each viewport |
+| P4 multi-pending "Already handled on another device" toast — P4 Task 8 Step 5 manual core case | Task 6: REQUIRED step in `15-multi-pending` (was previously marked "(Optional, harder)" — promoted) |
 
 ---
 
@@ -68,7 +72,8 @@ e2e-real/
 │   ├── 12-chat-roundtrip.test.ts           # REWRITTEN with browser
 │   ├── 13-settings-drawer.test.ts          # NEW
 │   ├── 14-auth-failure.test.ts             # NEW
-│   └── 15-multi-pending.test.ts            # NEW
+│   ├── 15-multi-pending.test.ts            # NEW
+│   └── 16-demo-cards.test.ts               # NEW — /demo route visual baseline
 ├── screenshots/                            # tracked baselines, one dir per scenario
 │   └── <scenario>/<step>.png               # synced from artifacts on success
 ├── artifacts/                              # NEW — gitignored (videos, traces, raw PNGs)
@@ -443,7 +448,7 @@ Boot two real claude sessions on the same daemon, each provoking a permission co
 2. `surface-shows-1-of-2` — open surface, assert `permission-queue` reads `1 of 2 pending`
 3. `advance-after-allow` — click Allow; assert queue text becomes `1 of 1 pending` (or surface closes if 1 left)
 4. `surface-closes-when-empty` — allow the second; surface should auto-close
-5. (Optional, harder) `already-handled-toast` — start a third pending, open surface for it, then have the daemon resolve it directly (simulating "another device"); assert toast shows + surface auto-advances or closes.
+5. **REQUIRED — `already-handled-toast`**. Start a third pending, open surface for it, then have the daemon resolve it directly out-of-band (simulate "another device" by making the ws-side `pwa-client` from `helpers/pwa-client.ts` send the `permission_reply` for that request_id). Assert the visible toast text `"Already handled on another device."` and assert the surface either auto-advances to the next pending or auto-closes when empty. (Was previously marked Optional — promoted to required because it's the core P4 invariant; the queue advance without the toast doesn't prove the resolution-from-elsewhere path.)
 
 - [ ] **Step 3: Run both**
 
@@ -480,6 +485,8 @@ Steps:
 3. `chat-input-typed` — `page.getByTestId("chat-input").fill("hello claude")`
 4. `chat-sent` — submit, assert the user bubble appears in `timeline`
 5. `claude-response-rendered` — wait for an assistant card with non-empty text
+6. **`disconnect-banner-appears`** — kill the hub container WS layer (e.g. `docker compose pause hub` then resume after the next step) OR call `await page.evaluate(() => { (window as any).__test_close_ws?.(); })` if the harness exposes a hook. Assert `data-testid="connection-banner"` is visible. Type a message and submit while disconnected — the banner's `data-testid="queued-count"` should read `1 queued`.
+7. **`reconnect-flushes-queue`** — restore the WS, wait for the `connection-banner` to disappear, assert the queued message arrives in the chat log (the queued user-bubble appears) — covers spec §3.2 queued-flush invariant introduced by the P5.5 hotfix.
 
 - [ ] **Step 3: Run both**
 
@@ -580,11 +587,11 @@ git commit -m "test(e2e-real): 13-settings-drawer — rename/revoke/toggles/appe
 **Files:**
 - Modify: `e2e-real/tests/04-history-scrollback.test.ts` — assert `Load earlier events` button click triggers history backfill in the timeline.
 - Modify: `e2e-real/tests/05-task-completed.test.ts` — assert `task-completed` card lands; the per-session badge increments.
-- Modify: `e2e-real/tests/06-idle.test.ts` — assert idle card appears synthetic-last; clears on next event.
+- Modify: `e2e-real/tests/06-idle.test.ts` — provoke an idle state (real Claude finishes a turn → daemon emits `idle` frame). Assert (a) the synthetic last item renders the IdleWaitingCard's signature text `"How would you like to proceed"` (the SessionTimeline appends `<SessionTimelineItem marker="idle">` containing `<IdleWaitingCard />` per P5.5 hotfix; do not look for any new testid — assert by visible text) and (b) once the next user message is sent, the synthetic item disappears (idle flag cleared).
 - Modify: `e2e-real/tests/07-multi-daemon.test.ts` — assert two `machine-card-*` testids present; pending badge sums correctly.
 - Modify: `e2e-real/tests/08-kill-session.test.ts` — confirm-kill flow: trash icon → confirm → daemon reports session_close → row removed.
 - Modify: `e2e-real/tests/09-start-session.test.ts` — DaemonCard cwd input → Start button → `session_open` arrives → row appears.
-- Modify: `e2e-real/tests/11-offline-push.test.ts` — exercise the push-prefs UI; the actual push subscription stays whatever the existing scenario asserts (likely fake VAPID; no change to that).
+- Modify: `e2e-real/tests/11-offline-push.test.ts` — **scope clarification**: this scenario stays focused on the **push subscription registration** path (browser permission prompt → service worker → /push/subscribe → fake VAPID). The push-prefs UI toggles inside SettingsDrawer are covered by `13-settings-drawer.test.ts` instead (Task 9). Steps for 11 in the new browser path: open `/`, sign in, grant Notifications permission via `await context.grantPermissions(['notifications'])`, assert the post-registration log line / inbox state via the existing assertions; visual coverage is just the post-login home screen.
 
 Each conversion is mechanical: replace `loginAndConnect` with `openPwa`, replace inbox-asserts with DOM-asserts via testids. Each ends with one commit per file:
 
@@ -609,6 +616,74 @@ Expect 14 scenarios green (12 originals minus `10` perf which still uses `pwa-cl
 
 ---
 
+## Task 10b: Add `16-demo-cards` (`/demo` route visual baseline)
+
+**Why:** Spec calls `/demo` the regression baseline for the prototype. Today only the unit test `cards.test.tsx` covers each card's signature string; nothing exercises layout, composition, or cross-viewport rendering. This task plants a PNG baseline for the Cards step at all three viewports.
+
+**Files:**
+- Create: `e2e-real/tests/16-demo-cards.test.ts`
+
+This scenario does NOT need docker / claude / daemons — it only navigates the demo's static fixtures. So it can run without `pairAndStartDaemon` / `startClaudeTmux`. It still uses the same `vite preview` server.
+
+- [ ] **Step 1: Write the scenario**
+
+```ts
+import { test } from "@playwright/test";
+import { startPreview } from "../helpers/preview-server";
+import { makeScenarioContext } from "../helpers/scenario";
+import { chromium } from "@playwright/test";
+
+let preview: Awaited<ReturnType<typeof startPreview>>;
+test.beforeAll(async () => { preview = await startPreview(); });
+test.afterAll(async () => { await preview?.stop(); });
+
+test("/demo cards step renders the full catalog", async ({ page }, testInfo) => {
+  const artifactsDir = `${testInfo.outputDir}`;
+  const scenario = makeScenarioContext({ page, artifactsDir, scenarioSlug: "16-demo-cards", projectName: testInfo.project.name });
+
+  await scenario.step("home-step", async () => {
+    await page.goto(`${preview.baseURL}/demo`);
+    await page.getByText("Home").first().waitFor({ timeout: 10_000 });
+  });
+
+  await scenario.step("cards-step", async () => {
+    // Click through guided demo steps until reaching Cards. The DemoApp
+    // exposes a Next button; alternative: navigate directly via URL hash if
+    // the demo supports it. If not, programmatically click the "Cards"
+    // step label.
+    await page.getByRole("button", { name: /Cards/ }).first().click();
+    await page.getByText("Card anatomy, variants, states, and density rules.").waitFor({ timeout: 5_000 });
+  });
+
+  await scenario.step("catalog-tile-1-user-bubble", async () => {
+    await page.getByText("Please add password reset flow").waitFor();
+  });
+  await scenario.step("catalog-tile-permission-required", async () => {
+    await page.getByText("Permission required", { exact: false }).first().waitFor();
+  });
+  await scenario.step("catalog-tile-task-completed", async () => {
+    await page.getByText("feat: add password reset flow").waitFor();
+  });
+});
+```
+
+This scenario auto-multiplies under `RUN_VIEWPORTS=mobile,tablet,desktop` (Task 11), giving 3 sets of PNGs per check.
+
+- [ ] **Step 2: Run**
+
+```bash
+cd e2e-real && bunx playwright test tests/16-demo-cards.test.ts --project=desktop
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add e2e-real/tests/16-demo-cards.test.ts
+git commit -m "test(e2e-real): 16-demo-cards — /demo route visual baseline"
+```
+
+---
+
 ## Task 11: Multi-viewport wrapper for typical paths (V3 of spec §4.5.8)
 
 **Why:** Mobile and tablet renderings are the new failure mode introduced by P4's responsive grid; today they have zero automated coverage. Run the typical-path scenarios at all three viewports.
@@ -620,10 +695,10 @@ Expect 14 scenarios green (12 originals minus `10` perf which still uses `pwa-cl
 - [ ] **Step 1: Verify the project list reads `RUN_VIEWPORTS`**
 
 ```bash
-cd e2e-real && RUN_VIEWPORTS=mobile,tablet,desktop bunx playwright test tests/01-pair-and-snapshot.test.ts tests/02-permission-relay.test.ts tests/12-chat-roundtrip.test.ts
+cd e2e-real && RUN_VIEWPORTS=mobile,tablet,desktop bunx playwright test tests/01-pair-and-snapshot.test.ts tests/02-permission-relay.test.ts tests/12-chat-roundtrip.test.ts tests/16-demo-cards.test.ts
 ```
 
-Expect 9 runs (3 scenarios × 3 viewports). Step screenshots gain a viewport suffix automatically — wire that up by reading `test.info().project.name` inside the `step` wrapper:
+Expect 12 runs (4 scenarios × 3 viewports). Step screenshots gain a viewport suffix automatically — wire that up by reading `test.info().project.name` inside the `step` wrapper:
 
 Update `helpers/scenario.ts` `step` to suffix:
 ```ts
