@@ -68,7 +68,19 @@ export async function upCompose(): Promise<void> {
     await waitPortFree(7745, 10_000);
   }
 
-  const r = runCompose(["up", "-d", "--wait"], { timeoutMs: 300_000 });
+  // Try `up --wait`. Stale-container races (Docker daemon reports
+  // "No such container: <id>") are recoverable: `down -v` purges the
+  // dangling reference and the next `up` succeeds. Retry once.
+  let r = runCompose(["up", "-d", "--wait"], { timeoutMs: 300_000 });
+  if (r.code !== 0 && /No such container/i.test(r.stderr)) {
+    process.stderr.write(
+      `[upCompose] stale-container race detected — running 'down -v --remove-orphans' and retrying once\n`,
+    );
+    runCompose(["down", "-v", "--remove-orphans", "-t", "5"], { timeoutMs: 30_000 });
+    await waitPortFree(7745, 10_000);
+    r = runCompose(["up", "-d", "--wait"], { timeoutMs: 300_000 });
+  }
+
   if (r.code !== 0) {
     const logs = dumpLogs();
     throw new Error(

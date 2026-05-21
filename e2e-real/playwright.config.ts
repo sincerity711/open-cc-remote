@@ -26,7 +26,10 @@ export default defineConfig({
   testIgnore: [/10-perm-p95\.test\.ts$/, /\/_helpers\//],
   fullyParallel: false,
   workers: 1,
-  retries: 0,
+  // Real-e2e depends on docker compose + tmux + claude + vite preview — any
+  // of those can stutter on a fresh boot. One retry locally absorbs the
+  // first-test docker race; CI gets two for safety.
+  retries: process.env.CI ? 2 : 1,
   reporter: [["list"], ["html", { open: "never" }]],
   use: { baseURL: "http://localhost:4173", trace: "on", video: "on" },
   projects,
