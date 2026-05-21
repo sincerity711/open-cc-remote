@@ -14,6 +14,11 @@ const projects = requested.map((vp) => ({
 
 export default defineConfig({
   testDir: "./tests",
+  // Files using `bun:test` can't be loaded by Playwright (ESM loader rejects
+  // the `bun:` scheme). Run those separately via `bun test`.
+  // - 10-perm-p95.test.ts      — protocol-only WS perf measurement
+  // - tests/_helpers/*.test.ts — helper-internal unit tests
+  testIgnore: [/10-perm-p95\.test\.ts$/, /\/_helpers\//],
   fullyParallel: false,
   workers: 1,
   retries: 0,
