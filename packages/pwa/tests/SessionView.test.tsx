@@ -93,3 +93,55 @@ test("SessionView reports offline state in header and disables composer placehol
   expect(markup).toContain("Offline");
   expect(markup).toContain("session offline");
 });
+
+test("SessionView shows the connection-lost banner when not connected", () => {
+  const markup = renderToStaticMarkup(
+    <SessionView
+      header={{ name: "session-1", model: null, cwd: "/x", online: true }}
+      items={[]}
+      composerBlocked={false}
+      connected={false}
+      onLoadEarlier={() => {}}
+      onSendChat={() => {}}
+      onOpenPermission={() => {}}
+      onBack={() => {}}
+    />,
+  );
+
+  expect(markup).toContain("Connection lost");
+  expect(markup).toContain('data-testid="connection-banner"');
+});
+
+test("SessionView omits the connection-lost banner when connected", () => {
+  const markup = renderToStaticMarkup(
+    <SessionView
+      header={{ name: "session-1", model: null, cwd: "/x", online: true }}
+      items={[]}
+      composerBlocked={false}
+      connected={true}
+      onLoadEarlier={() => {}}
+      onSendChat={() => {}}
+      onOpenPermission={() => {}}
+      onBack={() => {}}
+    />,
+  );
+
+  expect(markup).not.toContain("connection-banner");
+});
+
+test("SessionView renders the idle synthetic-last item when idle is true", () => {
+  const markup = renderToStaticMarkup(
+    <SessionView
+      header={{ name: "session-1", model: "sonnet", cwd: "/x", online: true }}
+      items={items}
+      composerBlocked={false}
+      idle={true}
+      onLoadEarlier={() => {}}
+      onSendChat={() => {}}
+      onOpenPermission={() => {}}
+      onBack={() => {}}
+    />,
+  );
+
+  expect(markup).toContain("How would you like to proceed");
+});

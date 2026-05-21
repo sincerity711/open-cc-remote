@@ -124,6 +124,8 @@ export function RealApp() {
               composerBlocked={sessionTimeline.composerBlocked}
               pendingPermissionInThisSession={sessionTimeline.pendingInThisSession}
               chatError={selectedChatError}
+              connected={connected}
+              idle={sessionTimeline.idle}
               onLoadEarlier={sessionTimeline.loadEarlier}
               onSendChat={(content) => hub.sendChat(selected.daemon_id, selected.session_id, content)}
               onOpenPermission={() => permissionQueue.openSurface()}

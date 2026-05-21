@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../../components/ui/button";
 import { renderTimelineItem, type RenderTimelineItemContext } from "./renderTimelineItem";
+import { SessionTimelineItem } from "./SessionTimelineItem";
+import { IdleWaitingCard } from "./cards/IdleWaitingCard";
 import type { TimelineEvent } from "./types";
 
 export interface SessionTimelineProps {
   items: TimelineEvent[];
+  idle?: boolean;
   onLoadEarlier: () => void;
   onOpenPermission?: (request_id: string) => void;
 }
 
-export function SessionTimeline({ items, onLoadEarlier, onOpenPermission }: SessionTimelineProps) {
+export function SessionTimeline({ items, idle, onLoadEarlier, onOpenPermission }: SessionTimelineProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const lastLoadAt = useRef(0);
@@ -53,6 +56,11 @@ export function SessionTimeline({ items, onLoadEarlier, onOpenPermission }: Sess
             </Button>
           </div>
           {items.map((it) => renderTimelineItem(it, ctx))}
+          {idle && (
+            <SessionTimelineItem marker="idle" key="__idle__">
+              <IdleWaitingCard />
+            </SessionTimelineItem>
+          )}
         </div>
       )}
     </div>

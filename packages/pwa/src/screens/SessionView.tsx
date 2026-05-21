@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowLeft, Send, X } from "lucide-react";
 import type { PwaPermissionRequest } from "@cc-remote/proto";
 import { Button } from "../components/ui/button";
@@ -12,6 +12,8 @@ export interface SessionViewProps {
   composerBlocked: boolean;
   pendingPermissionInThisSession?: PwaPermissionRequest;
   chatError?: string;
+  connected?: boolean;
+  idle?: boolean;
   onLoadEarlier: () => void;
   onSendChat: (content: string) => void;
   onOpenPermission: (request_id: string) => void;
@@ -24,20 +26,34 @@ export function SessionView({
   composerBlocked,
   pendingPermissionInThisSession,
   chatError,
+  connected = true,
+  idle = false,
   onLoadEarlier,
   onSendChat,
   onOpenPermission,
   onBack,
 }: SessionViewProps) {
   const [draft, setDraft] = useState("");
+  const [queue, setQueue] = useState<string[]>([]);
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
     const t = draft.trim();
     if (!t) return;
-    onSendChat(t);
+    if (!connected) {
+      setQueue((q) => [...q, t]);
+    } else {
+      onSendChat(t);
+    }
     setDraft("");
   };
+
+  useEffect(() => {
+    if (connected && queue.length > 0) {
+      for (const msg of queue) onSendChat(msg);
+      setQueue([]);
+    }
+  }, [connected, queue, onSendChat]);
 
   return (
     <aside
@@ -71,12 +87,24 @@ export function SessionView({
       <div className="flex flex-1 flex-col overflow-hidden" data-testid="chat-log">
         <SessionTimeline
           items={items}
+          idle={idle}
           onLoadEarlier={onLoadEarlier}
           onOpenPermission={onOpenPermission}
         />
       </div>
 
       <div className="border-border bg-surface border-t p-3 pb-[calc(12px+env(safe-area-inset-bottom))]">
+        {!connected && (
+          <div
+            className="bg-danger-subtle text-danger mb-2 flex items-center justify-between gap-2 rounded-md px-3 py-2 text-xs"
+            data-testid="connection-banner"
+          >
+            <span>Connection lost — messages will retry when reconnected.</span>
+            {queue.length > 0 && (
+              <span data-testid="queued-count">{queue.length} queued</span>
+            )}
+          </div>
+        )}
         {composerBlocked && pendingPermissionInThisSession && (
           <div className="bg-warning-subtle text-warning mb-2 flex items-center justify-between gap-2 rounded-md px-3 py-2 text-sm">
             <span>Permission required before Claude can continue.</span>

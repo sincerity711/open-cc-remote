@@ -9,6 +9,7 @@ export interface UseSessionTimelineResult {
   loadEarlier: () => void;
   composerBlocked: boolean;
   online: boolean;
+  idle: boolean;
   pendingInThisSession?: PwaPermissionRequest;
 }
 
@@ -38,6 +39,7 @@ export function useSessionTimeline(
         loadEarlier: () => {},
         composerBlocked: false,
         online: false,
+        idle: false,
       };
     }
     const k = eventKey(selected.daemon_id, selected.session_id);
@@ -66,6 +68,7 @@ export function useSessionTimeline(
       loadEarlier,
       composerBlocked: pending.length > 0,
       online,
+      idle: hub.idleSessions[k] ?? false,
       pendingInThisSession: pending[0],
     };
   }, [hub, selected]);
