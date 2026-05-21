@@ -16,6 +16,7 @@ import { openPwa } from "../helpers/pwa-browser.ts";
 import { startPreview, type PreviewHandle } from "../helpers/preview-server.ts";
 import { makeScenarioContext } from "../helpers/scenario.ts";
 import { preflightOrThrow } from "../helpers/preflight.ts";
+import { syncIfPassed } from "../helpers/sync-screenshots.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..");
@@ -32,6 +33,10 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await preview?.stop();
   await downCompose();
+});
+
+test.afterEach(async ({}, testInfo) => {
+  await syncIfPassed(testInfo, "09-start-session");
 });
 
 test("start session: cwd input → Start button → row appears", async ({ page }, testInfo) => {

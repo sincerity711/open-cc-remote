@@ -20,6 +20,7 @@ import { upCompose, downCompose } from "../helpers/compose.ts";
 import { openPwa } from "../helpers/pwa-browser.ts";
 import { startPreview, type PreviewHandle } from "../helpers/preview-server.ts";
 import { pairAndStartDaemon, makeScenarioContext } from "../helpers/scenario.ts";
+import { syncIfPassed } from "../helpers/sync-screenshots.ts";
 
 let preview: PreviewHandle;
 
@@ -31,6 +32,10 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await preview?.stop();
   await downCompose();
+});
+
+test.afterEach(async ({}, testInfo) => {
+  await syncIfPassed(testInfo, "11-offline-push");
 });
 
 test("push subscription: notifications granted → /push/subscribe reachable", async ({ page }, testInfo) => {

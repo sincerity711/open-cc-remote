@@ -12,6 +12,7 @@
 import { test, expect, chromium } from "@playwright/test";
 import { startPreview, type PreviewHandle } from "../helpers/preview-server.ts";
 import { makeScenarioContext } from "../helpers/scenario.ts";
+import { syncIfPassed } from "../helpers/sync-screenshots.ts";
 
 let preview: PreviewHandle;
 
@@ -21,6 +22,10 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await preview?.stop();
+});
+
+test.afterEach(async ({}, testInfo) => {
+  await syncIfPassed(testInfo, "14-auth-failure");
 });
 
 test("stale bearer triggers guard and lands on SignInScreen", async ({ page }, testInfo) => {

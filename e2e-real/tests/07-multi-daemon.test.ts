@@ -15,6 +15,7 @@ import { upCompose, downCompose } from "../helpers/compose.ts";
 import { openPwa } from "../helpers/pwa-browser.ts";
 import { startPreview, type PreviewHandle } from "../helpers/preview-server.ts";
 import { pairAndStartDaemon, makeScenarioContext } from "../helpers/scenario.ts";
+import { syncIfPassed } from "../helpers/sync-screenshots.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..");
@@ -30,6 +31,10 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await preview?.stop();
   await downCompose();
+});
+
+test.afterEach(async ({}, testInfo) => {
+  await syncIfPassed(testInfo, "07-multi-daemon");
 });
 
 test("multi-daemon: all 3 daemon cards render in PWA", async ({ page }, testInfo) => {

@@ -27,6 +27,7 @@ import { openPwa } from "../helpers/pwa-browser.ts";
 import { startPreview, type PreviewHandle } from "../helpers/preview-server.ts";
 import { pairAndStartDaemon, makeScenarioContext } from "../helpers/scenario.ts";
 import { preflightOrThrow } from "../helpers/preflight.ts";
+import { syncIfPassed } from "../helpers/sync-screenshots.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..");
@@ -43,6 +44,10 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await preview?.stop();
   await downCompose();
+});
+
+test.afterEach(async ({}, testInfo) => {
+  await syncIfPassed(testInfo, "04-history-scrollback");
 });
 
 test("history scrollback: Load earlier events button triggers backfill", async ({ page }, testInfo) => {

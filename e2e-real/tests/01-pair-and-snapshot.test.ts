@@ -15,6 +15,7 @@ import { startClaudeTmux } from "../helpers/claude-tmux.ts";
 import { startPreview, type PreviewHandle } from "../helpers/preview-server.ts";
 import { pairAndStartDaemon, makeScenarioContext } from "../helpers/scenario.ts";
 import { preflightOrThrow } from "../helpers/preflight.ts";
+import { syncIfPassed } from "../helpers/sync-screenshots.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..");
@@ -31,6 +32,10 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await preview?.stop();
   await downCompose();
+});
+
+test.afterEach(async ({}, testInfo) => {
+  await syncIfPassed(testInfo, "01-pair-and-snapshot");
 });
 
 test("pair-and-snapshot: sign-in screen → home with daemon card after real claude session", async ({ page }, testInfo) => {
