@@ -99,20 +99,27 @@ test("permission relay: PWA approve → tool runs → task_completed", async ({ 
     });
 
     await sc.step("permission-mini-card", async () => {
-      // The mini-card lives on the home screen, but on desktop the
-      // SessionView and HomeScreen render alongside each other. If the
-      // testid isn't present from the SessionView vantage, navigate back.
+      // The mini-card lives on the home screen. On desktop both home and
+      // session render side-by-side so the mini is visible without nav.
+      // On mobile, opening a session hides home (sessionActiveOnMobile),
+      // so the equivalent signal is the in-session warning strip above
+      // the composer ("Permission required before Claude can continue.")
+      // that the SessionView shows when pendingPermissionInThisSession
+      // is set. We assert whichever surfaces first within the timeout.
       const mini = session.page.getByTestId("permission-mini");
-      try {
-        await mini.waitFor({ timeout: 60_000 });
-      } catch {
-        // Fall back: navigate home and try again.
-        await session.page.goto("/");
-        await mini.waitFor({ timeout: 30_000 });
-      }
+      const inSessionWarning = session.page.getByText(
+        "Permission required before Claude can continue.",
+      );
+      await Promise.race([
+        mini.waitFor({ timeout: 60_000 }),
+        inSessionWarning.waitFor({ timeout: 60_000 }),
+      ]);
     });
 
     await sc.step("permission-surface-open", async () => {
+      // Reach the surface via whichever Review entrypoint is visible —
+      // both the mini-card (home) and the in-session warning strip
+      // expose a "Review" button.
       await session.page.getByRole("button", { name: "Review" }).first().click();
       await session.page.getByTestId("permission-surface").waitFor({ timeout: 5_000 });
     });
