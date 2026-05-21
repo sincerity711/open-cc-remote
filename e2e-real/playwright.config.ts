@@ -1,8 +1,13 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const VIEWPORT_PRESETS = {
-  mobile:  { ...devices["iPhone 14"], viewport: { width: 390, height: 844 } },
-  tablet:  { ...devices["iPad Mini"], viewport: { width: 768, height: 1024 } },
+  // Mobile/tablet override defaultBrowserType from the iPhone/iPad device
+  // presets (which default to WebKit). Using chromium across all viewports
+  // keeps the browser install single-channel and avoids `pw_run.sh` not
+  // installed for webkit. Trade-off: we test responsive layout, not real
+  // mobile-Safari rendering.
+  mobile:  { ...devices["iPhone 14"], defaultBrowserType: "chromium" as const, viewport: { width: 390, height: 844 } },
+  tablet:  { ...devices["iPad Mini"], defaultBrowserType: "chromium" as const, viewport: { width: 768, height: 1024 } },
   desktop: { viewport: { width: 1280, height: 800 } },
 };
 
