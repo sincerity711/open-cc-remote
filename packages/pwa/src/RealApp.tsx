@@ -10,6 +10,8 @@ import { computeDaemonViewModels, totalPendingApprovals } from "./lib/daemonView
 import { AppShell } from "./screens/AppShell";
 import { HomeScreen } from "./screens/HomeScreen";
 import { useDevice } from "./hooks/useMediaQuery";
+import { usePermissionQueue } from "./hooks/usePermissionQueue";
+import { PermissionSurface } from "./screens/PermissionSurface";
 
 const HUB_URL = (import.meta.env.VITE_HUB_URL as string) ?? "ws://localhost:7745";
 
@@ -54,6 +56,7 @@ export function RealApp() {
     }),
     [daemons, events, pendingPermissions, completedCounts, idleSessions],
   );
+  const permissionQueue = usePermissionQueue(pendingPermissions);
   const pendingApprovalsCount = totalPendingApprovals(pendingPermissions);
   const topPending = Object.values(pendingPermissions)[0];
   const topPendingPreview = topPending
@@ -98,9 +101,7 @@ export function RealApp() {
         connected={connected}
         pendingApprovalsCount={pendingApprovalsCount}
         onOpenSettings={() => setShowSettings(true)}
-        onOpenPermission={() => {
-          // Wired to PermissionSurface in Task 8.
-        }}
+        onOpenPermission={permissionQueue.openSurface}
         onSignOut={() => { clearBearer(); setBearer(null); }}
         sessionActiveOnMobile={!!selected}
         home={
@@ -112,9 +113,7 @@ export function RealApp() {
             onSelectSession={(daemon_id, session_id) => setSelected({ daemon_id, session_id })}
             onStartSession={(daemon_id, cwd) => hub.startSession(daemon_id, cwd)}
             onKillSession={(daemon_id, session_id) => hub.killSession(daemon_id, session_id)}
-            onOpenPermission={() => {
-              // Wired to PermissionSurface in Task 8.
-            }}
+            onOpenPermission={permissionQueue.openSurface}
           />
         }
         session={
@@ -132,10 +131,7 @@ export function RealApp() {
               chatError={selectedChatError}
               onLoadEarlier={sessionTimeline.loadEarlier}
               onSendChat={(content) => hub.sendChat(selected.daemon_id, selected.session_id, content)}
-              onOpenPermission={(request_id) => {
-                const req = pendingPermissions[request_id];
-                if (req) sendPermissionReply(req, "allow");
-              }}
+              onOpenPermission={() => permissionQueue.openSurface()}
               onBack={() => setSelected(null)}
             />
           ) : undefined
@@ -143,6 +139,38 @@ export function RealApp() {
       />
       {showSettings && bearer && (
         <Settings hubUrl={HUB_URL} bearer={bearer} onClose={() => setShowSettings(false)} />
+      )}
+      {permissionQueue.open && permissionQueue.active && (() => {
+        const active = permissionQueue.active;
+        return (
+          <PermissionSurface
+            request={active}
+            daemonHostname={
+              daemons.find((d) => d.daemon_id === active.daemon_id)?.hostname ??
+              active.daemon_id
+            }
+            queueIndex={permissionQueue.queueIndex}
+            queueSize={permissionQueue.queueSize}
+            device={device}
+            onAllow={() => {
+              sendPermissionReply(active, "allow");
+              permissionQueue.advance();
+            }}
+            onDeny={() => {
+              sendPermissionReply(active, "deny");
+              permissionQueue.advance();
+            }}
+            onClose={permissionQueue.closeSurface}
+          />
+        );
+      })()}
+      {permissionQueue.handledNotice && (
+        <div
+          className="bg-surface text-foreground border-border shadow-card fixed top-16 left-1/2 z-[60] -translate-x-1/2 rounded-md border px-3 py-2 text-sm"
+          role="status"
+        >
+          Already handled on another device.
+        </div>
       )}
     </>
   );
