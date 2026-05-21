@@ -1,0 +1,125 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+  --font-sans:
+    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-muted: var(--surface-subtle);
+  --color-elevated: var(--elevated);
+  --color-overlay: var(--overlay);
+  --color-foreground: var(--foreground);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-disabled: var(--disabled);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-subtle: var(--primary-subtle);
+  --color-secondary: var(--secondary);
+  --color-success: var(--success);
+  --color-success-subtle: var(--success-subtle);
+  --color-warning: var(--warning);
+  --color-warning-subtle: var(--warning-subtle);
+  --color-danger: var(--danger);
+  --color-danger-subtle: var(--danger-subtle);
+  --color-offline: var(--offline);
+  --color-code: var(--code-bg);
+  --color-code-foreground: var(--code-text);
+  --color-code-border: var(--code-border);
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-card: 14px;
+  --radius-sheet: 20px;
+
+  --shadow-card: var(--shadow-card);
+  --shadow-sheet: var(--shadow-sheet);
+}
+
+:root {
+  --background: #f7f8fa;
+  --surface: #ffffff;
+  --surface-subtle: #f1f3f6;
+  --elevated: #ffffff;
+  --overlay: rgba(17, 24, 39, 0.36);
+  --foreground: #111827;
+  --muted-foreground: #4b5563;
+  --disabled: #9ca3af;
+  --border: #e5e7eb;
+  --ring: #60a5fa;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-foreground: #ffffff;
+  --primary-subtle: #eff6ff;
+  --secondary: #f8fafc;
+  --success: #16a34a;
+  --success-subtle: #ecfdf5;
+  --warning: #d97706;
+  --warning-subtle: #fff7ed;
+  --danger: #dc2626;
+  --danger-subtle: #fef2f2;
+  --offline: #64748b;
+  --code-bg: #0f172a;
+  --code-text: #e5e7eb;
+  --code-border: #1e293b;
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-sheet: 0 16px 48px rgba(15, 23, 42, 0.18);
+}
+
+.dark {
+  --background: #090b10;
+  --surface: #11141b;
+  --surface-subtle: #171b24;
+  --elevated: #1a1f2b;
+  --overlay: rgba(0, 0, 0, 0.56);
+  --foreground: #f3f4f6;
+  --muted-foreground: #b6bfcc;
+  --disabled: #5f6b7a;
+  --border: #262c38;
+  --ring: #60a5fa;
+  --primary: #3b82f6;
+  --primary-hover: #60a5fa;
+  --primary-foreground: #ffffff;
+  --primary-subtle: #0b2545;
+  --secondary: #171b24;
+  --success: #22c55e;
+  --success-subtle: #052e16;
+  --warning: #fbbf24;
+  --warning-subtle: #2a1a05;
+  --danger: #f87171;
+  --danger-subtle: #2a0f12;
+  --offline: #64748b;
+  --code-bg: #05070b;
+  --code-text: #d1d5db;
+  --code-border: #1e293b;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --shadow-sheet: 0 16px 48px rgba(0, 0, 0, 0.48);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    background: var(--background);
+    font-family: var(--font-sans);
+  }
+
+  body {
+    margin: 0;
+    min-width: 320px;
+    background: var(--background);
+  }
+
+  button,
+  input {
+    font: inherit;
+  }
+}
