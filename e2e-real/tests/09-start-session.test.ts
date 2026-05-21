@@ -1,40 +1,47 @@
 // Scenario 09 — daemon allow_start: true, spawn_command runs claude → second
-// session surfaces.
+// session surfaces. Browser-driven Playwright variant per P6 plan task 10.
 //
-// The plan uses `-p "say started"` for the spawn — which means the spawned
-// claude is non-interactive (-p). The plugin still loads via --mcp-config and
-// registers a session. We assert that a NEW session_open arrives at the PWA.
+// The DaemonCard exposes a "/path/to/project" text input + a Start session
+// icon button. Submitting the form triggers a `start_session` frame; the
+// daemon executes spawn_command in the supplied cwd, claude registers via
+// the MCP plugin, and a NEW session_open arrives at the PWA.
 
-import { test, expect, beforeAll, afterAll } from "bun:test";
+import { test, expect } from "@playwright/test";
 import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { upCompose, downCompose } from "../helpers/compose.ts";
-import { loginAndConnect } from "../helpers/pwa-client.ts";
-import { pairAndStartDaemon } from "../helpers/scenario.ts";
+import { openPwa } from "../helpers/pwa-browser.ts";
+import { startPreview, type PreviewHandle } from "../helpers/preview-server.ts";
+import { makeScenarioContext } from "../helpers/scenario.ts";
 import { preflightOrThrow } from "../helpers/preflight.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..");
 const pluginEntry = resolve(repoRoot, "packages", "plugin", "src", "index.ts");
 
-beforeAll(async () => {
+let preview: PreviewHandle;
+
+test.beforeAll(async () => {
   preflightOrThrow();
   await upCompose();
-}, 300_000);
-afterAll(async () => { await downCompose(); }, 60_000);
+  preview = await startPreview();
+});
 
-test("start_session: PWA → daemon spawns claude → new session_open", async () => {
+test.afterAll(async () => {
+  await preview?.stop();
+  await downCompose();
+});
+
+test("start session: cwd input → Start button → row appears", async ({ page }, testInfo) => {
+  test.setTimeout(300_000);
+
   const daemon_id = `start-${Date.now()}`;
   const cwd = mkdtempSync(join(tmpdir(), "ccr-start-"));
 
-  // Pre-write the MCP config that the spawn_command will reference.
-  // Daemon hasn't started yet, so we don't know the daemon socket path.
-  // Pattern: pair → mkStateDir → write mcp config → start daemon. We need the
-  // socket path BEFORE the daemon starts. Daemon socket path is
-  // `<state_dir>/daemon.sock` — predictable.
-  // Using helpers/daemon's mkStateDir directly:
+  // Pair → mkStateDir → write mcp config → start daemon. Daemon socket path
+  // is `<state_dir>/daemon.sock` — predictable.
   const { mkStateDir, pairDaemon, startDaemon, rmStateDir } = await import("../helpers/daemon.ts");
   const { issuePairingCode } = await import("../helpers/admin.ts");
 
@@ -55,8 +62,7 @@ test("start_session: PWA → daemon spawns claude → new session_open", async (
   };
   writeFileSync(mcpPath, JSON.stringify(mcpConfig, null, 2));
 
-  // Compose the spawn_command. ANTHROPIC auth is supplied via env passed to
-  // the daemon; the daemon's tmux child inherits that env.
+  // Compose the spawn_command. ANTHROPIC auth is supplied via env.
   const apiKey = process.env.ANTHROPIC_API_KEY;
   const authToken = process.env.ANTHROPIC_AUTH_TOKEN;
   const baseUrl = process.env.ANTHROPIC_BASE_URL;
@@ -82,26 +88,57 @@ test("start_session: PWA → daemon spawns claude → new session_open", async (
     spawn_command,
   });
 
-  const pwa = await loginAndConnect({ hub_http: "http://localhost:7745", hub_ws: "ws://localhost:7745" });
+  await page.close();
+
+  const session = await openPwa({
+    baseURL: preview.baseURL,
+    hub_http: "http://localhost:7745",
+    artifactsDir: testInfo.outputDir,
+  });
+
+  const sc = makeScenarioContext({
+    page: session.page,
+    artifactsDir: testInfo.outputDir,
+    scenarioSlug: "09-start-session",
+    projectName: testInfo.project.name,
+  });
 
   const tmuxName = `ccr-start-spawn-${daemon_id}`;
   try {
-    pwa.send({ type: "start_session", daemon_id, cwd, name: tmuxName });
+    await sc.step("home-after-login", async () => {
+      await session.page.getByTestId("home-screen").waitFor({ timeout: 30_000 });
+    });
 
-    const opened = await pwa.waitFor((f) => {
-      if (f.type === "session_open" && f.daemon_id === daemon_id) return f;
-      return false;
-    }, 60_000, "session_open from spawned claude");
-    expect(opened).toBeTruthy();
+    await sc.step("daemon-card-visible", async () => {
+      await session.page.getByTestId(`machine-card-${daemon_id}`).waitFor({ timeout: 30_000 });
+    });
+
+    await sc.step("cwd-typed-and-start-clicked", async () => {
+      // The DaemonCard inside the machine-card holds a labeled input
+      // ("Working directory for <hostname>") and an icon Start button.
+      const card = session.page.getByTestId(`machine-card-${daemon_id}`);
+      const cwdInput = card.getByRole("textbox");
+      await cwdInput.waitFor({ timeout: 5_000 });
+      await cwdInput.fill(cwd);
+      await card.getByRole("button", { name: "Start session" }).click();
+    });
+
+    await sc.step("session-row-appears", async () => {
+      // After spawn, claude registers via MCP → session_open arrives → row
+      // renders under the daemon card. Real claude boot under the test
+      // runner can take a while; budget 90s.
+      const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
+      await expect(sessionsList.locator(".bg-surface").first()).toBeVisible({ timeout: 120_000 });
+    });
   } finally {
-    pwa.close();
     // Clean up the spawned tmux session.
     try {
       const { killSession } = await import("../helpers/tmux.ts");
       killSession(tmuxName);
-    } catch {}
+    } catch { /* noop */ }
+    await session.close();
     await daemon.stop();
     rmStateDir(state_dir);
     rmSync(cwd, { recursive: true, force: true });
   }
-}, 240_000);
+});
