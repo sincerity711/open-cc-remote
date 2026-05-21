@@ -1154,7 +1154,7 @@ import {
 
 const cases: Array<[string, JSX.Element, string]> = [
   ["UserBubble", <UserBubble />, "Please add password reset flow"],
-  ["AssistantBubble", <AssistantBubble />, "I'll plan the implementation"],
+  ["AssistantBubble", <AssistantBubble />, "plan the implementation"],
   ["ReasoningCard", <ReasoningCard />, "Reasoning (5 steps)"],
   ["BashToolCard", <BashToolCard />, "pnpm test auth"],
   ["FileEditCard", <FileEditCard />, "src/routes/auth/reset.ts"],
