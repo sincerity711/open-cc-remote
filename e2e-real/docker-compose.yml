@@ -30,7 +30,7 @@ services:
       HUB_PORT: "7745"
       HUB_DB_PATH: "/data/hub.sqlite"
       HUB_JWT_SECRET: "e2e-test-secret-not-for-prod"
-      HUB_PWA_URL: "http://localhost:7745/"
+      HUB_PWA_URL: "http://localhost:4173/"
       HUB_IAS_ISSUER: "http://fake-ias:7770"
       HUB_IAS_CLIENT_ID: "cc-remote"
       HUB_IAS_CLIENT_SECRET: "test-secret"

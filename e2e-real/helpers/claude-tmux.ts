@@ -110,22 +110,18 @@ export async function startClaudeTmux(opts: StartClaudeTmuxOpts): Promise<Claude
 
     tmux.sendKeys(opts.sessionName, cmd, true);
 
-    // 4. Dev-channels confirmation. Observed text in CC 2.1.144:
-    //    "WARNING: Loading development channels … 1. I am using this for local
-    //    development / 2. Exit". Match on "Enter to confirm" which is the
-    //    button-row instruction and only renders once the dialog is fully
-    //    interactive.
+    // 4. Boot dialogs. Claude Code's dialog order changed between 2.1.144 and
+    //    2.1.146 — current order is trust-workspace FIRST, then dev-channels.
+    //    Both display "Enter to confirm". We dismiss them in two passes by
+    //    waiting for "Enter to confirm", sending Enter, then waiting again.
+    //    The trust dialog only renders for unfamiliar cwds, so the FIRST pass
+    //    is soft (may already be on dev-channels). The SECOND pass is also
+    //    soft because boot order can swap on different versions.
     await dismissDialog(opts.sessionName, /Enter to confirm/i, 20_000, true);
-
-    // 5. Workspace-trust dialog (per-cwd, may already be remembered).
-    //    Observed text: "Quick safety check: Is this a project you created or
-    //    one you trust?" → 1. Yes / 2. No.
-    await dismissDialog(
-      opts.sessionName,
-      /trust.*workspace|trust.*folder|safety check|created or one you trust/i,
-      8_000,
-      true,
-    );
+    // After Enter, Claude needs ~1-2s to swap dialogs. Poll for the next
+    // "Enter to confirm" or for the interactive prompt directly.
+    await new Promise((r) => setTimeout(r, 1_500));
+    await dismissDialog(opts.sessionName, /Enter to confirm/i, 8_000, true);
 
     // 6. Wait for the interactive prompt. Claude Code 2.1.144 shows a `❯` cursor
     //    on a fresh line once boot is complete (preceded by "Try ..." placeholder

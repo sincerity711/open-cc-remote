@@ -22,12 +22,35 @@ export async function openPwa(opts: {
   hub_http: string;         // e.g. http://localhost:7745
   artifactsDir: string;     // for video/trace
 }): Promise<BrowserSession> {
-  const browser = await chromium.launch({ headless: true });
+  // Host-resolution fix: the hub redirects to the IAS issuer at
+  // `http://fake-ias:7770`, a hostname only resolvable inside the docker
+  // network. fake-ias is published on the host at localhost:7770. Use
+  // chromium's host-resolver-rules to alias fake-ias → 127.0.0.1 at the
+  // network layer, which is the only level that intercepts top-level
+  // navigation before DNS resolution fails.
+  const browser = await chromium.launch({
+    headless: true,
+    args: ["--host-resolver-rules=MAP fake-ias 127.0.0.1"],
+  });
   const context = await browser.newContext({
     baseURL: opts.baseURL,
     recordVideo: { dir: opts.artifactsDir },
   });
-  await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+  // Under `playwright test` with `use: { trace: 'on' }`, the runner already
+  // auto-starts tracing on every context created via chromium.launch(). Calling
+  // tracing.start again throws "Tracing has been already started". Detect that
+  // case (best-effort) by trying to start and treating the duplicate-start
+  // error as a no-op.
+  let traceOwned = true;
+  try {
+    await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+  } catch (e) {
+    if ((e as Error).message?.includes("already started")) {
+      traceOwned = false;
+    } else {
+      throw e;
+    }
+  }
 
   const page = await context.newPage();
   // Inject HUB_URL via VITE_HUB_URL — vite preview reads from build-time env, so
@@ -51,7 +74,11 @@ export async function openPwa(opts: {
     page,
     bearer,
     async close() {
-      await context.tracing.stop({ path: `${opts.artifactsDir}/trace.zip` });
+      if (traceOwned) {
+        try {
+          await context.tracing.stop({ path: `${opts.artifactsDir}/trace.zip` });
+        } catch { /* best-effort */ }
+      }
       await context.close();
       await browser.close();
     },
