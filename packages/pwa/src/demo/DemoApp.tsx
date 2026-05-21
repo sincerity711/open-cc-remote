@@ -52,6 +52,7 @@ import { StatusChip, type SessionState } from "../screens/primitives/StatusChip"
 import { StatusIcon } from "../screens/primitives/StatusIcon";
 import { CatalogCard } from "../screens/timeline/cards/CatalogCard";
 import { CatalogHeader } from "../screens/timeline/cards/CatalogHeader";
+import { AssistantBubble, ReasoningCard, UserBubble, UserBubbleSurface } from "../screens/timeline/cards";
 import { SessionTimelineItem } from "../screens/timeline/SessionTimelineItem";
 import type { TimelineEvent } from "../screens/timeline/types";
 
@@ -966,7 +967,7 @@ function SessionClaudeTurnCard() {
         I'll plan the implementation and create the necessary endpoints.
       </p>
       <div className="mt-3 grid gap-2">
-        <CatalogReasoning />
+        <ReasoningCard />
         <CatalogBashTool />
         <CatalogFileEdit />
         <CatalogReadSearch />
@@ -1053,8 +1054,8 @@ function MiniTimelinePreview() {
         <MoreHorizontal className="text-muted-foreground size-4" />
       </div>
       <div className="space-y-3 p-4">
-        <CatalogUserBubble />
-        <CatalogAssistantBubble />
+        <UserBubble />
+        <AssistantBubble />
         <CatalogBashTool />
         <CatalogFileEdit />
         <CatalogReadSearch />
@@ -1081,13 +1082,13 @@ function CardCatalog({ device }: { device: Device }) {
       <div className="space-y-3">
         <CatalogGroup device={device}>
           <CatalogTile number={1} title="User Bubble (Right)">
-            <CatalogUserBubble />
+            <UserBubble />
           </CatalogTile>
           <CatalogTile number={2} title="Assistant Bubble (Left)">
-            <CatalogAssistantBubble />
+            <AssistantBubble />
           </CatalogTile>
           <CatalogTile number={3} title="Reasoning (Collapsed)">
-            <CatalogReasoning />
+            <ReasoningCard />
           </CatalogTile>
           <CatalogTile number={4} title="Bash Tool">
             <CatalogBashTool />
@@ -1191,51 +1192,6 @@ function CatalogTile({
       </p>
       {children}
     </div>
-  );
-}
-
-function CatalogUserBubble() {
-  return (
-    <CatalogCard>
-      <UserBubbleSurface />
-    </CatalogCard>
-  );
-}
-
-function UserBubbleSurface() {
-  return (
-    <div className="bg-primary-subtle border-primary/20 ml-auto max-w-[92%] rounded-md border p-3">
-      <p>Please add password reset flow using email tokens.</p>
-      <p className="text-muted-foreground mt-2 text-right text-xs">10:24 AM</p>
-    </div>
-  );
-}
-
-function CatalogAssistantBubble() {
-  return (
-    <CatalogCard>
-      <CatalogHeader icon={Terminal} title="Claude" meta="10:24 AM" />
-      <p className="mt-2 leading-5">
-        I'll plan the implementation and create the necessary endpoints.
-      </p>
-    </CatalogCard>
-  );
-}
-
-function CatalogReasoning() {
-  return (
-    <CatalogCard>
-      <div className="flex items-center justify-between gap-2">
-        <p className="flex items-center gap-2 font-semibold">
-          <Sparkles className="text-primary size-4" />
-          Reasoning (5 steps)
-        </p>
-        <ChevronRight className="text-muted-foreground size-4" />
-      </div>
-      <p className="text-muted-foreground mt-4 text-center text-xs">
-        Click to expand
-      </p>
-    </CatalogCard>
   );
 }
 
