@@ -9,3 +9,5 @@ export { ReadSearchCard } from "./ReadSearchCard";
 export { ToolResultShortCard } from "./ToolResultShortCard";
 export { ToolResultLongCard } from "./ToolResultLongCard";
 export { ToolFailureCard } from "./ToolFailureCard";
+export { PermissionInlineCard } from "./PermissionInlineCard";
+export { PermissionResolvedCard } from "./PermissionResolvedCard";

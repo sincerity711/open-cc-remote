@@ -30,7 +30,6 @@ import {
   Send,
   Settings,
   ShieldAlert,
-  ShieldCheck,
   Sparkles,
   Split,
   Smartphone,
@@ -56,6 +55,8 @@ import {
   AssistantBubble,
   BashToolCard,
   FileEditCard,
+  PermissionInlineCard,
+  PermissionResolvedCard,
   ReadSearchCard,
   ReasoningCard,
   ToolFailureCard,
@@ -1124,13 +1125,13 @@ function CardCatalog({ device }: { device: Device }) {
             <ToolFailureCard />
           </CatalogTile>
           <CatalogTile number={10} title="Permission Request (Inline)">
-            <CatalogPermissionInline />
+            <PermissionInlineCard />
           </CatalogTile>
           <CatalogTile number={11} title="Permission Review (Card)">
             <CatalogPermissionReview />
           </CatalogTile>
           <CatalogTile number={12} title="Permission Resolved (Inline)">
-            <CatalogPermissionResolved />
+            <PermissionResolvedCard />
           </CatalogTile>
         </CatalogGroup>
         <CatalogGroup device={device}>
@@ -1206,21 +1207,6 @@ function CatalogTile({
   );
 }
 
-function CatalogPermissionInline() {
-  return (
-    <CatalogCard tone="warning">
-      <CatalogHeader icon={ShieldAlert} title="Permission required" meta="10:26 AM" tone="warning" />
-      <div className="mt-3 grid gap-1 text-xs">
-        <p>Tool <span className="ml-6 font-mono">Bash</span></p>
-        <p>Command <span className="font-mono">rm -rf node_modules</span></p>
-      </div>
-      <Button className="mt-3 w-full" size="sm" variant="secondary">
-        Review
-      </Button>
-    </CatalogCard>
-  );
-}
-
 function CatalogPermissionReview() {
   return (
     <CatalogCard tone="warning">
@@ -1236,15 +1222,6 @@ function CatalogPermissionReview() {
         <Button size="sm">Allow once</Button>
         <Button size="sm" variant="secondary">Always</Button>
       </div>
-    </CatalogCard>
-  );
-}
-
-function CatalogPermissionResolved() {
-  return (
-    <CatalogCard tone="success">
-      <CatalogHeader icon={ShieldCheck} title="Permission granted" meta="10:27 AM" tone="success" />
-      <code className="mt-3 block font-mono text-xs">rm -rf node_modules</code>
     </CatalogCard>
   );
 }
