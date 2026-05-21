@@ -2,6 +2,7 @@
 // Encapsulates the "issue code → mkStateDir → pairDaemon → startDaemon"
 // dance that every scenario repeats.
 
+import type { Page } from "@playwright/test";
 import { issuePairingCode } from "./admin.ts";
 import { startDaemon, pairDaemon, mkStateDir, rmStateDir, type DaemonOpts, type DaemonHandle } from "./daemon.ts";
 
@@ -28,6 +29,37 @@ export async function pairAndStartDaemon(opts: PairAndStartOpts): Promise<Paired
     async cleanup() {
       await handle.stop();
       rmStateDir(state_dir);
+    },
+  };
+}
+
+export interface ScenarioContext {
+  page: Page;
+  artifactsDir: string;
+  scenarioSlug: string;
+  projectName: string;
+  step: (label: string, fn: () => Promise<void>) => Promise<void>;
+}
+
+export function makeScenarioContext(opts: {
+  page: Page;
+  artifactsDir: string;
+  scenarioSlug: string;
+  projectName: string;
+}): ScenarioContext {
+  let seq = 0;
+  return {
+    page: opts.page,
+    artifactsDir: opts.artifactsDir,
+    scenarioSlug: opts.scenarioSlug,
+    projectName: opts.projectName,
+    step: async (label, fn) => {
+      seq += 1;
+      await fn();
+      const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+      const padded = String(seq).padStart(2, "0");
+      const file = `${opts.artifactsDir}/${padded}-${slug}.${opts.projectName}.png`;
+      await opts.page.screenshot({ path: file, fullPage: false });
     },
   };
 }
