@@ -41,30 +41,39 @@ fi
 stop || true
 mkdir -p "$DEMO_STATE_DIR"
 
-# Verify /etc/hosts has the cc-ias-demo entry. The demo's IAS issuer URL is
-# `http://cc-ias-demo:17770` so the same URL works from inside the hub
-# container (extra_hosts → host-gateway) AND from a browser on the host
-# (127.0.0.1 via /etc/hosts). Refuse to start without it — better to fail
-# fast with a clear instruction than to bring everything up and have OIDC
-# callbacks dead-end.
-if ! grep -qE '^[^#]*\s+cc-ias-demo(\s|$)' /etc/hosts; then
+# Pick a hostname that reaches fake-ias from BOTH the hub container AND a
+# host-side browser. Two strategies, in priority order:
+#   1) Mac LAN IP (10.x / 192.168.x): fast, no setup, BUT may be blocked by
+#      firewall on some networks. Probe by opening a temporary listener and
+#      curling back to the IP.
+#   2) /etc/hosts entry "127.0.0.1 cc-ias-demo": works on any network, but
+#      requires sudo. We refuse to start without it as a fallback.
+HOST_IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)
+if [[ -z "${HOST_IP}" ]]; then
+  HOST_IP=$(ifconfig 2>/dev/null | awk '/inet / && $2 != "127.0.0.1" {print $2; exit}')
+fi
+ISSUER_HOST=""
+if [[ -n "${HOST_IP}" ]]; then
+  ISSUER_HOST="${HOST_IP}"
+  echo "[demo] using LAN IP ${HOST_IP} for IAS issuer"
+elif grep -qE '^[^#]*\s+cc-ias-demo(\s|$)' /etc/hosts; then
+  ISSUER_HOST="cc-ias-demo"
+  echo "[demo] no LAN IP detected; using /etc/hosts cc-ias-demo entry"
+else
   cat <<'EOF' >&2
 
-[demo] /etc/hosts is missing an entry for cc-ias-demo (needed by the OIDC
-       callback flow so both the hub container and your browser can resolve
-       the IAS hostname to the same target).
-
-       One-time setup:
+[demo] Cannot detect a LAN IP and /etc/hosts has no cc-ias-demo entry.
+       The OIDC callback flow needs ONE of them. One-time setup:
 
          echo '127.0.0.1 cc-ias-demo' | sudo tee -a /etc/hosts
 
-       Then re-run this script.
 EOF
   exit 2
 fi
+export ISSUER_HOST
 
 echo "[demo] bringing up hub + fake-ias (compose)..."
-(cd e2e-real && docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --wait)
+(cd e2e-real && ISSUER_HOST="${ISSUER_HOST}" docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --wait)
 
 echo "[demo] issuing pairing code..."
 PAIR_CODE=$(cd e2e-real && docker compose -f docker-compose.yml -f docker-compose.demo.yml exec -T hub \
@@ -136,7 +145,7 @@ else
   AUTH_PREFIX=""
 fi
 tmux send-keys -t "$TMUX_NAME" \
-  "${AUTH_PREFIX} claude --mcp-config ${DEMO_STATE_DIR}/mcp-config.json --dangerously-load-development-channels server:cc-remote --model claude-haiku-4-5 --setting-sources project,local" Enter
+  "${AUTH_PREFIX} claude --mcp-config ${DEMO_STATE_DIR}/mcp-config.json --dangerously-load-development-channels server:cc-remote --model claude-haiku-4-5 --setting-sources project,local --allowedTools 'mcp__cc-remote__reply'" Enter
 
 # Auto-dismiss the same boot dialogs that helpers/claude-tmux.ts handles in
 # the e2e suite, so a fresh `tmux attach -t demo-claude` lands directly on

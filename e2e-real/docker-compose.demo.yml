@@ -1,17 +1,7 @@
 version: "3.9"
-# Demo override: high-port mapping + a shared hostname both the hub container
-# AND host browsers can resolve to fake-ias.
-#
-# Why a shared hostname instead of an IP:
-# - LAN-IP approach (10.x / 192.168.x) breaks when the user's network blocks
-#   inbound on the LAN address (some Wi-Fi setups + macOS firewall do).
-# - host.docker.internal resolves inside containers but NOT reliably from host
-#   browsers (resolves to a Docker bridge IP that doesn't route from host).
-# - Shared hostname `cc-ias-demo` works both ways with one /etc/hosts entry:
-#     127.0.0.1 cc-ias-demo
-#   and `extra_hosts: ["cc-ias-demo:host-gateway"]` inside the hub container.
-#   Both sides hit the same URL → fake-ias's issuerUrl is consistent → JWT
-#   validation works.
+# Demo override: high-port mapping + IAS issuer URL controlled by the
+# demo-channel.sh ISSUER_HOST env (auto-detected: LAN IP if reachable, else
+# `cc-ias-demo` requiring /etc/hosts entry).
 #
 # !override is required because docker-compose merges the `ports` list by
 # APPENDING entries; without override the base low-port bindings would stay.
@@ -23,8 +13,10 @@ services:
     ports: !override
       - "17745:7745"
     extra_hosts:
+      # Only used in the cc-ias-demo fallback path. host-gateway resolves to
+      # the host machine, where 17770 is published from fake-ias.
       - "cc-ias-demo:host-gateway"
     environment:
       HUB_PWA_URL: "http://localhost:15173/"
-      HUB_IAS_ISSUER: "http://cc-ias-demo:17770"
+      HUB_IAS_ISSUER: "http://${ISSUER_HOST}:17770"
       HUB_IAS_REDIRECT_URI: "http://localhost:17745/auth/callback"
