@@ -9,9 +9,10 @@ This complements but does not replace the in-process `e2e/` suite, which remains
 - `fake-ias` + `hub` — docker compose containers (`docker-compose.yml`, Dockerfiles in `fixtures/`)
 - `cc-remote daemon` — spawned per scenario from the local source on the host
 - `claude` (real) — driven through tmux + `--mcp-config` + `--dangerously-load-development-channels`
-- `pwa-client` — a scripted HTTP+WSS client that drives the IAS login chain and asserts on inbound frames
+- PWA — a real chromium browser driven by Playwright against the production `vite preview` build (per scenario)
+- `pwa-client` — a scripted HTTP+WSS client retained only for the protocol-only p95 perf scenario
 
-See `docs/superpowers/specs/2026-05-19-real-e2e-design.md` for the full design.
+See `docs/superpowers/specs/2026-05-19-real-e2e-design.md` and `docs/superpowers/plans/2026-05-21-pwa-integration-6-real-e2e.md` for the full design.
 
 ## Prerequisites
 
@@ -29,10 +30,37 @@ See `docs/superpowers/specs/2026-05-19-real-e2e-design.md` for the full design.
 ```bash
 bun install
 cd e2e-real
-bun run test
+
+# Default: 14 browser-driven scenarios on chromium / desktop viewport.
+bunx playwright test --project=desktop
+
+# 1 protocol-only perf scenario (bun:test — Playwright's ESM loader can't
+# load `bun:test`, so it runs separately):
+bun test e2e-real/tests/10-perm-p95.test.ts
 ```
 
 First run builds the docker images (1–3 min). Subsequent runs reuse cached images. Each test file calls `upCompose` in `beforeAll` and `downCompose -v` in `afterAll`, so state is wiped between files.
+
+### Multi-viewport (typical-path scenarios)
+
+The Playwright config reads `RUN_VIEWPORTS=mobile,tablet,desktop` and runs the same test against each project. The `makeScenarioContext` helper writes step PNGs as `${seq}-${slug}.${projectName}.png`, so mobile/tablet/desktop runs of the same scenario don't collide.
+
+```bash
+RUN_VIEWPORTS=mobile,tablet,desktop bunx playwright test \
+  --project=mobile --project=tablet --project=desktop \
+  tests/01-pair-and-snapshot.test.ts \
+  tests/02-permission-relay.test.ts \
+  tests/12-chat-roundtrip.test.ts \
+  tests/16-demo-cards.test.ts
+```
+
+Note: the `iPhone 14` and `iPad Mini` device presets default to `webkit`. Mobile/tablet runs will fail at fixture-instantiation time unless WebKit is installed (`bunx playwright install webkit`). Once installed, the 4 typical-path scenarios above are expected to cover responsive bugs in the SessionView / AppShell layout chain.
+
+### Visual regression workflow
+
+`e2e-real/screenshots/<scenarioSlug>/` contains the committed baseline PNGs. After every passing run, `helpers/sync-screenshots.ts` (called from `test.afterEach` in each scenario) copies the test's `outputDir/*.png` over the baseline. Failed runs do NOT sync, so a broken UI cannot poison the baseline.
+
+Before merging, run `git diff e2e-real/screenshots/` — any byte change is either a deliberate visual update (commit it with the code change) or an unintended regression (fix it). Diffing on `.png` files is binary, so use a visual diff tool or open both frames; the per-step file naming (`01-sign-in-screen.desktop.png`, etc.) makes it obvious which step regressed.
 
 Manual cleanup if a run is interrupted:
 
@@ -43,11 +71,13 @@ tmux ls 2>/dev/null | awk -F: '/^ccr-/ {print $1}' | xargs -I{} tmux kill-sessio
 
 ## Cost
 
-~$0.20 per full suite at default Haiku (`claude-haiku-4-5`). Permission scenarios add a small premium. The suite emits a final summary line (planned).
+~$0.20 per full suite at default Haiku (`claude-haiku-4-5`). Permission scenarios add a small premium.
 
 ## Acceptance baseline
 
-`bun test e2e-real/` should produce **12 pass / 0 fail in ~5.4 min** wall time on this hardware. Spec §8 budget is < 6 min. If you see longer, suspect a stale docker container / volume — run the manual cleanup above first.
+`bunx playwright test --project=desktop` should produce **15 pass / 0 fail in ~6.5 min** wall time on this hardware (14 browser scenarios + 1 demo-cards UI scenario; the protocol-only `10-perm-p95` runs separately under `bun test`). Spec §8 budget is < 7 min. If you see longer, suspect a stale docker container / volume — run the manual cleanup above first.
+
+A global `_summary.json` artifact aggregating per-scenario timing/cost is deferred — Playwright's HTML reporter (`e2e-real/playwright-report/index.html`) covers most of what an aggregate summary would surface.
 
 ## Why the unusual `claude` flags
 
