@@ -3,7 +3,6 @@ import { useHub, eventKey } from "./ws.ts";
 import { consumeFragment, getBearer, loginUrl, clearBearer } from "./auth.ts";
 import { SessionView } from "./screens/SessionView";
 import { useSessionTimeline } from "./hooks/useSessionTimeline";
-import { PermissionBanner } from "./PermissionBanner.tsx";
 import { registerPushSubscription } from "./push.ts";
 import { Settings } from "./Settings.tsx";
 import { computeDaemonViewModels, totalPendingApprovals } from "./lib/daemonViewModel";
@@ -95,7 +94,6 @@ export function RealApp() {
 
   return (
     <>
-      <PermissionBanner pending={pendingPermissions} onReply={sendPermissionReply} />
       <AppShell
         device={device}
         connected={connected}
