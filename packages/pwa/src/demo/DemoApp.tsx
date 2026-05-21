@@ -50,6 +50,8 @@ import { ClaudeCodeMark } from "../screens/primitives/ClaudeCodeMark";
 import { Field } from "../screens/primitives/Field";
 import { StatusChip, type SessionState } from "../screens/primitives/StatusChip";
 import { StatusIcon } from "../screens/primitives/StatusIcon";
+import { CatalogCard } from "../screens/timeline/cards/CatalogCard";
+import { CatalogHeader } from "../screens/timeline/cards/CatalogHeader";
 
 type Device = "mobile" | "tablet" | "desktop";
 type StepId =
@@ -1316,73 +1318,6 @@ function CatalogTile({
         {number}. {title}
       </p>
       {children}
-    </div>
-  );
-}
-
-function CatalogCard({
-  children,
-  tone = "default",
-}: {
-  children: React.ReactNode;
-  tone?: "default" | "danger" | "success" | "warning" | "purple";
-}) {
-  return (
-    <article
-      className={cn(
-        "rounded-card shadow-card min-h-[92px] border p-3 text-sm",
-        tone === "default" && "border-border bg-surface",
-        tone === "danger" && "border-danger/30 bg-danger-subtle",
-        tone === "success" && "border-success/30 bg-success-subtle",
-        tone === "warning" && "border-warning/35 bg-warning-subtle",
-        tone === "purple" && "border-primary/25 bg-primary-subtle",
-      )}
-    >
-      {children}
-    </article>
-  );
-}
-
-function CatalogHeader({
-  icon: Icon,
-  meta,
-  status,
-  title,
-  tone = "default",
-}: {
-  icon: typeof Terminal;
-  meta?: string;
-  status?: React.ReactNode;
-  title: string;
-  tone?: "danger" | "default" | "primary" | "success" | "warning";
-}) {
-  return (
-    <div className="flex items-center justify-between gap-2">
-      <p className="flex min-w-0 items-center gap-2 font-semibold">
-        <span
-          className={cn(
-            "border-border bg-muted inline-flex size-6 shrink-0 items-center justify-center rounded-md border",
-            tone === "primary" && "border-primary/25 bg-primary-subtle",
-            tone === "success" && "border-success/25 bg-success-subtle",
-            tone === "warning" && "border-warning/30 bg-warning-subtle",
-            tone === "danger" && "border-danger/30 bg-danger-subtle",
-          )}
-        >
-          <Icon
-            className={cn(
-              "size-3.5",
-              tone === "primary" && "text-primary",
-              tone === "success" && "text-success",
-              tone === "warning" && "text-warning",
-              tone === "danger" && "text-danger",
-            )}
-          />
-        </span>
-        <span className="truncate">{title}</span>
-      </p>
-      {status ?? (
-        <span className="text-muted-foreground shrink-0 text-xs">{meta}</span>
-      )}
     </div>
   );
 }
