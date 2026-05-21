@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import type { PwaPermissionRequest, PwaPermissionResolved } from "@cc-remote/proto";
 import { mergeTimeline } from "../lib/timeline";
 import type { TimelineEvent } from "../screens/timeline/types";
-import { eventKey, type UseHubResult } from "../ws";
+import { eventKey, type UseHubResult } from "./useHub";
 
 export interface UseSessionTimelineResult {
   items: TimelineEvent[];

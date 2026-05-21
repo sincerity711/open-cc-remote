@@ -4,7 +4,7 @@ import type {
   PwaPermissionRequest,
 } from "@cc-remote/proto";
 import type { SessionState } from "../screens/primitives/StatusChip";
-import { eventKey } from "../ws";
+import { eventKey } from "../hooks/useHub";
 
 export interface SessionRowViewModel {
   daemon_id: string;

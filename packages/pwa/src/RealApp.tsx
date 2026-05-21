@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useHub, eventKey } from "./ws.ts";
+import { useHub, eventKey } from "./hooks/useHub";
 import { consumeFragment, getBearer, loginUrl, clearBearer } from "./auth.ts";
 import { SessionView } from "./screens/SessionView";
 import { useSessionTimeline } from "./hooks/useSessionTimeline";
