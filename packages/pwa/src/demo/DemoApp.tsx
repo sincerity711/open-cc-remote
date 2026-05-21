@@ -8,12 +8,10 @@ import {
   ChevronRight,
   Circle,
   Clock,
-  Code2,
   Copy,
   FileSearch,
   FileText,
   GitBranch,
-  Info,
   Layers,
   Laptop,
   LoaderCircle,
@@ -23,7 +21,6 @@ import {
   MoreHorizontal,
   PackageCheck,
   Pencil,
-  PlayCircle,
   Plus,
   Radio,
   Send,
@@ -54,11 +51,14 @@ import {
   BashToolCard,
   BatchSummaryCard,
   FileEditCard,
+  IdleWaitingCard,
   PermissionInlineCard,
   PermissionResolvedCard,
+  RawJsonCard,
   ReadSearchCard,
   ReasoningCard,
   SubagentCard,
+  SystemNoticeCard,
   TaskCompletedCard,
   TaskCreatedCard,
   ToolFailureCard,
@@ -967,7 +967,7 @@ function SessionExecutionTimeline() {
       </SessionTimelineItem>
 
       <SessionTimelineItem marker="idle">
-        <CatalogIdleWaiting />
+        <IdleWaitingCard />
       </SessionTimelineItem>
     </div>
   );
@@ -1074,7 +1074,7 @@ function MiniTimelinePreview() {
         <FileEditCard />
         <ReadSearchCard />
         <TaskCompletedCard />
-        <CatalogIdleWaiting />
+        <IdleWaitingCard />
       </div>
       <div className="border-border border-t p-4">
         <div className="border-border bg-muted flex h-11 items-center justify-between rounded-md border px-3">
@@ -1155,13 +1155,13 @@ function CardCatalog({ device }: { device: Device }) {
             <TaskCompletedCard />
           </CatalogTile>
           <CatalogTile number={18} title="System Metadata / Notice">
-            <CatalogSystemNotice />
+            <SystemNoticeCard />
           </CatalogTile>
           <CatalogTile number={19} title="Unknown / Raw JSON">
-            <CatalogRawJson />
+            <RawJsonCard />
           </CatalogTile>
           <CatalogTile number={20} title="Idle / Waiting">
-            <CatalogIdleWaiting />
+            <IdleWaitingCard />
           </CatalogTile>
         </CatalogGroup>
       </div>
@@ -1223,53 +1223,6 @@ function CatalogPermissionReview() {
         <Button size="sm" variant="danger">Deny</Button>
         <Button size="sm">Allow once</Button>
         <Button size="sm" variant="secondary">Always</Button>
-      </div>
-    </CatalogCard>
-  );
-}
-
-function CatalogSystemNotice() {
-  return (
-    <CatalogCard>
-      <CatalogHeader icon={Info} title="System" meta="10:22 AM" />
-      <div className="text-muted-foreground mt-3 grid gap-1 text-xs">
-        <p>Session started</p>
-        <p>Claude Sonnet 3.5</p>
-        <p>Context window 128k</p>
-      </div>
-    </CatalogCard>
-  );
-}
-
-function CatalogRawJson() {
-  return (
-    <CatalogCard>
-      <CatalogHeader icon={Code2} title="Unknown message" meta="10:22 AM" />
-      <pre className="bg-muted mt-3 overflow-hidden rounded-md p-2 font-mono text-xs leading-5">
-{`{
-  "type": "event_unknown",
-  "payload": { "foo": "bar" }
-}`}
-      </pre>
-      <div className="mt-3 flex items-center justify-between">
-        <span className="text-primary text-xs font-semibold">View raw</span>
-        <ChevronRight className="text-muted-foreground size-4" />
-      </div>
-    </CatalogCard>
-  );
-}
-
-function CatalogIdleWaiting() {
-  return (
-    <CatalogCard>
-      <CatalogHeader icon={Clock} title="Waiting for input" meta="10:31 AM" />
-      <div className="mt-3 flex items-center justify-between gap-3">
-        <p className="text-muted-foreground text-sm leading-5">
-          How would you like to proceed?
-        </p>
-        <span className="border-border bg-muted inline-flex size-9 shrink-0 items-center justify-center rounded-full border">
-          <PlayCircle className="text-muted-foreground size-5" />
-        </span>
       </div>
     </CatalogCard>
   );
