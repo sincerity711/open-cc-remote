@@ -6,3 +6,6 @@ export { UserBubble, UserBubbleSurface } from "./UserBubble";
 export { BashToolCard } from "./BashToolCard";
 export { FileEditCard } from "./FileEditCard";
 export { ReadSearchCard } from "./ReadSearchCard";
+export { ToolResultShortCard } from "./ToolResultShortCard";
+export { ToolResultLongCard } from "./ToolResultLongCard";
+export { ToolFailureCard } from "./ToolFailureCard";

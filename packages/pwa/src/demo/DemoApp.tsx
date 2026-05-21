@@ -58,6 +58,9 @@ import {
   FileEditCard,
   ReadSearchCard,
   ReasoningCard,
+  ToolFailureCard,
+  ToolResultLongCard,
+  ToolResultShortCard,
   UserBubble,
   UserBubbleSurface,
 } from "../screens/timeline/cards";
@@ -1110,15 +1113,15 @@ function CardCatalog({ device }: { device: Device }) {
             <ReadSearchCard />
           </CatalogTile>
           <CatalogTile number={7} title="Tool Result (Short Success)">
-            <CatalogToolResultShort />
+            <ToolResultShortCard />
           </CatalogTile>
           <CatalogTile number={8} title="Tool Result (Long Output)">
-            <CatalogToolResultLong />
+            <ToolResultLongCard />
           </CatalogTile>
         </CatalogGroup>
         <CatalogGroup device={device}>
           <CatalogTile number={9} title="Tool Failure / Error">
-            <CatalogToolFailure />
+            <ToolFailureCard />
           </CatalogTile>
           <CatalogTile number={10} title="Permission Request (Inline)">
             <CatalogPermissionInline />
@@ -1200,62 +1203,6 @@ function CatalogTile({
       </p>
       {children}
     </div>
-  );
-}
-
-function CatalogToolResultShort() {
-  return (
-    <CatalogCard>
-      <CatalogHeader
-        icon={CheckCircle2}
-        title="Tests"
-        tone="success"
-        status={<span className="text-success text-xs font-semibold">Success</span>}
-      />
-      <p className="mt-3">All 42 tests passed</p>
-      <p className="text-muted-foreground mt-2 text-xs">Duration 1.8s</p>
-    </CatalogCard>
-  );
-}
-
-function CatalogToolResultLong() {
-  return (
-    <CatalogCard>
-      <CatalogHeader
-        icon={FileText}
-        title="Build"
-        meta="10:26 AM"
-        tone="primary"
-        status={<span className="text-success text-xs font-semibold">Success</span>}
-      />
-      <p className="mt-3">Build completed with warnings</p>
-      <button className="bg-muted mt-3 flex h-9 w-full items-center justify-between rounded-md px-3 text-xs font-semibold">
-        View output (24 lines)
-        <ChevronRight className="size-4" />
-      </button>
-    </CatalogCard>
-  );
-}
-
-function CatalogToolFailure() {
-  return (
-    <CatalogCard tone="danger">
-      <CatalogHeader
-        icon={Terminal}
-        title="Bash"
-        meta="10:25 AM"
-        tone="danger"
-        status={<span className="text-danger text-xs font-semibold">Failed</span>}
-      />
-      <code className="mt-3 block font-mono text-xs">rm -rf node_modules</code>
-      <p className="text-muted-foreground mt-2 text-xs">
-        Exit code <span className="text-danger font-semibold">1</span>
-      </p>
-      <pre className="bg-danger-subtle text-danger mt-3 rounded-md font-mono text-xs leading-5">
-Permission denied: node_modules
-Operation not permitted
-      </pre>
-    </CatalogCard>
   );
 }
 
