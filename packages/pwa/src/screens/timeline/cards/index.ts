@@ -3,3 +3,6 @@ export { CatalogHeader, type CatalogHeaderTone } from "./CatalogHeader";
 export { AssistantBubble } from "./AssistantBubble";
 export { ReasoningCard } from "./ReasoningCard";
 export { UserBubble, UserBubbleSurface } from "./UserBubble";
+export { BashToolCard } from "./BashToolCard";
+export { FileEditCard } from "./FileEditCard";
+export { ReadSearchCard } from "./ReadSearchCard";

@@ -52,7 +52,15 @@ import { StatusChip, type SessionState } from "../screens/primitives/StatusChip"
 import { StatusIcon } from "../screens/primitives/StatusIcon";
 import { CatalogCard } from "../screens/timeline/cards/CatalogCard";
 import { CatalogHeader } from "../screens/timeline/cards/CatalogHeader";
-import { AssistantBubble, ReasoningCard, UserBubble, UserBubbleSurface } from "../screens/timeline/cards";
+import {
+  AssistantBubble,
+  BashToolCard,
+  FileEditCard,
+  ReadSearchCard,
+  ReasoningCard,
+  UserBubble,
+  UserBubbleSurface,
+} from "../screens/timeline/cards";
 import { SessionTimelineItem } from "../screens/timeline/SessionTimelineItem";
 import type { TimelineEvent } from "../screens/timeline/types";
 
@@ -968,9 +976,9 @@ function SessionClaudeTurnCard() {
       </p>
       <div className="mt-3 grid gap-2">
         <ReasoningCard />
-        <CatalogBashTool />
-        <CatalogFileEdit />
-        <CatalogReadSearch />
+        <BashToolCard />
+        <FileEditCard />
+        <ReadSearchCard />
       </div>
     </CatalogCard>
   );
@@ -1056,9 +1064,9 @@ function MiniTimelinePreview() {
       <div className="space-y-3 p-4">
         <UserBubble />
         <AssistantBubble />
-        <CatalogBashTool />
-        <CatalogFileEdit />
-        <CatalogReadSearch />
+        <BashToolCard />
+        <FileEditCard />
+        <ReadSearchCard />
         <CatalogTaskCompleted />
         <CatalogIdleWaiting />
       </div>
@@ -1091,15 +1099,15 @@ function CardCatalog({ device }: { device: Device }) {
             <ReasoningCard />
           </CatalogTile>
           <CatalogTile number={4} title="Bash Tool">
-            <CatalogBashTool />
+            <BashToolCard />
           </CatalogTile>
         </CatalogGroup>
         <CatalogGroup device={device}>
           <CatalogTile number={5} title="File Edit">
-            <CatalogFileEdit />
+            <FileEditCard />
           </CatalogTile>
           <CatalogTile number={6} title="Read / Grep / Glob">
-            <CatalogReadSearch />
+            <ReadSearchCard />
           </CatalogTile>
           <CatalogTile number={7} title="Tool Result (Short Success)">
             <CatalogToolResultShort />
@@ -1192,63 +1200,6 @@ function CatalogTile({
       </p>
       {children}
     </div>
-  );
-}
-
-function CatalogBashTool() {
-  return (
-    <CatalogCard>
-      <CatalogHeader
-        icon={Terminal}
-        title="Bash"
-        meta="10:25 AM"
-        status={<span className="text-success text-xs font-semibold">Success</span>}
-      />
-      <code className="mt-3 block font-mono text-xs">pnpm test auth</code>
-      <p className="text-muted-foreground mt-2 truncate font-mono text-xs">
-        cwd ~/awesome-project
-      </p>
-      <div className="border-border mt-3 border-t pt-2">
-        <span className="text-warning text-xs font-semibold">2 warnings</span>
-      </div>
-    </CatalogCard>
-  );
-}
-
-function CatalogFileEdit() {
-  return (
-    <CatalogCard>
-      <CatalogHeader
-        icon={Pencil}
-        title="Edit"
-        meta="10:27 AM"
-        tone="success"
-        status={
-          <span className="shrink-0 text-xs font-semibold">
-            <span className="text-success">+24</span>{" "}
-            <span className="text-danger">-6</span>
-          </span>
-        }
-      />
-      <p className="mt-3 truncate font-mono text-xs">src/routes/auth/reset.ts</p>
-      <div className="mt-3 flex items-center justify-between gap-2">
-        <span className="text-muted-foreground text-xs">Lines 45-68</span>
-        <span className="text-primary text-xs font-semibold">View diff</span>
-      </div>
-    </CatalogCard>
-  );
-}
-
-function CatalogReadSearch() {
-  return (
-    <CatalogCard>
-      <CatalogHeader icon={FileSearch} title="Read" meta="10:27 AM" tone="primary" />
-      <div className="mt-3 flex items-center justify-between gap-2">
-        <p className="truncate font-mono text-xs">src/lib/token.ts</p>
-        <ChevronRight className="text-muted-foreground size-4 shrink-0" />
-      </div>
-      <p className="text-muted-foreground mt-2 text-xs">(128 lines)</p>
-    </CatalogCard>
   );
 }
 
