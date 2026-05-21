@@ -11,3 +11,7 @@ export { ToolResultLongCard } from "./ToolResultLongCard";
 export { ToolFailureCard } from "./ToolFailureCard";
 export { PermissionInlineCard } from "./PermissionInlineCard";
 export { PermissionResolvedCard } from "./PermissionResolvedCard";
+export { BatchSummaryCard } from "./BatchSummaryCard";
+export { SubagentCard } from "./SubagentCard";
+export { TaskCreatedCard } from "./TaskCreatedCard";
+export { TaskCompletedCard } from "./TaskCompletedCard";

@@ -10,7 +10,6 @@ import {
   Clock,
   Code2,
   Copy,
-  ExternalLink,
   FileSearch,
   FileText,
   GitBranch,
@@ -37,7 +36,6 @@ import {
   Tablet,
   Terminal,
   Trash2,
-  Users,
   Wrench,
   X,
 } from "lucide-react";
@@ -54,11 +52,15 @@ import { CatalogHeader } from "../screens/timeline/cards/CatalogHeader";
 import {
   AssistantBubble,
   BashToolCard,
+  BatchSummaryCard,
   FileEditCard,
   PermissionInlineCard,
   PermissionResolvedCard,
   ReadSearchCard,
   ReasoningCard,
+  SubagentCard,
+  TaskCompletedCard,
+  TaskCreatedCard,
   ToolFailureCard,
   ToolResultLongCard,
   ToolResultShortCard,
@@ -961,7 +963,7 @@ function SessionExecutionTimeline() {
       </SessionTimelineItem>
 
       <SessionTimelineItem marker="success">
-        <CatalogTaskCompleted />
+        <TaskCompletedCard />
       </SessionTimelineItem>
 
       <SessionTimelineItem marker="idle">
@@ -1071,7 +1073,7 @@ function MiniTimelinePreview() {
         <BashToolCard />
         <FileEditCard />
         <ReadSearchCard />
-        <CatalogTaskCompleted />
+        <TaskCompletedCard />
         <CatalogIdleWaiting />
       </div>
       <div className="border-border border-t p-4">
@@ -1136,21 +1138,21 @@ function CardCatalog({ device }: { device: Device }) {
         </CatalogGroup>
         <CatalogGroup device={device}>
           <CatalogTile number={13} title="Batch Summary">
-            <CatalogBatchSummary />
+            <BatchSummaryCard />
           </CatalogTile>
           <CatalogTile number={14} title="Subagent Group (Collapsed)">
-            <CatalogSubagentCollapsed />
+            <SubagentCard />
           </CatalogTile>
           <CatalogTile number={15} title="Subagent Group (Expanded)">
-            <CatalogSubagentExpanded />
+            <SubagentCard expanded />
           </CatalogTile>
           <CatalogTile number={16} title="Task Created (Chip Row)">
-            <CatalogTaskCreated />
+            <TaskCreatedCard />
           </CatalogTile>
         </CatalogGroup>
         <CatalogGroup device={device}>
           <CatalogTile number={17} title="Task Completed">
-            <CatalogTaskCompleted />
+            <TaskCompletedCard />
           </CatalogTile>
           <CatalogTile number={18} title="System Metadata / Notice">
             <CatalogSystemNotice />
@@ -1221,92 +1223,6 @@ function CatalogPermissionReview() {
         <Button size="sm" variant="danger">Deny</Button>
         <Button size="sm">Allow once</Button>
         <Button size="sm" variant="secondary">Always</Button>
-      </div>
-    </CatalogCard>
-  );
-}
-
-function CatalogBatchSummary() {
-  return (
-    <CatalogCard>
-      <CatalogHeader icon={PackageCheck} title="Batch complete" meta="10:28 AM" tone="primary" />
-      <p className="text-muted-foreground mt-2 text-xs">4 tools - 1m 12s</p>
-      <p className="text-muted-foreground mt-1 text-xs">3 succeeded, 1 failed</p>
-      <div className="border-border mt-3 flex items-center justify-between border-t pt-2">
-        <span className="text-primary text-xs font-semibold">View details</span>
-        <ChevronRight className="text-muted-foreground size-4" />
-      </div>
-    </CatalogCard>
-  );
-}
-
-function CatalogSubagentCollapsed() {
-  return (
-    <CatalogCard>
-      <CatalogHeader icon={Users} title="Subagent: test-runner" tone="primary" />
-      <p className="text-muted-foreground mt-2 text-xs">4 steps - 1m 12s</p>
-      <div className="mt-4 flex items-center justify-between gap-2">
-        <span className="text-muted-foreground text-xs">Click to expand</span>
-        <ChevronRight className="text-muted-foreground size-4" />
-      </div>
-    </CatalogCard>
-  );
-}
-
-function CatalogSubagentExpanded() {
-  const rows = ["Install deps", "Run unit tests", "Run integration tests", "Collect coverage"];
-  return (
-    <CatalogCard>
-      <CatalogHeader
-        icon={Users}
-        title="Subagent: test-runner"
-        tone="primary"
-        status={<span className="text-success text-xs font-semibold">Completed</span>}
-      />
-      <div className="mt-3 grid gap-1">
-        {rows.map((row, index) => (
-          <div className="flex items-center justify-between gap-2 text-xs" key={row}>
-            <span className="flex items-center gap-2">
-              <CheckCircle2 className="text-success size-3.5" />
-              {row}
-            </span>
-            <span className="text-muted-foreground">{12 + index * 8}.4s</span>
-          </div>
-        ))}
-      </div>
-    </CatalogCard>
-  );
-}
-
-function CatalogTaskCreated() {
-  return (
-    <CatalogCard>
-      <div className="flex flex-wrap gap-2">
-        {["api-reset", "email-token", "rate-limit"].map((task) => (
-          <span
-            className="border-primary/25 bg-primary-subtle text-primary rounded-md border px-2 py-1 text-xs font-semibold"
-            key={task}
-          >
-            {task}
-          </span>
-        ))}
-      </div>
-      <button className="text-muted-foreground mt-4 flex items-center gap-1 text-xs">
-        <Plus className="size-3.5" />
-        Add task
-      </button>
-    </CatalogCard>
-  );
-}
-
-function CatalogTaskCompleted() {
-  return (
-    <CatalogCard tone="purple">
-      <CatalogHeader icon={CheckCircle2} title="Task completed" meta="10:31 AM" tone="primary" />
-      <p className="mt-2 font-semibold">feat: add password reset flow</p>
-      <div className="mt-3 flex items-center justify-between gap-2">
-        <span className="text-muted-foreground text-xs">Commit a1b2c3d</span>
-        <ExternalLink className="text-primary size-3.5" />
       </div>
     </CatalogCard>
   );
@@ -1478,7 +1394,7 @@ function TimelineEventCard({
     case "subagent":
       return (
         <TimelineShell marker="subagent">
-          <SubagentCard event={event} />
+          <SubagentLiveCard event={event} />
         </TimelineShell>
       );
     case "batch":
@@ -1724,7 +1640,7 @@ function PermissionResolvedNotice({
   );
 }
 
-function SubagentCard({
+function SubagentLiveCard({
   event,
 }: {
   event: Extract<TimelineEvent, { kind: "subagent" }>;
