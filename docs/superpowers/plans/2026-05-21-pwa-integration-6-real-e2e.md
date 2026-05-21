@@ -124,7 +124,7 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   reporter: [["list"], ["html", { open: "never" }]],
-  use: { baseURL: "http://localhost:4173", trace: "retain-on-failure", video: "retain-on-failure" },
+  use: { baseURL: "http://localhost:4173", trace: "on", video: "on" },
   projects,
 });
 ```
