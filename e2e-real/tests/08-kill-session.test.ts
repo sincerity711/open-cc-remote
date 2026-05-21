@@ -1,26 +1,37 @@
-// Scenario 08 — daemon allow_kill: true; PWA kill_session → claude exits +
-// session_close.
+// Scenario 08 — daemon allow_kill: true; PWA trash icon → confirm Kill →
+// daemon reports session_close → row removed. Browser-driven Playwright
+// variant per P6 plan task 10.
 
-import { test, expect, beforeAll, afterAll } from "bun:test";
+import { test, expect } from "@playwright/test";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { upCompose, downCompose } from "../helpers/compose.ts";
 import { startClaudeTmux } from "../helpers/claude-tmux.ts";
-import { loginAndConnect } from "../helpers/pwa-client.ts";
-import { pairAndStartDaemon } from "../helpers/scenario.ts";
+import { openPwa } from "../helpers/pwa-browser.ts";
+import { startPreview, type PreviewHandle } from "../helpers/preview-server.ts";
+import { pairAndStartDaemon, makeScenarioContext } from "../helpers/scenario.ts";
 import { preflightOrThrow } from "../helpers/preflight.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..");
 const pluginEntry = resolve(repoRoot, "packages", "plugin", "src", "index.ts");
 
-beforeAll(async () => {
+let preview: PreviewHandle;
+
+test.beforeAll(async () => {
   preflightOrThrow();
   await upCompose();
-}, 300_000);
-afterAll(async () => { await downCompose(); }, 60_000);
+  preview = await startPreview();
+});
 
-test("kill_session: PWA → daemon → claude exits + session_close", async () => {
+test.afterAll(async () => {
+  await preview?.stop();
+  await downCompose();
+});
+
+test("kill session: trash icon → confirm → row removed", async ({ page }, testInfo) => {
+  test.setTimeout(240_000);
+
   const daemon_id = `kill-${Date.now()}`;
   const handle = await pairAndStartDaemon({
     daemon_id,
@@ -29,10 +40,27 @@ test("kill_session: PWA → daemon → claude exits + session_close", async () =
     allow_kill: true,
   });
 
-  const pwa = await loginAndConnect({ hub_http: "http://localhost:7745", hub_ws: "ws://localhost:7745" });
+  await page.close();
 
-  let claude: ReturnType<typeof startClaudeTmux> extends Promise<infer R> ? R | undefined : never;
+  const session = await openPwa({
+    baseURL: preview.baseURL,
+    hub_http: "http://localhost:7745",
+    artifactsDir: testInfo.outputDir,
+  });
+
+  const sc = makeScenarioContext({
+    page: session.page,
+    artifactsDir: testInfo.outputDir,
+    scenarioSlug: "08-kill-session",
+    projectName: testInfo.project.name,
+  });
+
+  let claude: { stop: () => void } | undefined;
   try {
+    await sc.step("home-after-login", async () => {
+      await session.page.getByTestId("home-screen").waitFor({ timeout: 30_000 });
+    });
+
     claude = await startClaudeTmux({
       cwd: "/tmp",
       prompt: "count from 1 to 100, one per line, slowly",
@@ -42,30 +70,31 @@ test("kill_session: PWA → daemon → claude exits + session_close", async () =
       pluginEntryPath: pluginEntry,
     });
 
-    // Capture session_id from session_open or snapshot.
-    const opened = await pwa.waitFor((f) => {
-      if (f.type === "session_open" && f.daemon_id === daemon_id) return f;
-      if (f.type === "snapshot") {
-        for (const d of f.daemons) {
-          if (d.daemon_id === daemon_id && d.sessions.length > 0) {
-            return { type: "session_open" as const, daemon_id: d.daemon_id, session: d.sessions[0]! };
-          }
-        }
-      }
-      return false;
-    }, 60_000, "session_open");
-    const session_id = (opened as any).session.session_id as string;
+    await sc.step("session-row-visible", async () => {
+      const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
+      await sessionsList.locator(".bg-surface").first().waitFor({ timeout: 90_000 });
+    });
 
-    pwa.send({ type: "kill_session", daemon_id, session_id });
+    await sc.step("trash-icon-clicked", async () => {
+      // Click the per-row "Confirm kill <name>" ghost-button (the trash icon).
+      const trashBtn = session.page.getByRole("button", { name: /^Confirm kill / }).first();
+      await trashBtn.click();
+      // The confirmation strip "Kill session?" appears.
+      await expect(session.page.getByText("Kill session?")).toBeVisible({ timeout: 5_000 });
+    });
 
-    const closed = await pwa.waitFor((f) => {
-      if (f.type === "session_close" && f.daemon_id === daemon_id && (f as any).session_id === session_id) return f;
-      return false;
-    }, 30_000, "session_close");
-    expect(closed).toBeTruthy();
+    await sc.step("kill-confirmed-and-row-removed", async () => {
+      // Click the danger-styled Kill button inside the confirmation strip.
+      await session.page.getByRole("button", { name: "Kill", exact: true }).click();
+      // Daemon kills the tmux session → emits session_close → PWA removes
+      // the row. The sessions list either disappears (no sessions) or shows
+      // "No active sessions." Wait for the bg-surface row to be gone.
+      const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
+      await expect(sessionsList.locator(".bg-surface")).toHaveCount(0, { timeout: 30_000 });
+    });
   } finally {
-    pwa.close();
     claude?.stop();
+    await session.close();
     await handle.cleanup();
   }
-}, 240_000);
+});
