@@ -30,7 +30,11 @@ export interface UseHubResult extends HubState {
   sendChat: (daemon_id: string, session_id: string, content: string, reply_to?: string) => void;
 }
 
-export function useHub(hubUrl: string, bearer: string | null): UseHubResult {
+export function useHub(
+  hubUrl: string,
+  bearer: string | null,
+  options?: { onAuthFailure?: () => void },
+): UseHubResult {
   const [state, setState] = useState<HubState>({
     connected: false, daemons: [], events: {}, pendingPermissions: {},
     completedCounts: {}, idleSessions: {},
@@ -173,9 +177,11 @@ export function useHub(hubUrl: string, bearer: string | null): UseHubResult {
     };
 
     let epoch = 0;          // monotonic within this effect closure.
+    let framelessOpens = 0;
     const connect = () => {
       if (stopped) return;
       const myEpoch = ++epoch;
+      let receivedAnyFrame = false;
       const sep = hubUrl.includes("?") ? "&" : "?";
       const wsUrl = bearer
         ? `${hubUrl}/ws/pwa${sep}bearer=${encodeURIComponent(bearer)}`
@@ -199,6 +205,8 @@ export function useHub(hubUrl: string, bearer: string | null): UseHubResult {
       };
       ws.onmessage = (ev) => {
         if (wsRef.current !== ws) return;   // stale frame from an orphan ws
+        receivedAnyFrame = true;
+        framelessOpens = 0;
         try { apply(JSON.parse(ev.data) as HubToPwa); } catch {}
       };
       const reconnect = () => {
@@ -213,6 +221,16 @@ export function useHub(hubUrl: string, bearer: string | null): UseHubResult {
         }
         if (stopped) return;
         if (myEpoch !== epoch) return;
+        if (!receivedAnyFrame) {
+          framelessOpens += 1;
+          if (framelessOpens >= 3) {
+            stopped = true;
+            options?.onAuthFailure?.();
+            return;
+          }
+        } else {
+          framelessOpens = 0;
+        }
         const delay = backoff;
         backoff = Math.min(backoff * 2, 10_000);
         setTimeout(connect, delay);

@@ -12,6 +12,7 @@ import { HomeScreen } from "./screens/HomeScreen";
 import { useDevice } from "./hooks/useMediaQuery";
 import { usePermissionQueue } from "./hooks/usePermissionQueue";
 import { PermissionSurface } from "./screens/PermissionSurface";
+import { SignInScreen } from "./screens/SignInScreen";
 
 const HUB_URL = (import.meta.env.VITE_HUB_URL as string) ?? "ws://localhost:7745";
 
@@ -21,11 +22,16 @@ export function RealApp() {
   const [bearer, setBearer] = useState<string | null>(null);
   const [selected, setSelected] = useState<Selected | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
 
   useEffect(() => {
     consumeFragment();
     setBearer(getBearer());
   }, []);
+
+  useEffect(() => {
+    if (bearer) setAuthNotice(null);
+  }, [bearer]);
 
   useEffect(() => {
     if (!bearer) return;
@@ -41,7 +47,13 @@ export function RealApp() {
     });
   }, [bearer]);
 
-  const hub = useHub(HUB_URL, bearer);
+  const hub = useHub(HUB_URL, bearer, {
+    onAuthFailure: () => {
+      clearBearer();
+      setBearer(null);
+      setAuthNotice("Session expired, please sign in again.");
+    },
+  });
   const { connected, daemons, events, pendingPermissions, sendPermissionReply, completedCounts, idleSessions, chatErrors } = hub;
   const sessionTimeline = useSessionTimeline(hub, selected);
 
@@ -73,20 +85,7 @@ export function RealApp() {
     : undefined;
 
   if (!bearer) {
-    return (
-      <main className="bg-background flex h-dvh items-center justify-center p-6">
-        <div className="max-w-sm space-y-3 text-center">
-          <h1 className="text-2xl font-semibold">cc-remote</h1>
-          <p className="text-muted-foreground">You're not signed in.</p>
-          <a
-            className="bg-primary text-primary-foreground inline-block rounded-md px-4 py-2 text-sm font-semibold"
-            href={loginUrl(HUB_URL)}
-          >
-            Sign in
-          </a>
-        </div>
-      </main>
-    );
+    return <SignInScreen loginHref={loginUrl(HUB_URL)} notice={authNotice ?? undefined} />;
   }
 
   const selectedChatError = selected ? chatErrors[eventKey(selected.daemon_id, selected.session_id)] : undefined;
