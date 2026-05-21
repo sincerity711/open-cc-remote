@@ -5,3 +5,6 @@ dist/
 .env
 .env.local
 ~/.cc-remote/
+e2e-real/artifacts/
+playwright-report/
+e2e-real/test-results/

@@ -13,7 +13,8 @@
     "@cc-remote/proto": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "^5.4.0",
-    "bun-types": "latest"
+    "@playwright/test": "^1.60.0",
+    "bun-types": "latest",
+    "typescript": "^5.4.0"
   }
 }
