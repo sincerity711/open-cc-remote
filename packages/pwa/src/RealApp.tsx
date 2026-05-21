@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useHub, eventKey } from "./ws.ts";
 import { consumeFragment, getBearer, loginUrl, clearBearer } from "./auth.ts";
-import { SessionPane } from "./SessionPane.tsx";
+import { SessionView } from "./screens/SessionView";
+import { useSessionTimeline } from "./hooks/useSessionTimeline";
 import { PermissionBanner } from "./PermissionBanner.tsx";
 import { registerPushSubscription } from "./push.ts";
 import { Settings } from "./Settings.tsx";
@@ -35,7 +36,9 @@ export function RealApp() {
     });
   }, [bearer]);
 
-  const { connected, daemons, events, pendingPermissions, sendPermissionReply, requestHistory, killSession, startSession, completedCounts, idleSessions, chatMessages, chatErrors, sendChat } = useHub(HUB_URL, bearer);
+  const hub = useHub(HUB_URL, bearer);
+  const { connected, daemons, events, pendingPermissions, sendPermissionReply, completedCounts, idleSessions, chatErrors } = hub;
+  const sessionTimeline = useSessionTimeline(hub, selected);
 
   if (!bearer) {
     return (
@@ -49,12 +52,11 @@ export function RealApp() {
     );
   }
 
-  const selectedEvents = selected ? (events[eventKey(selected.daemon_id, selected.session_id)] ?? []) : [];
-  const selectedChat = selected ? (chatMessages[eventKey(selected.daemon_id, selected.session_id)] ?? []) : [];
   const selectedChatError = selected ? chatErrors[eventKey(selected.daemon_id, selected.session_id)] : undefined;
   const selectedDaemon = selected ? daemons.find((d) => d.daemon_id === selected.daemon_id) : undefined;
-  const selectedSessionOnline = !!selectedDaemon?.online
-    && !!selectedDaemon?.sessions.some((s) => s.session_id === selected?.session_id);
+  const selectedSession = selected
+    ? selectedDaemon?.sessions.find((s) => s.session_id === selected.session_id)
+    : undefined;
 
   return (
     <>
@@ -91,7 +93,7 @@ export function RealApp() {
                   e.preventDefault();
                   const cwd = newSessionCwd[d.daemon_id]?.trim();
                   if (!cwd) return;
-                  startSession(d.daemon_id, cwd);
+                  hub.startSession(d.daemon_id, cwd);
                   setNewSessionCwd((prev) => ({ ...prev, [d.daemon_id]: "" }));
                 }}
                 style={{ display: "flex", gap: 6, margin: "0 0 8px", padding: 8, background: "#f0f8ff", border: "1px solid #cde", borderRadius: 4 }}
@@ -152,7 +154,7 @@ export function RealApp() {
                           onClick={(e) => {
                             e.stopPropagation();
                             if (confirm(`Kill session ${s.session_id}?`)) {
-                              killSession(d.daemon_id, s.session_id);
+                              hub.killSession(d.daemon_id, s.session_id);
                             }
                           }}
                           style={{
@@ -174,16 +176,24 @@ export function RealApp() {
         )}
       </main>
       {selected && (
-        <SessionPane
-          daemon_id={selected.daemon_id}
-          session_id={selected.session_id}
-          events={selectedEvents}
-          chatMessages={selectedChat}
+        <SessionView
+          header={{
+            name: selectedSession?.session_id ?? selected.session_id,
+            model: selectedSession?.model ?? null,
+            cwd: selectedSession?.cwd ?? "",
+            online: sessionTimeline.online,
+          }}
+          items={sessionTimeline.items}
+          composerBlocked={sessionTimeline.composerBlocked}
+          pendingPermissionInThisSession={sessionTimeline.pendingInThisSession}
           chatError={selectedChatError}
-          sessionOnline={selectedSessionOnline}
-          onClose={() => setSelected(null)}
-          onLoadHistory={(before_offset) => requestHistory(selected.daemon_id, selected.session_id, before_offset, 50)}
-          onSendChat={(content) => sendChat(selected.daemon_id, selected.session_id, content)}
+          onLoadEarlier={sessionTimeline.loadEarlier}
+          onSendChat={(content) => hub.sendChat(selected.daemon_id, selected.session_id, content)}
+          onOpenPermission={(request_id) => {
+            const req = pendingPermissions[request_id];
+            if (req) sendPermissionReply(req, "allow");
+          }}
+          onBack={() => setSelected(null)}
         />
       )}
       {showSettings && bearer && (
