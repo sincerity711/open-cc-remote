@@ -57,7 +57,7 @@ export function SessionView({
 
   return (
     <aside
-      className="border-border bg-surface fixed inset-y-0 right-0 z-40 flex w-[min(720px,90vw)] flex-col border-l shadow-xl"
+      className="bg-surface border-border flex h-full min-w-0 flex-col border-l"
       data-testid="session-view"
     >
       <header className="border-border flex items-center justify-between gap-2 border-b p-3">
