@@ -1,16 +1,43 @@
 // Hand-rolled validator for Claude Code JSONL session lines.
 //
-// Why hand-rolled: only one consumer (drift-detector test + fixture lock-in)
-// and we want zero new runtime deps. The validator is deliberately strict on
-// the shapes the PWA's mergeTimeline relies on (assistant.message.content
-// blocks, user.tool_result blocks) and lenient on protocol-internal entries
-// it ignores (system/summary/file-history-snapshot/etc.) so future Claude
-// Code versions don't break tests when they ship a new envelope type.
+// THE SPEC IS LAYERED:
+//
+// 1. Inner layer — `assistant.message.content[]` and `user.message.content[]`
+//    blocks (text / thinking / tool_use / tool_result / image /
+//    redacted_thinking). This IS the Anthropic Messages API content-block
+//    schema, officially documented and stable:
+//      • https://platform.claude.com/docs/en/api/messages
+//      • https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview
+//      • https://platform.claude.com/docs/en/build-with-claude/extended-thinking
+//    We enforce this layer strictly. If Anthropic ever changes the schema
+//    here it would be a breaking API change documented in their changelog.
+//
+// 2. Outer layer — the JSONL envelope (`type`, `uuid`, `parentUuid`,
+//    `sessionId`, `timestamp`, `cwd`, `version`, `gitBranch`, `promptId`,
+//    `userType`, `entrypoint`, plus protocol-internal top-level types like
+//    `attachment`, `queue-operation`, `file-history-snapshot`,
+//    `mcp_instructions_data`, `ai-title`, `last-prompt`, `permission-mode`,
+//    `pr-link`, `system`, `summary`). This is Claude Code's INTERNAL on-disk
+//    format with no published stability guarantee — community-reverse-engineered
+//    from `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`. We enforce
+//    this layer leniently: known protocol-internal types pass through without
+//    inner-shape checks, unknown top-level types pass through entirely
+//    (forward-compat).
+//
+// Why hand-rolled (not Zod): one consumer (drift-detector + fixture lock-in),
+// zero new runtime deps, easy to grep when CC version drifts.
+//
+// On drift detection: the `*.test.ts` next to this file walks the most
+// recent real CC JSONL on disk (under `~/.claude/projects/`) and validates
+// every line. If Anthropic changes the Messages API schema, this fails
+// loud with the offending block + path so a human can update fixtures and
+// the validator together.
 
 export type ValidateResult = { ok: true } | { ok: false; error: string };
 
 /** Top-level Claude JSONL line types we know about. Anything not in this set
- * passes through (forward-compat). */
+ * passes through (forward-compat). All of these are Claude-Code-internal
+ * envelope types — NOT part of the Anthropic Messages API. */
 const PASSTHROUGH_TOP_LEVEL = new Set<string>([
   "system",
   "summary",
@@ -24,8 +51,19 @@ const PASSTHROUGH_TOP_LEVEL = new Set<string>([
   "pr-link",
 ]);
 
-const ASSISTANT_BLOCK_TYPES = new Set<string>(["text", "thinking", "tool_use"]);
-const USER_BLOCK_TYPES = new Set<string>(["tool_result", "text"]);
+/** Block types valid inside an `assistant.message.content[]` array per the
+ * Anthropic Messages API. `redacted_thinking` is the encrypted-body variant
+ * of thinking returned when extended-thinking is enabled. */
+const ASSISTANT_BLOCK_TYPES = new Set<string>([
+  "text",
+  "thinking",
+  "redacted_thinking",
+  "tool_use",
+]);
+
+/** Block types valid inside a `user.message.content[]` array per the
+ * Anthropic Messages API. */
+const USER_BLOCK_TYPES = new Set<string>(["tool_result", "text", "image"]);
 
 function isObject(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === "object" && !Array.isArray(v);
@@ -56,6 +94,24 @@ export function validateContentBlock(block: unknown): ValidateResult {
     }
     if (block["signature"] !== undefined && !isString(block["signature"])) {
       return { ok: false, error: "thinking block `signature` must be string when present" };
+    }
+    return { ok: true };
+  }
+  if (type === "redacted_thinking") {
+    // Encrypted-body variant. Anthropic only sends `data` (base64 string).
+    if (!isString(block["data"])) {
+      return { ok: false, error: "redacted_thinking block missing string `data`" };
+    }
+    return { ok: true };
+  }
+  if (type === "image") {
+    // Anthropic Messages API: image blocks have a `source: {type, media_type, data}` object.
+    const source = block["source"];
+    if (!isObject(source)) {
+      return { ok: false, error: "image block missing object `source`" };
+    }
+    if (!isString(source["type"])) {
+      return { ok: false, error: "image block `source.type` must be string" };
     }
     return { ok: true };
   }
