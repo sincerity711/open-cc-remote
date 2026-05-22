@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { InitializeRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { connectDaemon } from "./daemon-client.ts";
+import { connectDaemonReconnecting, type DaemonClient } from "./daemon-client.ts";
 import { buildSession } from "./session.ts";
 import { installPermissionRelay, emitPermissionDecision } from "./permission.ts";
 import { installChatRelay, emitChatIn } from "./chat.ts";
@@ -27,25 +27,31 @@ async function main() {
 
   let registered = false;
   let mcp: Server | null = null;
+  // Hold the SessionSnapshot we registered with so we can re-send it on
+  // reconnect. The plugin process outlives any single daemon process now.
+  let registeredSession: import("@cc-remote/proto").SessionSnapshot | null = null;
 
-  let daemon;
+  let daemon: DaemonClient;
   try {
-    daemon = await connectDaemon(sockPath, {
-      timeoutMs: 3000,
-      onClose: () => {
-        process.stderr.write(`cc-remote plugin: daemon disconnected; exiting\n`);
-        if (!mcp) process.exit(0);
-        if (registered) {
-          // Best-effort: tell Claude the channel is gone.
-          void mcp.notification({
-            method: "notifications/claude/channel",
-            params: {
-              content: "cc-remote daemon disconnected",
-              meta: { chat_id: "pwa", message_id: `sys-${Date.now()}`, user: "system", user_id: "system", ts: Math.floor(Date.now() / 1000) },
-            },
-          }).catch(() => {});
+    daemon = await connectDaemonReconnecting(sockPath, {
+      initialTimeoutMs: 3000,
+      onDisconnected: () => {
+        process.stderr.write(`cc-remote plugin: daemon disconnected; will reconnect\n`);
+      },
+      onReconnecting: (attempt, delayMs) => {
+        if (attempt <= 3 || attempt % 5 === 0) {
+          process.stderr.write(`cc-remote plugin: reconnect attempt ${attempt} in ${delayMs}ms\n`);
         }
-        process.exit(0);
+      },
+      onReconnected: () => {
+        process.stderr.write(`cc-remote plugin: daemon reconnected\n`);
+        // Re-send the original register so the new daemon picks up this
+        // session. Idempotent on the daemon side: LiveSessions.add no-ops if
+        // the session_id already exists; on a fresh daemon process it's a
+        // genuine fresh registration.
+        if (registeredSession) {
+          void daemon.send({ type: "register", session: registeredSession }).catch(() => {});
+        }
       },
     });
   } catch (e) {
@@ -86,6 +92,7 @@ async function main() {
     try {
       await daemon.send({ type: "register", session });
       registered = true;
+      registeredSession = session;
       process.stderr.write(`cc-remote plugin: registered ${session.session_id} cwd=${session.cwd}\n`);
     } catch (e) {
       process.stderr.write(`cc-remote plugin: register failed: ${(e as Error).message}\n`);
@@ -101,6 +108,8 @@ async function main() {
         emitPermissionDecision(mcp!, f.request_id, f.decision);
       } else if (f.type === "chat_in") {
         emitChatIn(mcp!, f);
+      } else if (f.type === "daemon_going_down") {
+        process.stderr.write(`cc-remote plugin: daemon going down (${f.reason}); waiting to reconnect\n`);
       }
     });
 

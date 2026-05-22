@@ -50,6 +50,7 @@ export type PluginToDaemon =
 
 export type DaemonToPlugin =
   | { type: "ack"; ref: "register" | "bye" | "chat_out" }
+  | { type: "daemon_going_down"; reason: "shutdown" | "restart" }
   | PluginPermissionReply
   | DaemonChatIn;
 

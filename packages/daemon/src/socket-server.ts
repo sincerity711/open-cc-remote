@@ -18,7 +18,9 @@ export interface SocketServerHandle {
 export function startSocketServer(opts: SocketServerOptions): SocketServerHandle {
   try { unlinkSync(opts.path); } catch {}
 
+  const clients = new Set<Socket>();
   const server: Server = createServer((sock) => {
+    clients.add(sock);
     const decoder = new FrameDecoder();
     sock.on("data", (chunk: Buffer) => {
       try {
@@ -29,7 +31,10 @@ export function startSocketServer(opts: SocketServerOptions): SocketServerHandle
         sock.destroy(e as Error);
       }
     });
-    sock.on("close", () => opts.onClose?.(sock));
+    sock.on("close", () => {
+      clients.delete(sock);
+      opts.onClose?.(sock);
+    });
     sock.on("error", () => sock.destroy());
   });
 
@@ -48,6 +53,14 @@ export function startSocketServer(opts: SocketServerOptions): SocketServerHandle
   return {
     ready,
     close() {
+      // Drop existing clients first — `server.close()` only stops accepting
+      // new connections, it does not drop established ones. Without this,
+      // a daemon shutdown leaves plugins thinking the socket is alive until
+      // their next write fails.
+      for (const sock of clients) {
+        try { sock.destroy(); } catch {}
+      }
+      clients.clear();
       server.close();
       try { unlinkSync(opts.path); } catch {}
     },

@@ -363,10 +363,14 @@ const sockServer = startSocketServer({
   path: cfg.socket_path,
   onFrame: (frame: PluginToDaemon, client) => {
     if (frame.type === "register") {
+      const isReregister = sessions.get(frame.session.session_id) !== undefined;
       sessions.add(frame.session);
       clientToSession.set(client, frame.session.session_id);
       sessionToClient.set(frame.session.session_id, client);
       sockServer.replyTo(client, { type: "ack", ref: "register" });
+      process.stderr.write(
+        `daemon: ${isReregister ? "re-register" : "register"} session=${frame.session.session_id} cwd=${frame.session.cwd}\n`,
+      );
     } else if (frame.type === "bye") {
       sessions.remove(frame.session_id);
       clientToSession.delete(client);
@@ -412,14 +416,22 @@ await sockServer.ready;
 console.log(`daemon ${cfg.daemon_id} ready; socket=${cfg.socket_path}; hub=${cfg.hub_url}; auth=${jwt ? "on" : "off"}`);
 
 const shutdown = () => {
-  for (const w of watchers.values()) w.close();
-  watchers.clear();
-  for (const t of idleTimers.values()) clearTimeout(t);
-  idleTimers.clear();
-  sockServer.close();
-  hub.close();
-  db.close();
-  process.exit(0);
+  // Best-effort: tell connected plugins we're going down so they enter
+  // reconnect mode immediately (instead of waiting for the socket close).
+  // We give the write a brief tick to flush before tearing the socket down.
+  for (const client of clientToSession.keys()) {
+    try { sockServer.replyTo(client, { type: "daemon_going_down", reason: "shutdown" }); } catch {}
+  }
+  setTimeout(() => {
+    for (const w of watchers.values()) w.close();
+    watchers.clear();
+    for (const t of idleTimers.values()) clearTimeout(t);
+    idleTimers.clear();
+    sockServer.close();
+    hub.close();
+    db.close();
+    process.exit(0);
+  }, 50);
 };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
