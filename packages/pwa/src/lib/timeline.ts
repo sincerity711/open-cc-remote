@@ -26,8 +26,9 @@ interface TimedItem {
  * timeline. `user` / `assistant` are already rendered as chat bubbles via
  * the chat broadcast stream. The remaining types are session-control noise
  * (attachments, summaries, queue ops, MCP instructions, AI title metadata,
- * raw `system` JSONL frames) that previously fell through to the raw-JSON
- * card and dominated the chat panel.
+ * file-history snapshots, last-prompt, permission-mode, pr-link, raw
+ * `system` JSONL frames) that previously fell through to the raw-JSON card
+ * and dominated the chat panel.
  */
 const HIDDEN_PAYLOAD_TYPES = new Set<string>([
   "user",
@@ -38,6 +39,10 @@ const HIDDEN_PAYLOAD_TYPES = new Set<string>([
   "mcp_instructions_data",
   "ai-title",
   "system",
+  "file-history-snapshot",
+  "last-prompt",
+  "permission-mode",
+  "pr-link",
 ]);
 
 /**

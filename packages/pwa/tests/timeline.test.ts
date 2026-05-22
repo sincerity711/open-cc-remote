@@ -130,8 +130,9 @@ test("user/assistant JSONL events are skipped (chat broadcasts cover them)", () 
 
 test("protocol-internal payload types are dropped from the timeline", () => {
   // Real Claude JSONL includes attachment, summary, queue-operation,
-  // mcp_instructions_data, ai-title, and system payloads. These are
-  // session-control noise and must not surface as raw cards.
+  // mcp_instructions_data, ai-title, file-history-snapshot, last-prompt,
+  // permission-mode, pr-link, and system payloads. These are session-control
+  // noise and must not surface as raw cards.
   const hidden = [
     "attachment",
     "summary",
@@ -139,6 +140,10 @@ test("protocol-internal payload types are dropped from the timeline", () => {
     "mcp_instructions_data",
     "ai-title",
     "system",
+    "file-history-snapshot",
+    "last-prompt",
+    "permission-mode",
+    "pr-link",
   ];
   for (const type of hidden) {
     const items = mergeTimeline({
