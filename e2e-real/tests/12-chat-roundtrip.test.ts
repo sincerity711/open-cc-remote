@@ -1,29 +1,32 @@
-// Scenario 12 — chat round-trip with real claude, browser-driven.
+// Scenario 12 — chat round-trip, mock-driven, with disconnect/reconnect queue.
 //
-// PWA chat-input → daemon → plugin → real claude → reply → broadcast → PWA
-// timeline. Extends the WS-only original with the P5.5 hotfix coverage:
+// PWA chat-input → daemon → fake-claude → auto-reply chat_out → broadcast →
+// PWA timeline. Extends with the P5.5 hotfix coverage:
 //   - Disconnect: setOffline(true) → connection-banner appears, queued chat
 //     stays in the offline queue (queued-count = "1 queued").
 //   - Reconnect: setOffline(false) → banner disappears, queued user-bubble
 //     flushes into the timeline.
 //
-// Spec §3.2 invariant.
+// fake-claude --auto-reply makes the chat path deterministic and hermetic
+// (no ANTHROPIC token usage). The "drain pending permission" step from the
+// real-Claude variant is removed: the mock path never raises permissions.
 
 import { test, expect } from "@playwright/test";
-import { resolve, dirname } from "node:path";
+import { spawn, type ChildProcess } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { upCompose, downCompose } from "../helpers/compose.ts";
-import { startClaudeTmux } from "../helpers/claude-tmux.ts";
 import { openPwa } from "../helpers/pwa-browser.ts";
 import { startPreview, type PreviewHandle } from "../helpers/preview-server.ts";
 import { pairAndStartDaemon, makeScenarioContext } from "../helpers/scenario.ts";
 import { preflightOrThrow } from "../helpers/preflight.ts";
-import * as tmux from "../helpers/tmux.ts";
 import { syncIfPassed } from "../helpers/sync-screenshots.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..");
-const pluginEntry = resolve(repoRoot, "packages", "plugin", "src", "index.ts");
+const fakeClaudeBin = resolve(repoRoot, "tools", "fake-claude", "fake-claude.ts");
 
 let preview: PreviewHandle;
 
@@ -46,10 +49,15 @@ test("chat round-trip + disconnect/reconnect flushes queued bubble", async ({ pa
   test.setTimeout(240_000);
 
   const daemon_id = `chat-${Date.now()}`;
+  const projectsRoot = mkdtempSync(join(tmpdir(), "ccr-chat-projects-"));
+  const sessionCwd = "/private/tmp/cc-remote-mock-chat";
+  const sessionId = "mock-chat-session";
+
   const handle = await pairAndStartDaemon({
     daemon_id,
     hub_url: "ws://localhost:7745",
     hub_http: "http://localhost:7745",
+    extra_env: { CLAUDE_PROJECTS_DIR: projectsRoot },
   });
 
   // openPwa creates its own browser/page; close the playwright-injected one.
@@ -90,34 +98,41 @@ test("chat round-trip + disconnect/reconnect flushes queued bubble", async ({ pa
     projectName: testInfo.project.name,
   });
 
-  let claude: { stop: () => void; capturePane: () => string; sessionName: string } | undefined;
+  // Note: chat broadcasts flow over the daemon Unix socket, not via JSONL,
+  // so this scenario does not need the bind-watcher / tape-replay scaffolding
+  // from scenario 18. CLAUDE_PROJECTS_DIR still points at a tmpdir to keep
+  // the daemon's bind subsystem isolated per test.
+
+  let fakeClaude: ChildProcess | undefined;
   try {
     await sc.step("home-after-login", async () => {
       await session.page.getByTestId("home-screen").waitFor({ timeout: 30_000 });
     });
 
-    // Boot real claude with the same priming prompt as the WS-only original:
-    // forward whatever channel content arrives by calling the reply tool.
-    claude = await startClaudeTmux({
-      cwd: "/tmp",
-      prompt: "You are connected to cc-remote. When a `<channel source=\"cc-remote\">` message arrives, call the MCP tool `mcp__cc-remote__reply` with arguments {\"text\": <the exact channel content verbatim, no quotes, no prose>}. Acknowledge with the single word: ready.",
-      sendPrompt: true,
-      sessionName: `ccr-chat-${daemon_id}`,
-      socketPath: handle.socket_path,
-      mcpConfigPath: `${handle.state_dir}/cc-remote-mcp.json`,
-      pluginEntryPath: pluginEntry,
-    });
+    // Spawn fake-claude with --auto-reply so any chat_in arriving at the
+    // plugin socket is mirrored back as a chat_out. This drives the
+    // claude→PWA broadcast path deterministically.
+    fakeClaude = spawn(
+      "bun",
+      [
+        fakeClaudeBin,
+        "--session-id", sessionId,
+        "--claude-session-id", sessionId,
+        "--cwd", sessionCwd,
+        "--socket", handle.socket_path,
+        "--auto-reply", "hi back",
+      ],
+      { stdio: ["ignore", "pipe", "pipe"], env: process.env },
+    );
 
     await sc.step("session-opened", async () => {
       const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
       const sessionRow = sessionsList.locator(".bg-surface").first();
-      await sessionRow.waitFor({ timeout: 90_000 });
+      await sessionRow.waitFor({ timeout: 30_000 });
       await sessionRow.click();
       await session.page.getByTestId("session-view").waitFor({ timeout: 5_000 });
     });
 
-    // Round-trip with a unique token so an assistant card containing it
-    // proves channel content actually reached the model.
     const TOKEN = `KMR-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
 
     await sc.step("chat-input-typed", async () => {
@@ -130,64 +145,14 @@ test("chat round-trip + disconnect/reconnect flushes queued bubble", async ({ pa
       await expect(session.page.getByTestId("timeline")).toContainText(TOKEN, { timeout: 10_000 });
     });
 
-    // Trigger a turn so claude actually receives the channel injection.
-    const triggerTurn = async () => {
-      try {
-        tmux.sendKeys(claude!.sessionName, "process pending channel messages now", false);
-        await new Promise((r) => setTimeout(r, 300));
-        tmux.sendEnter(claude!.sessionName);
-      } catch { /* ignore */ }
-    };
-    setTimeout(() => { void triggerTurn(); }, 3_000);
-    setTimeout(() => { void triggerTurn(); }, 35_000);
-    setTimeout(() => { void triggerTurn(); }, 75_000);
-
     await sc.step("claude-response-rendered", async () => {
-      // Wait for the assistant turn carrying the token. Two timeline items
-      // contain the token: the user bubble (already asserted) and an
-      // assistant card. We wait for >=2 occurrences to confirm both.
-      await expect(async () => {
-        const count = await session.page
-          .getByTestId("timeline")
-          .locator(`text=${TOKEN}`)
-          .count();
-        expect(count).toBeGreaterThanOrEqual(2);
-      }).toPass({ timeout: 120_000, intervals: [1_000, 2_000, 5_000] });
+      // fake-claude auto-reply emitted "hi back" — the broadcast lands in the
+      // timeline as an assistant chat bubble.
+      await expect(session.page.getByTestId("timeline")).toContainText("hi back", { timeout: 30_000 });
     });
 
-    // Drain any pending permission requests Claude raised mid-test (e.g. for
-    // mcp__cc-remote__reply on the priming prompt). Permissions block the
-    // composer (composerBlocked → input disabled) which would prevent the
-    // queued-while-offline message below from being typed. Behavior is
-    // non-deterministic: some Claude versions inline the channel content,
-    // some call the reply tool. Approve any open permission, otherwise skip.
-    await sc.step("drain-pending-permission", async () => {
-      const review = session.page.getByRole("button", { name: /^Review$/ }).first();
-      if (await review.isVisible().catch(() => false)) {
-        await review.click();
-        const allow = session.page.getByRole("button", { name: /Allow/ }).first();
-        if (await allow.isVisible().catch(() => false)) {
-          await allow.click();
-        }
-        await session.page.getByTestId("permission-surface").waitFor({ state: "detached", timeout: 5_000 }).catch(() => {});
-      }
-      // Wait for composer to unblock.
-      await expect(session.page.getByTestId("chat-input")).toBeEnabled({ timeout: 10_000 });
-    });
-
-    // P5.5 hotfix coverage: disconnect path.
-    //
-    // Strategy:
-    //   - addInitScript wrapper at top-of-test registers every WebSocket on
-    //     `window.__cc_ws_registry__` so we have a handle on the live hub
-    //     socket. We close it explicitly — setOffline alone is unreliable
-    //     for tearing down existing sockets on chromium.
-    //   - context.setOffline(true) blocks the auto-reconnect attempts at the
-    //     TCP layer. We must beat the hook's frameless-open auth-failure
-    //     timer (3 closes without onopen → onAuthFailure). Backoff is
-    //     500 → 1000 → 2000ms, so we have ~3.5s before bail. We set offline
-    //     for as short a window as possible: just long enough to assert the
-    //     banner and queue.
+    // P5.5 hotfix coverage: disconnect path. See scenario rationale in the
+    // pre-mock variant; mechanics are unchanged.
     await sc.step("disconnect-banner-appears", async () => {
       await session.context.setOffline(true);
       await session.page.evaluate(() => {
@@ -208,15 +173,8 @@ test("chat round-trip + disconnect/reconnect flushes queued bubble", async ({ pa
 
     await sc.step("reconnect-flushes-queue", async () => {
       await session.context.setOffline(false);
-      // Banner clears once the next backoff tick opens a real connection.
       await expect(session.page.getByTestId("connection-banner")).toHaveCount(0, { timeout: 30_000 });
-      // queue flushes via the connected→true useEffect, which fires
-      // onSendChat for each queued msg → hub broadcasts chat from=pwa →
-      // timeline renders a UserBubble whose body contains the queued text.
       await expect(session.page.getByTestId("queued-count")).toHaveCount(0, { timeout: 15_000 });
-      // Locate UserBubble surfaces (className bg-primary-subtle is unique to
-      // them in renderTimelineItem) and assert at least one renders the
-      // queued "Q" body.
       await expect(async () => {
         const bubbles = session.page.getByTestId("timeline").locator(".bg-primary-subtle p");
         const texts = await bubbles.allTextContents();
@@ -224,16 +182,12 @@ test("chat round-trip + disconnect/reconnect flushes queued bubble", async ({ pa
         if (!hit) throw new Error(`no UserBubble with body "Q"; got bodies: ${JSON.stringify(texts)}`);
       }).toPass({ timeout: 30_000, intervals: [500, 1_000, 2_000] });
     });
-  } catch (e) {
-    if (claude) {
-      try {
-        process.stderr.write(`[scenario 12] failure; pane:\n${claude.capturePane()}\n`);
-      } catch { /* ignore */ }
-    }
-    throw e;
   } finally {
-    claude?.stop();
+    if (fakeClaude && fakeClaude.exitCode === null) {
+      try { fakeClaude.kill("SIGTERM"); } catch {}
+    }
     await session.close();
     await handle.cleanup();
+    try { rmSync(projectsRoot, { recursive: true, force: true }); } catch {}
   }
 });
