@@ -7,6 +7,21 @@ import type {
 const PER_SESSION_BUFFER = 2000;
 const PER_SESSION_CHAT_BUFFER = 500;
 
+/**
+ * Append a live `event` frame to the per-session buffer with `jsonl_offset`
+ * dedup + trim. Pure helper so it can be unit-tested independently of the
+ * React reducer (see tests/useHub.test.ts).
+ */
+export function appendEventToBuffer(
+  existing: EventFrameForPwa[],
+  frame: EventFrameForPwa,
+  max: number = PER_SESSION_BUFFER,
+): EventFrameForPwa[] {
+  if (existing.some((e) => e.jsonl_offset === frame.jsonl_offset)) return existing;
+  const next = existing.concat([frame]);
+  return next.length > max ? next.slice(next.length - max) : next;
+}
+
 export interface HubState {
   connected: boolean;
   daemons: DaemonView[];
@@ -91,10 +106,9 @@ export function useHub(
           case "event": {
             const k = eventKey(frame.daemon_id, frame.session_id);
             const existing = prev.events[k] ?? [];
-            const next = existing.concat([frame]);
-            const trimmed = next.length > PER_SESSION_BUFFER
-              ? next.slice(next.length - PER_SESSION_BUFFER)
-              : next;
+            const trimmed = appendEventToBuffer(existing, frame);
+            // Dedup hit — bail unchanged so React skips the rerender.
+            if (trimmed === existing) return prev;
             return {
               ...prev,
               events: { ...prev.events, [k]: trimmed },

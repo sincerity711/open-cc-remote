@@ -272,8 +272,15 @@ sessions.onAdd((s: SessionSnapshot) => {
     sessions.update(s.session_id, { claude_session_id: claudeId });
 
     const path = jsonlPath(s.cwd, claudeId);
+    process.stderr.write(`daemon: jsonl bind resolved session=${s.session_id} claude=${claudeId} path=${path}\n`);
     const watcher = startWatcher({
       path,
+      // startOffset: 0 — drain the entire JSONL on bind. The fs event that
+      // resolves bindJsonl is *the same write* that prompted the bind (e.g.
+      // the user-injected <channel> line); reading from current EOF would
+      // skip past it. Re-emitting historic lines is safe because both the
+      // hub event ring and the PWA `event` reducer dedupe by jsonl_offset.
+      startOffset: 0,
       onLine: (line, jsonl_offset) => {
         let payload: unknown;
         try { payload = JSON.parse(line); } catch { payload = { raw: line }; }
