@@ -54,26 +54,23 @@ export function SessionTimeline({ items, idle, onLoadEarlier, onOpenPermission }
       data-testid="timeline"
       className="bg-background relative flex-1 overflow-y-auto"
     >
-      {items.length === 0 ? (
-        <div className="flex h-full items-center justify-center p-6">
-          <p className="text-muted-foreground text-sm">Send a message to start.</p>
+      <div className="relative px-4 py-4 pl-12">
+        <div className="bg-border absolute top-2 bottom-2 left-7 w-px" />
+        <div className="mb-3 flex justify-center">
+          <Button onClick={onLoadEarlier} size="sm" variant="ghost">
+            Load earlier events
+          </Button>
         </div>
-      ) : (
-        <div className="relative px-4 py-4 pl-12">
-          <div className="bg-border absolute top-2 bottom-2 left-7 w-px" />
-          <div className="mb-3 flex justify-center">
-            <Button onClick={onLoadEarlier} size="sm" variant="ghost">
-              Load earlier events
-            </Button>
-          </div>
-          {items.map((it) => renderTimelineItem(it, ctx))}
-          {idle && (
-            <SessionTimelineItem marker="idle" key="__idle__">
-              <IdleWaitingCard />
-            </SessionTimelineItem>
-          )}
-        </div>
-      )}
+        {items.map((it) => renderTimelineItem(it, ctx))}
+        {idle && (
+          <SessionTimelineItem marker="idle" key="__idle__">
+            <IdleWaitingCard />
+          </SessionTimelineItem>
+        )}
+        {items.length === 0 && !idle && (
+          <p className="text-muted-foreground py-12 text-center text-sm">Send a message to start.</p>
+        )}
+      </div>
       {showJumpPill && (
         <button
           className="bg-primary text-primary-foreground shadow-card sticky bottom-3 ml-auto mr-3 inline-flex h-9 items-center gap-1 rounded-full px-3 text-xs font-semibold"
