@@ -72,7 +72,7 @@ export function computeDaemonViewModels(
       return {
         daemon_id: d.daemon_id,
         session_id: s.session_id,
-        name: s.claude_session_id ?? s.session_id,
+        name: pickSessionName(s.cwd, s.session_id),
         model: s.model ?? "-",
         cwd: s.cwd,
         activity,
@@ -107,6 +107,20 @@ function pickActivity(
   if (state === "offline") return "offline";
   if (state === "idle") return tasks > 0 ? `idle - ${tasks} tasks done` : "idle";
   return "running";
+}
+
+/**
+ * Derive a human-friendly session name. Prefer the cwd basename (e.g. "repo")
+ * over a raw UUID; if cwd is empty or root, fall back to the first 8 chars
+ * of session_id so we never leak a full UUID into the UI.
+ */
+function pickSessionName(cwd: string, session_id: string): string {
+  if (cwd) {
+    const trimmed = cwd.replace(/\/+$/, "");
+    const base = trimmed.split("/").pop();
+    if (base) return base;
+  }
+  return session_id.slice(0, 8);
 }
 
 /**

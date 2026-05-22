@@ -153,7 +153,7 @@ function DaemonCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="truncate font-semibold">{daemon.hostname}</h3>
-          <p className="text-muted-foreground text-sm">Online · {daemon.daemon_id}</p>
+          <p className="text-muted-foreground text-sm">Online</p>
         </div>
         <span className="bg-muted text-muted-foreground rounded-full px-2 py-1 text-xs">
           {daemon.sessions.length} ses

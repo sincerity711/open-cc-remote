@@ -124,7 +124,7 @@ test("daemon with zero sessions still appears in the model list", () => {
   expect(models[0].sessions).toEqual([]);
 });
 
-test("name falls back to session_id when claude_session_id is null", () => {
+test("name derives from cwd basename (so users see 'repo' not a raw UUID)", () => {
   const models = computeDaemonViewModels({
     daemons: [onlineDaemon],
     events: {},
@@ -132,5 +132,38 @@ test("name falls back to session_id when claude_session_id is null", () => {
     completedCounts: {},
     idleSessions: {},
   });
-  expect(models[0].sessions[0].name).toBe("s1");
+  // baseSession.cwd === "/work/repo"
+  expect(models[0].sessions[0].name).toBe("repo");
+});
+
+test("name falls back to short session_id when cwd is empty or root", () => {
+  const noCwd: DaemonView = {
+    daemon_id: "d1",
+    hostname: "mbp.local",
+    online: true,
+    sessions: [{ ...baseSession, cwd: "" }],
+  };
+  const rootCwd: DaemonView = {
+    daemon_id: "d1",
+    hostname: "mbp.local",
+    online: true,
+    sessions: [{ ...baseSession, session_id: "abcdef1234567890", cwd: "/" }],
+  };
+  const a = computeDaemonViewModels({
+    daemons: [noCwd],
+    events: {},
+    pendingPermissions: {},
+    completedCounts: {},
+    idleSessions: {},
+  });
+  const b = computeDaemonViewModels({
+    daemons: [rootCwd],
+    events: {},
+    pendingPermissions: {},
+    completedCounts: {},
+    idleSessions: {},
+  });
+  // first 8 chars of session_id, no full UUIDs leaked
+  expect(a[0].sessions[0].name).toBe(baseSession.session_id.slice(0, 8));
+  expect(b[0].sessions[0].name).toBe("abcdef12");
 });
