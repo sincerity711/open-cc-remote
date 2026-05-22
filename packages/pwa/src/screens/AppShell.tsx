@@ -79,13 +79,13 @@ export function AppShell({
         )}
 
         {device === "mobile" ? (
-          <div className="min-w-0 flex-1">
+          <div className="min-h-0 min-w-0 flex-1">
             {sessionActiveOnMobile && session ? session : home}
           </div>
         ) : (
           <>
-            <div className="min-w-0">{home}</div>
-            <div className="min-w-0">
+            <div className="min-h-0 min-w-0">{home}</div>
+            <div className="min-h-0 min-w-0">
               {session ?? (
                 <div className="bg-background flex h-full items-center justify-center">
                   <p className="text-muted-foreground text-sm">

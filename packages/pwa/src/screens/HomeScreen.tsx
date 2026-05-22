@@ -38,23 +38,26 @@ export function HomeScreen({
 
   return (
     <section
-      className="bg-background border-border h-full overflow-y-auto border-r p-4"
+      className="bg-background border-border h-full overflow-y-auto border-r"
       data-testid="home-screen"
     >
-      {pendingApprovalsCount > 0 && topPendingPreview && (
-        <PermissionMiniCard
-          count={pendingApprovalsCount}
-          preview={topPendingPreview}
-          onReview={onOpenPermission}
-        />
-      )}
-
-      <div className="mt-4 flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Machines</h2>
-        <span className="text-muted-foreground text-xs">
-          {daemons.length} daemon{daemons.length === 1 ? "" : "s"}
-        </span>
+      <div className="bg-background sticky top-0 z-10 border-b border-transparent px-4 pt-4 pb-2">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Machines</h2>
+          <span className="text-muted-foreground text-xs">
+            {daemons.length} daemon{daemons.length === 1 ? "" : "s"}
+          </span>
+        </div>
       </div>
+
+      <div className="px-4 pb-4">
+        {pendingApprovalsCount > 0 && topPendingPreview && (
+          <PermissionMiniCard
+            count={pendingApprovalsCount}
+            preview={topPendingPreview}
+            onReview={onOpenPermission}
+          />
+        )}
 
       {daemons.length === 0 ? (
         <p className="text-muted-foreground mt-3 text-sm">
@@ -79,6 +82,7 @@ export function HomeScreen({
           ),
         )
       )}
+      </div>
     </section>
   );
 }
