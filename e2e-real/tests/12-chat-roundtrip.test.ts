@@ -155,6 +155,26 @@ test("chat round-trip + disconnect/reconnect flushes queued bubble", async ({ pa
       }).toPass({ timeout: 120_000, intervals: [1_000, 2_000, 5_000] });
     });
 
+    // Drain any pending permission requests Claude raised mid-test (e.g. for
+    // mcp__cc-remote__reply on the priming prompt). Permissions block the
+    // composer (composerBlocked → input disabled) which would prevent the
+    // queued-while-offline message below from being typed. Behavior is
+    // non-deterministic: some Claude versions inline the channel content,
+    // some call the reply tool. Approve any open permission, otherwise skip.
+    await sc.step("drain-pending-permission", async () => {
+      const review = session.page.getByRole("button", { name: /^Review$/ }).first();
+      if (await review.isVisible().catch(() => false)) {
+        await review.click();
+        const allow = session.page.getByRole("button", { name: /Allow/ }).first();
+        if (await allow.isVisible().catch(() => false)) {
+          await allow.click();
+        }
+        await session.page.getByTestId("permission-surface").waitFor({ state: "detached", timeout: 5_000 }).catch(() => {});
+      }
+      // Wait for composer to unblock.
+      await expect(session.page.getByTestId("chat-input")).toBeEnabled({ timeout: 10_000 });
+    });
+
     // P5.5 hotfix coverage: disconnect path.
     //
     // Strategy:
