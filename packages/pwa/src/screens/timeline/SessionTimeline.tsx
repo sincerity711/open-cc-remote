@@ -16,10 +16,20 @@ export function SessionTimeline({ items, idle, onLoadEarlier, onOpenPermission }
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const lastLoadAt = useRef(0);
+  // Number of items the user has "seen" — i.e. the items.length value at the
+  // last time the timeline was either auto-scrolling at bottom or the user
+  // explicitly clicked the "New events" pill. While the user is scrolled up,
+  // any items beyond this count are unseen and trigger the pill.
+  const lastSeenLength = useRef(items.length);
 
   useEffect(() => {
     if (!autoScroll || !scrollRef.current) return;
     scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [items, autoScroll]);
+
+  // Reset the unseen counter while the user is at the bottom.
+  useEffect(() => {
+    if (autoScroll) lastSeenLength.current = items.length;
   }, [items, autoScroll]);
 
   const onScroll = () => {
@@ -35,13 +45,14 @@ export function SessionTimeline({ items, idle, onLoadEarlier, onOpenPermission }
   };
 
   const ctx: RenderTimelineItemContext = { onOpenPermission };
+  const showJumpPill = !autoScroll && items.length > lastSeenLength.current;
 
   return (
     <div
       ref={scrollRef}
       onScroll={onScroll}
       data-testid="timeline"
-      className="bg-background flex-1 overflow-y-auto"
+      className="bg-background relative flex-1 overflow-y-auto"
     >
       {items.length === 0 ? (
         <div className="flex h-full items-center justify-center p-6">
@@ -62,6 +73,21 @@ export function SessionTimeline({ items, idle, onLoadEarlier, onOpenPermission }
             </SessionTimelineItem>
           )}
         </div>
+      )}
+      {showJumpPill && (
+        <button
+          className="bg-primary text-primary-foreground shadow-card sticky bottom-3 ml-auto mr-3 inline-flex h-9 items-center gap-1 rounded-full px-3 text-xs font-semibold"
+          data-testid="timeline-jump-new"
+          onClick={() => {
+            const el = scrollRef.current;
+            if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+            setAutoScroll(true);
+            lastSeenLength.current = items.length;
+          }}
+          type="button"
+        >
+          New events {items.length - lastSeenLength.current} ↓
+        </button>
       )}
     </div>
   );
