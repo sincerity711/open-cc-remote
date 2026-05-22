@@ -1,10 +1,9 @@
-import { CatalogCard } from "./CatalogCard";
-import { CatalogHeader } from "./CatalogHeader";
+import { Check } from "lucide-react";
+import { ChatBubble } from "../../primitives/ChatBubble";
 
-/**
- * Static demo bubble (kept for /demo & catalog preview). Real timeline uses
- * `UserBubbleLive` below.
- */
+export type UserBubbleStatus = "sending" | "sent" | "failed";
+
+/** Static demo bubble (kept for /demo & catalog preview). */
 export function UserBubble() {
   return (
     <UserBubbleLive
@@ -19,21 +18,28 @@ export function UserBubbleSurface() {
 }
 
 /**
- * Live user message. Per docs/design/light-timeline.png the user message sits
- * on the rail like every other event (rail glyph = `user`); the only thing
- * distinguishing it from a Claude bubble is card tone (purple/primary-subtle).
+ * Live user message rendered as a right-aligned chat bubble. Per the chat /
+ * workflow split: no header, no rail glyph (the row hides the marker — the
+ * timeline rail line still passes behind). Card chrome belongs to workflow
+ * events (`tool` / `permission` / `failure` / `task`), not chat.
  */
 export function UserBubbleLive({
   body,
+  status = "sent",
   time,
 }: {
   body: string;
+  status?: UserBubbleStatus;
   time: string;
 }) {
   return (
-    <CatalogCard tone="purple">
-      <CatalogHeader title="You" meta={time} />
-      <p className="mt-2 leading-5 whitespace-pre-wrap">{body}</p>
-    </CatalogCard>
+    <ChatBubble align="end" tone="primary">
+      <p className="whitespace-pre-wrap">{body}</p>
+      <div className="text-muted-foreground mt-1 flex items-center justify-end gap-1 text-[11px]">
+        <span>{time}</span>
+        {status === "sent" && <Check className="size-3" />}
+        {status === "failed" && <span className="text-danger font-medium">failed</span>}
+      </div>
+    </ChatBubble>
   );
 }

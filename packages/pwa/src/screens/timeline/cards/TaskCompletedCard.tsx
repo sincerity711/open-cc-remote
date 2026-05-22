@@ -4,7 +4,7 @@ import { CatalogHeader } from "./CatalogHeader";
 
 export function TaskCompletedCard() {
   return (
-    <CatalogCard tone="purple">
+    <CatalogCard tone="success">
       <CatalogHeader title="Task completed" meta="10:31 AM" />
       <p className="mt-2 font-semibold">feat: add password reset flow</p>
       <div className="mt-3 flex items-center justify-between gap-2">

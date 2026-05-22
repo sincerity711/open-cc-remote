@@ -67,6 +67,7 @@ import {
   UserBubble,
   UserBubbleSurface,
 } from "../screens/timeline/cards";
+import { AssistantBubbleLive } from "../screens/timeline/cards/AssistantBubble";
 import { SessionTimelineItem } from "../screens/timeline/SessionTimelineItem";
 import type { TimelineEvent } from "../screens/timeline/types";
 
@@ -945,21 +946,35 @@ function SessionExecutionTimeline() {
   return (
     <div className="relative pb-3 pl-8">
       <div className="bg-border absolute top-2 bottom-2 left-3.5 w-px" />
-      <SessionTimelineItem marker="user">
+      <SessionTimelineItem align="end" marker="user">
         <UserBubbleSurface />
       </SessionTimelineItem>
 
       <SessionTimelineItem marker="claude">
-        <SessionClaudeTurnCard />
+        <AssistantBubble />
       </SessionTimelineItem>
 
       <SessionTimelineItem marker="claude">
-        <CatalogCard>
-          <CatalogHeader title="Claude" meta="10:28 AM" />
-          <p className="mt-2 leading-5">
-            Added reset flow and tests. Ready for review.
-          </p>
-        </CatalogCard>
+        <ReasoningCard />
+      </SessionTimelineItem>
+
+      <SessionTimelineItem marker="tool">
+        <BashToolCard />
+      </SessionTimelineItem>
+
+      <SessionTimelineItem marker="tool">
+        <FileEditCard />
+      </SessionTimelineItem>
+
+      <SessionTimelineItem marker="tool">
+        <ReadSearchCard />
+      </SessionTimelineItem>
+
+      <SessionTimelineItem marker="claude">
+        <AssistantBubbleLive
+          body="Added reset flow and tests. Ready for review."
+          time="10:28 AM"
+        />
       </SessionTimelineItem>
 
       <SessionTimelineItem marker="success">
@@ -970,23 +985,6 @@ function SessionExecutionTimeline() {
         <IdleWaitingCard />
       </SessionTimelineItem>
     </div>
-  );
-}
-
-function SessionClaudeTurnCard() {
-  return (
-    <CatalogCard>
-      <CatalogHeader title="Claude" meta="10:24 AM" />
-      <p className="mt-2 leading-5">
-        I'll plan the implementation and create the necessary endpoints.
-      </p>
-      <div className="mt-3 grid gap-2">
-        <ReasoningCard />
-        <BashToolCard />
-        <FileEditCard />
-        <ReadSearchCard />
-      </div>
-    </CatalogCard>
   );
 }
 

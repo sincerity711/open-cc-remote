@@ -12,11 +12,11 @@ import { ClaudeCodeMark } from "../primitives/ClaudeCodeMark";
 
 /**
  * Per docs/design/light-timeline.png the rail icon is a *small glyph* whose
- * sole job is to scan event type / status. All event types — including
- * `user` — sit on the rail; user differs from claude only by tone (the
- * card body uses `purple` to read like a chat bubble).
+ * sole job is to scan event type / status.
  *
- *   user       → person glyph
+ *   user       → person glyph (only shown when align="start"; chat user bubbles
+ *                use align="end" and omit the glyph entirely so the bubble
+ *                reads like a chat message rather than a workflow event)
  *   claude     → Claude mark
  *   tool       → wrench (generic)
  *   success    → green check
@@ -33,30 +33,36 @@ export type TimelineMarker =
   | "error"
   | "idle";
 
+export type TimelineAlign = "start" | "end";
+
 export function SessionTimelineItem({
+  align = "start",
   children,
   marker,
 }: {
+  align?: TimelineAlign;
   children: React.ReactNode;
   marker: TimelineMarker;
 }) {
   return (
     <div className="relative mb-4">
-      <span
-        className={cn(
-          "absolute -left-7 top-2 z-10 flex size-5 items-center justify-center",
-        )}
-      >
-        {marker === "user" && <User className="text-primary size-3.5" />}
-        {marker === "claude" && <ClaudeCodeMark className="rounded-full" size="sm" />}
-        {marker === "tool" && <Wrench className="text-muted-foreground size-3.5" />}
-        {marker === "success" && <CheckCircle2 className="text-success size-3.5" />}
-        {marker === "warning" && <AlertTriangle className="text-warning size-3.5" />}
-        {marker === "error" && <AlertCircle className="text-danger size-3.5" />}
-        {marker === "idle" && (
-          <Circle className="text-muted-foreground size-2.5" strokeWidth={2} />
-        )}
-      </span>
+      {align === "start" && (
+        <span
+          className={cn(
+            "absolute -left-7 top-2 z-10 flex size-5 items-center justify-center",
+          )}
+        >
+          {marker === "user" && <User className="text-primary size-3.5" />}
+          {marker === "claude" && <ClaudeCodeMark className="rounded-full" size="sm" />}
+          {marker === "tool" && <Wrench className="text-muted-foreground size-3.5" />}
+          {marker === "success" && <CheckCircle2 className="text-success size-3.5" />}
+          {marker === "warning" && <AlertTriangle className="text-warning size-3.5" />}
+          {marker === "error" && <AlertCircle className="text-danger size-3.5" />}
+          {marker === "idle" && (
+            <Circle className="text-muted-foreground size-2.5" strokeWidth={2} />
+          )}
+        </span>
+      )}
       <div className="min-w-0 space-y-2">{children}</div>
     </div>
   );

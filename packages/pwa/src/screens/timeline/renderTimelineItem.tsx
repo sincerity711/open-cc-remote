@@ -12,6 +12,7 @@ import type React from "react";
 import { Button } from "../../components/ui/button";
 import { CatalogCard, type CatalogCardTone } from "./cards/CatalogCard";
 import { CatalogHeader } from "./cards/CatalogHeader";
+import { AssistantBubbleLive } from "./cards/AssistantBubble";
 import { UserBubbleLive } from "./cards/UserBubble";
 import { SessionTimelineItem, type TimelineMarker } from "./SessionTimelineItem";
 import type { TimelineEvent } from "./types";
@@ -37,7 +38,7 @@ export function renderTimelineItem(
   switch (event.kind) {
     case "user":
       return (
-        <SessionTimelineItem key={event.id} marker={marker}>
+        <SessionTimelineItem key={event.id} align="end" marker={marker}>
           <UserBubbleLive body={event.body} time={event.time} />
         </SessionTimelineItem>
       );
@@ -45,10 +46,7 @@ export function renderTimelineItem(
     case "assistant":
       return (
         <SessionTimelineItem key={event.id} marker={marker}>
-          <CatalogCard>
-            <CatalogHeader title={event.title || "Claude"} meta={event.time} />
-            <p className="mt-2 leading-5 whitespace-pre-wrap">{event.body}</p>
-          </CatalogCard>
+          <AssistantBubbleLive body={event.body} time={event.time} />
         </SessionTimelineItem>
       );
 
