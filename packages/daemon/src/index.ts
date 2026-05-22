@@ -1,5 +1,5 @@
 import { hostname, homedir } from "node:os";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import type { Socket } from "node:net";
 import { spawn as childSpawn } from "node:child_process";
@@ -18,6 +18,42 @@ import { openDb } from "./db.ts";
 import { recordRequest, resolveRequest } from "./repos/permissions.ts";
 import { handleHubChatSend, handlePluginChatOut } from "./chat.ts";
 import { SessionFsm } from "./session-fsm.ts";
+
+/**
+ * Best-effort dismissal of Claude Code's interactive boot dialogs in a freshly-
+ * spawned tmux session. Polls the pane up to ~25s, presses Enter when a known
+ * dialog pattern is visible. Used by start_session — a PWA-spawned tmux pane
+ * has nobody attached to press Enter, and otherwise the new claude blocks
+ * forever on the dev-channels / workspace-trust confirmations.
+ */
+function dismissClaudeDialogs(tmuxName: string): void {
+  const patterns = [
+    /Enter to confirm|local development/, // dev-channels
+    /trust.*workspace|trust.*folder|safety check|created or one you trust/, // workspace-trust
+  ];
+  const deadline = Date.now() + 25_000;
+  const dismissed = new Set<number>();
+  const tick = () => {
+    if (Date.now() >= deadline || dismissed.size === patterns.length) return;
+    const r = childSpawn("tmux", ["capture-pane", "-t", tmuxName, "-p"], { stdio: ["ignore", "pipe", "ignore"] });
+    let buf = "";
+    r.stdout?.on("data", (chunk: Buffer) => { buf += chunk.toString(); });
+    r.on("close", () => {
+      patterns.forEach((re, i) => {
+        if (dismissed.has(i)) return;
+        if (re.test(buf)) {
+          dismissed.add(i);
+          setTimeout(() => {
+            childSpawn("tmux", ["send-keys", "-t", tmuxName, "Enter"], { stdio: "ignore" }).unref();
+          }, 400).unref();
+        }
+      });
+      setTimeout(tick, 500).unref();
+    });
+    r.on("error", () => setTimeout(tick, 500).unref());
+  };
+  setTimeout(tick, 500).unref();
+}
 
 const cfg = loadConfig();
 const epoch = Math.floor(Date.now() / 1000);
@@ -149,6 +185,12 @@ const hub = startHubClient({
         process.stderr.write(`daemon: start_session rejected — cwd ${cwd} not in allowed_cwd_prefix\n`);
         return;
       }
+      // Create the cwd if it doesn't exist; otherwise tmux silently falls back
+      // to $HOME and the spawn lands in the wrong place.
+      try { mkdirSync(cwd, { recursive: true }); } catch (e) {
+        process.stderr.write(`daemon: start_session mkdir failed for ${cwd}: ${(e as Error).message}\n`);
+        return;
+      }
       const tmuxName = frame.name ?? `cc-${Date.now()}`;
       try {
         const r = childSpawn("tmux", [
@@ -162,6 +204,11 @@ const hub = startHubClient({
         });
         r.unref();
         process.stderr.write(`daemon: spawned tmux session ${tmuxName} in ${cwd}\n`);
+        // Best-effort dismissal of Claude Code's interactive dialogs
+        // (dev-channels confirmation, workspace-trust). Without this, a
+        // PWA-driven new-session sits at the dialog forever — there's nobody
+        // attached to press Enter. Mirrors the helper in tools/demo-channel.sh.
+        dismissClaudeDialogs(tmuxName);
       } catch (e) {
         process.stderr.write(`daemon: start_session spawn threw: ${(e as Error).message}\n`);
       }
