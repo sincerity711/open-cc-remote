@@ -12,6 +12,7 @@ Hit while trying to spawn a new session (`~/SAPDevelop/obsidian-kg`) from the PW
 4. **start_session won't create missing cwd** — `tmux new-session -c <missing-dir>` fails silently. Either daemon `mkdir -p` the cwd before spawn (gated by `allowed_cwd_prefix`) or surface the error per #3.
 5. **`mcp-config.json` is co-located with demo state** — `spawn_command` references `/tmp/cc-remote-demo/mcp-config.json`. For non-demo use the daemon should ship its own MCP config (or generate one in its state dir) rather than depend on a sibling tool's path.
 6. **Init CLI for daemon config** — user wants a `cc-remote init` (or similar) that writes a sane config.json with `allow_start`, `allowed_cwd_prefix=$HOME`, working `spawn_command`. Avoids the hand-edit dance the demo currently does. (Captures the user's "config 以后做初始化的 cli" remark.)
+7. **`~` not expanded in start_session cwd** — PWA's "New session" composer sends the literal string the user types (e.g. `~/SAPDevelop/obsidian-kg`); daemon does a `startsWith(prefix)` check against `/Users/<u>` and fails. Either expand on PWA submit or expand `~/` → `$HOME` in daemon `start_session` handler before the prefix check.
 
 ## Backlog (non-UI, no plan written yet)
 
