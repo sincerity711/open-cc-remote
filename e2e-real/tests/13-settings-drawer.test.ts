@@ -187,10 +187,18 @@ test("settings drawer: rename / push-pref toggle / appearance / close", async ({
       // each and assert it received the bg-primary class.
       await lightBtn.click();
       await expect(lightBtn).toHaveClass(/bg-primary/, { timeout: 5_000 });
+      // Light mode: <html> must NOT carry the .dark class.
+      await expect(session.page.locator("html")).not.toHaveClass(/(^|\s)dark(\s|$)/, { timeout: 5_000 });
+
       await darkBtn.click();
       await expect(darkBtn).toHaveClass(/bg-primary/, { timeout: 5_000 });
+      // Dark mode: <html> must carry the .dark class so design tokens swap.
+      await expect(session.page.locator("html")).toHaveClass(/(^|\s)dark(\s|$)/, { timeout: 5_000 });
+
       await systemBtn.click();
       await expect(systemBtn).toHaveClass(/bg-primary/, { timeout: 5_000 });
+      // System mode: outcome depends on OS prefers-color-scheme; only assert
+      // the click completed without throwing and the chip moved (above).
     });
 
     await sc.step("drawer-closed", async () => {

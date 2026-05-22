@@ -66,7 +66,31 @@ export function RealApp() {
   const permissionQueue = usePermissionQueue(pendingPermissions);
   const pendingApprovalsCount = totalPendingApprovals(pendingPermissions);
   const deviceData = useDevices(HUB_URL, bearer);
-  const [appearance, setAppearance] = useState<Appearance>("system");
+  const [appearance, setAppearance] = useState<Appearance>(() => {
+    if (typeof window === "undefined") return "system";
+    const stored = window.localStorage.getItem("cc_remote_appearance");
+    return stored === "light" || stored === "dark" || stored === "system" ? stored : "system";
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const root = document.documentElement;
+    const apply = (mode: Appearance) => {
+      const dark =
+        mode === "dark" ||
+        (mode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+      root.classList.toggle("dark", dark);
+    };
+    apply(appearance);
+    window.localStorage.setItem("cc_remote_appearance", appearance);
+    if (appearance === "system") {
+      const mq = window.matchMedia("(prefers-color-scheme: dark)");
+      const onChange = () => apply("system");
+      mq.addEventListener("change", onChange);
+      return () => mq.removeEventListener("change", onChange);
+    }
+    return;
+  }, [appearance]);
   const topPending = Object.values(pendingPermissions)[0];
   const topPendingPreview = topPending
     ? {
