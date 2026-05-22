@@ -22,6 +22,25 @@ interface TimedItem {
 }
 
 /**
+ * Protocol-internal JSONL payload types that should never appear in the user
+ * timeline. `user` / `assistant` are already rendered as chat bubbles via
+ * the chat broadcast stream. The remaining types are session-control noise
+ * (attachments, summaries, queue ops, MCP instructions, AI title metadata,
+ * raw `system` JSONL frames) that previously fell through to the raw-JSON
+ * card and dominated the chat panel.
+ */
+const HIDDEN_PAYLOAD_TYPES = new Set<string>([
+  "user",
+  "assistant",
+  "attachment",
+  "summary",
+  "queue-operation",
+  "mcp_instructions_data",
+  "ai-title",
+  "system",
+]);
+
+/**
  * Pure derivation of the visible timeline from the four hub-state slices for one session.
  * Output is sorted by timestamp; ids are deterministic.
  */
@@ -50,9 +69,11 @@ export function mergeTimeline(args: MergeTimelineArgs): TimelineEvent[] {
   for (const e of args.events) {
     const tsMs = e.ts > 0 ? e.ts : 0;
     const payloadType = extractPayloadType(e.payload);
-    // Chat broadcasts already render user/assistant turns as friendly bubbles.
-    // The JSONL stream echoes them; skip the duplicates.
-    if (payloadType === "user" || payloadType === "assistant") continue;
+    // Filter protocol-internal payload types: chat broadcasts already render
+    // user/assistant turns as friendly bubbles, and the rest (attachment,
+    // summary, queue-operation, mcp_instructions_data, ai-title, system) are
+    // session-control noise the user should never see in the chat timeline.
+    if (HIDDEN_PAYLOAD_TYPES.has(payloadType)) continue;
     buf.push({
       tsMs,
       rank: e.jsonl_offset,

@@ -128,6 +128,29 @@ test("user/assistant JSONL events are skipped (chat broadcasts cover them)", () 
   expect(items[0]).toMatchObject({ kind: "raw", title: "tool_use" });
 });
 
+test("protocol-internal payload types are dropped from the timeline", () => {
+  // Real Claude JSONL includes attachment, summary, queue-operation,
+  // mcp_instructions_data, ai-title, and system payloads. These are
+  // session-control noise and must not surface as raw cards.
+  const hidden = [
+    "attachment",
+    "summary",
+    "queue-operation",
+    "mcp_instructions_data",
+    "ai-title",
+    "system",
+  ];
+  for (const type of hidden) {
+    const items = mergeTimeline({
+      events: [event(10, 1_700_000_000_000, { type })],
+      chat: [],
+      pending: [],
+      resolved: [],
+    });
+    expect(items, `payload type "${type}" must be filtered`).toHaveLength(0);
+  }
+});
+
 test("pending permissions emit permission-inline items", () => {
   const items = mergeTimeline({
     events: [],
