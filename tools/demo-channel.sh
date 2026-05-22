@@ -145,7 +145,7 @@ else
   AUTH_PREFIX=""
 fi
 tmux send-keys -t "$TMUX_NAME" \
-  "${AUTH_PREFIX} claude --mcp-config ${DEMO_STATE_DIR}/mcp-config.json --dangerously-load-development-channels server:cc-remote --model claude-haiku-4-5" Enter
+  "${AUTH_PREFIX} claude --mcp-config ${DEMO_STATE_DIR}/mcp-config.json --dangerously-load-development-channels server:cc-remote --model claude-haiku-4-5 --setting-sources project,local --allowedTools 'mcp__cc-remote__reply'" Enter
 
 # Auto-dismiss the same boot dialogs that helpers/claude-tmux.ts handles in
 # the e2e suite, so a fresh `tmux attach -t demo-claude` lands directly on
