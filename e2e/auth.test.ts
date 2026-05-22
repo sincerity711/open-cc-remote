@@ -12,6 +12,39 @@ import { makeServer } from "../packages/hub/src/routes.ts";
 
 const ROOT = resolve(import.meta.dir, "..");
 
+async function getFreePort(): Promise<number> {
+  const { createServer } = await import("node:net");
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.unref();
+    srv.on("error", reject);
+    srv.listen(0, () => {
+      const addr = srv.address();
+      const port = typeof addr === "object" && addr ? addr.port : 0;
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+async function followRedirects(
+  start: string,
+  init: RequestInit = {},
+  opts: { maxHops?: number; stopWhen?: (url: string) => boolean } = {},
+): Promise<{ res: Response; finalUrl: string }> {
+  const maxHops = opts.maxHops ?? 20;
+  let url = start;
+  let res!: Response;
+  for (let i = 0; i < maxHops; i++) {
+    if (opts.stopWhen?.(url)) break;
+    res = await fetch(url, { ...init, redirect: "manual" });
+    const loc = res.headers.get("location");
+    if (!loc || res.status < 300 || res.status >= 400) break;
+    // Resolve relative redirects
+    url = loc.startsWith("http") ? loc : new URL(loc, url).toString();
+  }
+  return { res, finalUrl: url };
+}
+
 async function waitFor<T>(pred: () => T | null, timeoutMs: number, label: string): Promise<T> {
   const start = Date.now();
   while (true) {
@@ -26,7 +59,16 @@ test("full auth e2e: IAS login → pair → daemon DPoP → PWA snapshot", async
   const dir = mkdtempSync(join(tmpdir(), "ccr-e2e-auth-"));
   const stateDir = join(dir, "daemon-state");
 
-  const ias = await startFakeIas({ port: 0, sub: "i060912@sap.com" });
+  const hubPort = await getFreePort();
+  const redirectUri = `http://localhost:${hubPort}/auth/callback`;
+
+  const ias = await startFakeIas({
+    port: 0,
+    sub: "i060912@sap.com",
+    redirectUris: [redirectUri],
+    clientId: "test-client",
+    clientSecret: "test-secret",
+  });
   const db = openDb(join(dir, "hub.sqlite"));
 
   const procs: ChildProcess[] = [];
@@ -38,26 +80,29 @@ test("full auth e2e: IAS login → pair → daemon DPoP → PWA snapshot", async
       issuer_url: ias.url,
       client_id: "test-client",
       client_secret: "test-secret",
-      redirect_uri: "http://localhost:0/auth/callback", // patched after hub starts
+      redirect_uri: redirectUri,
       allowed_subjects: ["i060912@sap.com"],
     });
     const { fetch: hubFetch, websocket } = makeServer({
       db, ias: iasCtx, jwt_secret: "test-jwt-secret",
       disable_auth: false, pwa_url: "/",
     });
-    hub = Bun.serve({ port: 0, fetch: hubFetch, websocket });
-    iasCtx.config.redirect_uri = `http://localhost:${hub.port}/auth/callback`;
+    hub = Bun.serve({ port: hubPort, fetch: hubFetch, websocket });
     const HUB_HTTP = `http://localhost:${hub.port}`;
     const HUB_WS = `ws://localhost:${hub.port}`;
 
     // 2. Simulate browser IAS flow → extract bearer from final redirect.
-    const loginRes = await fetch(`${HUB_HTTP}/auth/login`, { redirect: "manual" });
-    expect(loginRes.status).toBe(302);
-    const authorizeUrl = loginRes.headers.get("location")!;
-    const authRes = await fetch(authorizeUrl, { redirect: "manual" });
-    expect(authRes.status).toBe(302);
-    const callbackUrl = authRes.headers.get("location")!;
-    const cbRes = await fetch(callbackUrl, { redirect: "manual" });
+    //    Follow redirects through the OIDC multi-hop chain until we reach the
+    //    hub callback URL, then fetch that separately to capture the response.
+    const { finalUrl: callbackUrl } = await followRedirects(
+      `${HUB_HTTP}/auth/login`,
+      {},
+      { stopWhen: (url) => url.includes("/auth/callback") },
+    );
+    const cbRes = await fetch(callbackUrl, {
+      redirect: "manual",
+      headers: { "user-agent": "Test/1 Macintosh" },
+    });
     expect(cbRes.status).toBe(302);
     const finalLoc = cbRes.headers.get("location")!;
     const fragMatch = finalLoc.match(/#bearer=([^&]+)/);

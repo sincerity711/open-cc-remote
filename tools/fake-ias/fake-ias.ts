@@ -1,115 +1,134 @@
 #!/usr/bin/env bun
-// Test-only OIDC mock for cc-remote hub.
-// Signs id_tokens with an ephemeral ES256 keypair generated at startup.
-// Codes are JWTs (no per-code state); subjects fixed via opts.sub.
+// Bun-side wrapper for the oidc-provider-backed fake IAS server.
+// Spawns tools/fake-ias/oidc-server.mjs under `node` and waits for its READY line.
 
-import { generateKeyPair, exportJWK, SignJWT, jwtVerify } from "jose";
+import { spawn } from "node:child_process";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export interface FakeIasOptions {
-  port?: number;       // 0 = ephemeral
-  sub?: string;        // default "i060912@sap.com"
+  port?: number;
+  sub?: string;
+  clientId?: string;
+  clientSecret?: string;
+  redirectUris?: string[];
 }
 
 export interface FakeIasHandle {
   url: string;
   port: number;
+  pid: number;
   publicJwk: Record<string, unknown>;
-  stop(): void;
+  stop(): Promise<void>;
 }
+
+const SERVER_MJS = join(dirname(fileURLToPath(import.meta.url)), "oidc-server.mjs");
 
 export async function startFakeIas(opts: FakeIasOptions = {}): Promise<FakeIasHandle> {
   const sub = opts.sub ?? "i060912@sap.com";
-  const { publicKey, privateKey } = await generateKeyPair("ES256");
-  const pubJwk = (await exportJWK(publicKey)) as unknown as Record<string, unknown>;
-  pubJwk.kid = "fake-ias-key-1";
-  pubJwk.alg = "ES256";
-  pubJwk.use = "sig";
+  const clientId = opts.clientId ?? "cc-remote";
+  const clientSecret = opts.clientSecret ?? "test-secret";
+  const redirectUris = opts.redirectUris ?? ["http://localhost:9999/cb"];
+  const port = opts.port ?? 0;
 
-  let issuerUrl = "";
+  const env: Record<string, string> = {
+    ...process.env,
+    FAKE_IAS_PORT: String(port),
+    FAKE_IAS_SUB: sub,
+    FAKE_IAS_CLIENT_ID: clientId,
+    FAKE_IAS_CLIENT_SECRET: clientSecret,
+    FAKE_IAS_REDIRECT_URIS: redirectUris.join(","),
+  };
 
-  const server = Bun.serve({
-    port: opts.port ?? 0,
-    async fetch(req) {
-      const url = new URL(req.url);
-      if (!issuerUrl) issuerUrl = url.origin;
-
-      if (url.pathname === "/.well-known/openid-configuration") {
-        return Response.json({
-          issuer: issuerUrl,
-          authorization_endpoint: `${issuerUrl}/authorize`,
-          token_endpoint: `${issuerUrl}/token`,
-          jwks_uri: `${issuerUrl}/jwks.json`,
-          response_types_supported: ["code"],
-          subject_types_supported: ["public"],
-          id_token_signing_alg_values_supported: ["ES256"],
-        });
-      }
-
-      if (url.pathname === "/jwks.json") {
-        return Response.json({ keys: [pubJwk] });
-      }
-
-      if (url.pathname === "/authorize") {
-        const p = url.searchParams;
-        const redirect_uri = p.get("redirect_uri");
-        const state = p.get("state");
-        const client_id = p.get("client_id");
-        if (!redirect_uri || !state || !client_id) {
-          return new Response("missing params", { status: 400 });
-        }
-        const code = await new SignJWT({ sub, client_id })
-          .setProtectedHeader({ alg: "ES256", kid: "fake-ias-key-1" })
-          .setIssuedAt()
-          .setExpirationTime("5m")
-          .sign(privateKey);
-        const target = new URL(redirect_uri);
-        target.searchParams.set("code", code);
-        target.searchParams.set("state", state);
-        return Response.redirect(target.toString(), 302);
-      }
-
-      if (url.pathname === "/token" && req.method === "POST") {
-        const form = await req.formData();
-        const code = form.get("code") as string | null;
-        const client_id = form.get("client_id") as string | null;
-        if (!code || !client_id) return new Response("missing code/client_id", { status: 400 });
-
-        let payload: { sub?: string; client_id?: string };
-        try {
-          const v = await jwtVerify(code, publicKey);
-          payload = v.payload as typeof payload;
-        } catch {
-          return new Response("invalid code", { status: 400 });
-        }
-        if (payload.client_id !== client_id) {
-          return new Response("client_id mismatch", { status: 400 });
-        }
-        const id_token = await new SignJWT({})
-          .setProtectedHeader({ alg: "ES256", kid: "fake-ias-key-1" })
-          .setIssuer(issuerUrl)
-          .setSubject(payload.sub!)
-          .setAudience(client_id)
-          .setIssuedAt()
-          .setExpirationTime("1h")
-          .sign(privateKey);
-        return Response.json({
-          id_token,
-          access_token: id_token,
-          token_type: "Bearer",
-          expires_in: 3600,
-        });
-      }
-
-      return new Response("not found", { status: 404 });
-    },
+  const child = spawn("node", [SERVER_MJS], {
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
   });
 
-  return {
-    url: `http://localhost:${server.port!}`,
-    port: server.port!,
-    publicJwk: pubJwk,
-    stop() { server.stop(true); },
-  };
+  return new Promise<FakeIasHandle>((resolve, reject) => {
+    const stderrChunks: Buffer[] = [];
+    let stdoutBuf = "";
+    let settled = false;
+
+    const timeoutId = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill("SIGKILL");
+      reject(new Error("startFakeIas: timed out waiting for READY line (5s)"));
+    }, 5000);
+
+    child.stderr?.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+
+    child.stdout?.on("data", (chunk: Buffer) => {
+      stdoutBuf += chunk.toString("utf8");
+
+      // Drain all complete lines per chunk so a pre-READY stdout line doesn't stall us.
+      let newline: number;
+      while ((newline = stdoutBuf.indexOf("\n")) !== -1) {
+        const line = stdoutBuf.slice(0, newline).trimEnd();
+        stdoutBuf = stdoutBuf.slice(newline + 1);
+
+        if (!line.startsWith("READY ")) continue;
+
+        let parsed: { port: number; issuer: string; publicJwk: Record<string, unknown> };
+        try {
+          parsed = JSON.parse(line.slice("READY ".length));
+        } catch (err) {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeoutId);
+          child.kill("SIGKILL");
+          reject(new Error(`startFakeIas: invalid READY JSON: ${line}`));
+          return;
+        }
+
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+
+        const handle: FakeIasHandle = {
+          url: parsed.issuer,
+          port: parsed.port,
+          pid: child.pid!,
+          publicJwk: parsed.publicJwk,
+
+          stop(): Promise<void> {
+            return new Promise<void>((res) => {
+              if (child.exitCode !== null) {
+                res();
+                return;
+              }
+              const escalate = setTimeout(() => child.kill("SIGKILL"), 2000);
+              child.once("exit", () => {
+                clearTimeout(escalate);
+                res();
+              });
+              child.kill("SIGTERM");
+            });
+          },
+        };
+        resolve(handle);
+        return; // stop draining; we're done
+      }
+    });
+
+    child.on("exit", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      const stderr = Buffer.concat(stderrChunks).toString("utf8");
+      reject(
+        new Error(`startFakeIas: child exited with code ${code} before READY.\nstderr: ${stderr}`)
+      );
+    });
+
+    child.on("error", (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      reject(new Error(`startFakeIas: failed to spawn child: ${err.message}`));
+    });
+  });
 }
 
 if (import.meta.main) {
@@ -117,5 +136,5 @@ if (import.meta.main) {
     port: Number(process.env.FAKE_IAS_PORT ?? 17770),
     sub: process.env.FAKE_IAS_SUB,
   });
-  console.log(`fake-ias listening at ${handle.url}`);
+  console.log(`fake-ias listening at ${handle.url}  (pid ${handle.pid})`);
 }

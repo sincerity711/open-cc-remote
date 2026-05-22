@@ -1,21 +1,28 @@
 #!/usr/bin/env bun
 // Capture PWA screenshots for visual review of the timeline redesign.
+// Requires the hub to be running locally. Bearer is minted via the admin CLI:
+//   bun packages/hub/src/admin.ts mint-bearer <owner_sub>
+// Set HUB_OWNER_SUB to override the default owner subject used for minting.
 import { chromium } from "playwright";
 import { writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
 
 const PWA = "http://localhost:15173";
 const HUB = "http://localhost:17745";
 const OUT = "/tmp/pwa-shots";
+const REPO_ROOT = join(import.meta.dir, "..");
+const OWNER_SUB = process.env.HUB_OWNER_SUB ?? "local-admin";
 
-// Acquire a bearer by walking the fake-IAS chain (same as tools/inspect-demo-frames.ts).
-const r1 = await fetch(`${HUB}/auth/login`, { redirect: "manual" });
-const authorize = r1.headers.get("location")!;
-const r2 = await fetch(authorize, { redirect: "manual" });
-const callback = r2.headers.get("location")!.replace("fake-ias:7770", "localhost:7770");
-const r3 = await fetch(callback, { redirect: "manual" });
-const finalLoc = r3.headers.get("location")!;
-const bearer = new URL(finalLoc, "http://placeholder/").hash.match(/bearer=([^&]+)/)?.[1] ?? "";
-if (!bearer) throw new Error("no bearer");
+// Mint a bearer directly via the hub admin CLI (no IAS required).
+const mintResult = spawnSync(
+  "bun",
+  ["packages/hub/src/admin.ts", "mint-bearer", OWNER_SUB, "screenshot-pwa"],
+  { cwd: REPO_ROOT, encoding: "utf8" },
+);
+if (mintResult.status !== 0) throw new Error(`admin mint-bearer failed:\n${mintResult.stderr}`);
+const bearer = mintResult.stdout.trim();
+if (!bearer) throw new Error("admin mint-bearer returned empty bearer");
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 420, height: 900 } });

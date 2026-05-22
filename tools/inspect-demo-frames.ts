@@ -1,19 +1,31 @@
 #!/usr/bin/env bun
 // Inspect what frames the demo hub broadcasts to a PWA.
 // Run while interacting in tmux: `bun tools/inspect-demo-frames.ts`
+//
+// Requires the hub to be running locally. Bearer is minted via the admin CLI:
+//   bun packages/hub/src/admin.ts mint-bearer <owner_sub>
+// The hub must be pointing at its SQLite DB (HUB_DB_PATH, default ./hub.sqlite).
+// Set HUB_OWNER_SUB to override the default owner subject used for minting.
+
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
 
 const HUB = "http://localhost:17745";
+const REPO_ROOT = join(import.meta.dir, "..");
+const OWNER_SUB = process.env.HUB_OWNER_SUB ?? "local-admin";
 
 async function main() {
-  // 1. Walk the IAS chain to get a bearer.
-  const r1 = await fetch(`${HUB}/auth/login`, { redirect: "manual" });
-  const authorize = r1.headers.get("location")!;
-  const r2 = await fetch(authorize, { redirect: "manual" });
-  const callback = r2.headers.get("location")!.replace("fake-ias:7770", "localhost:7770");
-  const r3 = await fetch(callback, { redirect: "manual" });
-  const finalLoc = r3.headers.get("location")!;
-  const bearer = new URL(finalLoc, "http://placeholder/").hash.match(/bearer=([^&]+)/)?.[1] ?? "";
-  if (!bearer) throw new Error(`no bearer in ${finalLoc}`);
+  // 1. Mint a bearer directly via the hub admin CLI (no IAS required).
+  const result = spawnSync(
+    "bun",
+    ["packages/hub/src/admin.ts", "mint-bearer", OWNER_SUB, "inspect-demo-frames"],
+    { cwd: REPO_ROOT, encoding: "utf8" },
+  );
+  if (result.status !== 0) {
+    throw new Error(`admin mint-bearer failed:\n${result.stderr}`);
+  }
+  const bearer = result.stdout.trim();
+  if (!bearer) throw new Error("admin mint-bearer returned empty bearer");
 
   // 2. Open the WS.
   const ws = new WebSocket(`ws://localhost:17745/ws/pwa?bearer=${encodeURIComponent(bearer)}`);

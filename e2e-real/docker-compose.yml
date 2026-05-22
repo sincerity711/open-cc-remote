@@ -6,14 +6,17 @@ services:
     environment:
       FAKE_IAS_PORT: "7770"
       FAKE_IAS_SUB: "i060912@sap.com"
+      FAKE_IAS_CLIENT_ID: "cc-remote"
+      FAKE_IAS_CLIENT_SECRET: "test-secret"
+      FAKE_IAS_REDIRECT_URIS: "http://localhost:7745/auth/callback"
+      FAKE_IAS_ISSUER: "http://fake-ias:7770"
     ports:
       - "7770:7770"
     healthcheck:
       # TCP-only check via Node's net module — does NOT do HTTP, so it won't
-      # poison fake-ias's issuer-URL inference (the FIRST HTTP request to
-      # fake-ias sets the issuer to that request's origin, which must be
-      # http://fake-ias:7770 so the hub-to-token call works).
-      test: ["CMD", "bun", "-e", "import('node:net').then(m=>{const s=m.createConnection({host:'127.0.0.1',port:7770},()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1))})"]
+      # poison fake-ias's issuer URL (FAKE_IAS_ISSUER is now pinned via env,
+      # but a TCP-only check is still cleaner than an HTTP probe).
+      test: ["CMD", "node", "-e", "import('node:net').then(m=>{const s=m.createConnection({host:'127.0.0.1',port:7770},()=>{s.end();process.exit(0)});s.on('error',()=>process.exit(1))})"]
       interval: 2s
       timeout: 5s
       retries: 15
