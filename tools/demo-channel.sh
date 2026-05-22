@@ -86,8 +86,9 @@ cat > "${DEMO_STATE_DIR}/config.json" <<EOF
   "daemon_id": "$DAEMON_ID",
   "hub_url": "ws://localhost:${HUB_HOST_PORT}",
   "allow_kill": true,
-  "allow_start": false,
-  "allowed_cwd_prefix": ["${DEMO_STATE_DIR}", "/tmp"],
+  "allow_start": true,
+  "allowed_cwd_prefix": ["${DEMO_STATE_DIR}", "/tmp", "${HOME}"],
+  "spawn_command": "claude --mcp-config ${DEMO_STATE_DIR}/mcp-config.json --dangerously-load-development-channels server:cc-remote",
   "idle_window_ms": 3000
 }
 EOF
@@ -103,6 +104,21 @@ echo "[demo] pairing daemon..."
 CC_REMOTE_STATE_DIR="$DEMO_STATE_DIR" \
   bun run packages/daemon/bin/cc-remote.ts pair \
   --hub "http://localhost:${HUB_HOST_PORT}" --code "$PAIR_CODE" --daemon-id "$DAEMON_ID"
+
+# `pair` rewrites config.json down to {daemon_id, hub_url}. Re-emit the rich
+# config so allow_start / spawn_command / etc. survive the pair step.
+echo "[demo] re-writing daemon config (post-pair)..."
+cat > "${DEMO_STATE_DIR}/config.json" <<EOF
+{
+  "daemon_id": "$DAEMON_ID",
+  "hub_url": "ws://localhost:${HUB_HOST_PORT}",
+  "allow_kill": true,
+  "allow_start": true,
+  "allowed_cwd_prefix": ["${DEMO_STATE_DIR}", "/tmp", "${HOME}"],
+  "spawn_command": "claude --mcp-config ${DEMO_STATE_DIR}/mcp-config.json --dangerously-load-development-channels server:cc-remote",
+  "idle_window_ms": 3000
+}
+EOF
 
 echo "[demo] restarting daemon (pick up paired identity)..."
 pkill -F "${DEMO_STATE_DIR}/daemon.pid" 2>/dev/null || true
