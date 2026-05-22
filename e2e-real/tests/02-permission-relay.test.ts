@@ -1,24 +1,33 @@
-// Scenario 02 — real channel-permission protocol round-trip, browser-driven.
-// Real Claude tool-call → plugin → daemon → hub → PWA browser → Allow →
-// hub → daemon → plugin → Claude continues.
+// Scenario 02 — permission relay round-trip, mock-driven.
 //
-// Converts the WS-only pwa-client variant to Playwright per P6 plan task 5.
+// fake-claude (over the daemon's Unix socket) injects a permission_request
+// frame; PWA surfaces the mini-card / in-session warning; user clicks
+// Review → Allow; the daemon's `permission_reply` flows back to fake-claude
+// (no-op). After Allow, we replay `bash-success.jsonl` into the bound JSONL
+// path so a tool card with a Success status pill renders — proving the
+// post-permission JSONL render path end-to-end.
+//
+// Mirrors scenario 18's setup pattern (extra_env=CLAUDE_PROJECTS_DIR per
+// test). Hermetic — no ANTHROPIC token usage.
 
 import { test, expect } from "@playwright/test";
-import { resolve, dirname } from "node:path";
+import { spawn, type ChildProcess } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { upCompose, downCompose } from "../helpers/compose.ts";
-import { startClaudeTmux } from "../helpers/claude-tmux.ts";
 import { openPwa } from "../helpers/pwa-browser.ts";
 import { startPreview, type PreviewHandle } from "../helpers/preview-server.ts";
 import { pairAndStartDaemon, makeScenarioContext } from "../helpers/scenario.ts";
 import { preflightOrThrow } from "../helpers/preflight.ts";
-import { setupPermSandbox } from "../helpers/perm-sandbox.ts";
 import { syncIfPassed } from "../helpers/sync-screenshots.ts";
+import { replayJsonlTape } from "../helpers/replay-jsonl.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..");
-const pluginEntry = resolve(repoRoot, "packages", "plugin", "src", "index.ts");
+const fakeClaudeBin = resolve(repoRoot, "tools", "fake-claude", "fake-claude.ts");
+const tapesDir = resolve(__dirname, "..", "fixtures", "jsonl-tapes");
 
 let preview: PreviewHandle;
 
@@ -37,20 +46,28 @@ test.afterEach(async ({}, testInfo) => {
   await syncIfPassed(testInfo, "02-permission-relay");
 });
 
+function encodeCwd(cwd: string): string {
+  return (cwd.replace(/\/+$/, "") || "/").replace(/\//g, "-");
+}
+
 test("permission relay: PWA approve → tool runs → task_completed", async ({ page }, testInfo) => {
   test.setTimeout(180_000);
 
   const daemon_id = `perm-${Date.now()}`;
-  const sandbox = setupPermSandbox("relay", 1);
+  const projectsRoot = mkdtempSync(join(tmpdir(), "ccr-perm-projects-"));
+  const sessionCwd = "/private/tmp/cc-remote-mock-bash-success";
+  const sessionId = "mock-perm-bash-success";
+  const requestId = `req-${Date.now()}`;
+  const argsSummary = "ls -F /tmp";
+
   const handle = await pairAndStartDaemon({
     daemon_id,
     hub_url: "ws://localhost:7745",
     hub_http: "http://localhost:7745",
+    extra_env: { CLAUDE_PROJECTS_DIR: projectsRoot },
   });
 
-  // openPwa creates its own browser/page (with video + tracing scoped to its
-  // own context). The Playwright-injected `page` is unused for this scenario;
-  // close it to avoid leaving an orphan tab behind.
+  // openPwa creates its own browser/page; close the playwright-injected one.
   await page.close();
 
   const session = await openPwa({
@@ -66,7 +83,15 @@ test("permission relay: PWA approve → tool runs → task_completed", async ({ 
     projectName: testInfo.project.name,
   });
 
-  let claude: { stop: () => void } | undefined;
+  // Pre-create the JSONL file so the daemon's bind watcher attaches before we
+  // start streaming the tape (matches scenario 18's pattern).
+  const sessionDir = join(projectsRoot, encodeCwd(sessionCwd));
+  mkdirSync(sessionDir, { recursive: true });
+  const jsonlPath = join(sessionDir, `${sessionId}.jsonl`);
+  writeFileSync(jsonlPath, "");
+  const tapePath = join(tapesDir, "bash-success.jsonl");
+
+  let fakeClaude: ChildProcess | undefined;
   try {
     await sc.step("home-after-login", async () => {
       await session.page.getByTestId("home-screen").waitFor({ timeout: 30_000 });
@@ -76,50 +101,47 @@ test("permission relay: PWA approve → tool runs → task_completed", async ({ 
       await session.page.getByTestId(`machine-card-${daemon_id}`).waitFor({ timeout: 30_000 });
     });
 
-    // Boot real Claude under tmux + provoke a tool call requiring permission.
-    // bootTimeoutMs bumped to 60s — fresh boot under the test-runner is slower
-    // than direct invocation.
-    claude = await startClaudeTmux({
-      cwd: sandbox.dir,
-      prompt: `Use the Bash tool to run: rm ${sandbox.files[0]}`,
-      sessionName: `ccr-perm-${daemon_id}`,
-      socketPath: handle.socket_path,
-      mcpConfigPath: `${handle.state_dir}/cc-remote-mcp.json`,
-      pluginEntryPath: pluginEntry,
-      bootTimeoutMs: 90_000,
+    // Spawn fake-claude with --inject-permission. The plugin process registers
+    // the session, then 100ms later sends a permission_request. The daemon
+    // forwards it to the hub → PWA mini-card / in-session warning surfaces.
+    fakeClaude = spawn(
+      "bun",
+      [
+        fakeClaudeBin,
+        "--session-id", sessionId,
+        "--claude-session-id", sessionId,
+        "--cwd", sessionCwd,
+        "--socket", handle.socket_path,
+        "--inject-permission", `Bash:${requestId}:${argsSummary}`,
+      ],
+      { stdio: ["ignore", "pipe", "pipe"], env: process.env },
+    );
+
+    await sc.step("session-row-appears", async () => {
+      const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
+      await sessionsList.locator(".bg-surface").first().waitFor({ timeout: 30_000 });
     });
 
     await sc.step("session-opened", async () => {
-      // Wait for the session row to appear, then click into it.
       const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
-      const sessionRow = sessionsList.locator(".bg-surface").first();
-      await sessionRow.waitFor({ timeout: 60_000 });
-      await sessionRow.click();
+      await sessionsList.locator(".bg-surface").first().click();
       await session.page.getByTestId("session-view").waitFor({ timeout: 5_000 });
     });
 
     await sc.step("permission-mini-card", async () => {
-      // The mini-card lives on the home screen. On desktop both home and
-      // session render side-by-side so the mini is visible without nav.
-      // On mobile, opening a session hides home (sessionActiveOnMobile),
-      // so the equivalent signal is the in-session warning strip above
-      // the composer ("Permission required before Claude can continue.")
-      // that the SessionView shows when pendingPermissionInThisSession
-      // is set. We assert whichever surfaces first within the timeout.
+      // The mini-card lives on the home screen; on mobile the equivalent is
+      // the in-session warning strip above the composer. Either signal counts.
       const mini = session.page.getByTestId("permission-mini");
       const inSessionWarning = session.page.getByText(
         "Permission required before Claude can continue.",
       );
       await Promise.race([
-        mini.waitFor({ timeout: 60_000 }),
-        inSessionWarning.waitFor({ timeout: 60_000 }),
+        mini.waitFor({ timeout: 30_000 }),
+        inSessionWarning.waitFor({ timeout: 30_000 }),
       ]);
     });
 
     await sc.step("permission-surface-open", async () => {
-      // Reach the surface via whichever Review entrypoint is visible —
-      // both the mini-card (home) and the in-session warning strip
-      // expose a "Review" button.
       await session.page.getByRole("button", { name: "Review" }).first().click();
       await session.page.getByTestId("permission-surface").waitFor({ timeout: 5_000 });
     });
@@ -130,15 +152,22 @@ test("permission relay: PWA approve → tool runs → task_completed", async ({ 
     });
 
     await sc.step("tool-result-rendered", async () => {
-      // Soft assertion — once allowed, the timeline should render at minimum.
-      // Real Claude may take a while to summarize after the tool call, so we
-      // just look for a timeline node to confirm session view is healthy.
+      // After Allow, replay the bash-success tape into the bound JSONL so a
+      // tool card with a Success/Failed/Running status pill renders.
       await session.page.getByTestId("timeline").waitFor({ timeout: 30_000 });
+      await replayJsonlTape({ jsonlPath, tapePath, lineDelayMs: 80 });
+      const statusPill = session.page
+        .locator("article")
+        .locator("text=/^(Success|Failed|Running…)$/")
+        .first();
+      await statusPill.waitFor({ timeout: 30_000 });
     });
   } finally {
-    claude?.stop();
+    if (fakeClaude && fakeClaude.exitCode === null) {
+      try { fakeClaude.kill("SIGTERM"); } catch {}
+    }
     await session.close();
     await handle.cleanup();
-    sandbox.cleanup();
+    try { rmSync(projectsRoot, { recursive: true, force: true }); } catch {}
   }
 });
