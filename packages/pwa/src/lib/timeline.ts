@@ -47,12 +47,17 @@ const HIDDEN_PAYLOAD_TYPES = new Set<string>([
 
 /**
  * MCP tools whose tool_use blocks should NOT surface as timeline cards.
- * These are cc-remote-plugin-internal tools used by the channel-permission
- * protocol; the chat broadcast path already renders the user-visible result.
+ * Two classes:
+ *   - `mcp__cc-remote__`: cc-remote-plugin-internal tools used by the
+ *     channel-permission protocol; chat broadcast already shows the result.
+ *   - `ToolSearch`: Claude's built-in deferred-tool-resolver — it shows up
+ *     when claude introspects its own toolbox, never represents user work.
  */
 const HIDDEN_TOOL_NAME_PREFIXES = ["mcp__cc-remote__"];
+const HIDDEN_TOOL_NAMES = new Set(["ToolSearch"]);
 
 function isHiddenToolName(name: string): boolean {
+  if (HIDDEN_TOOL_NAMES.has(name)) return true;
   return HIDDEN_TOOL_NAME_PREFIXES.some((p) => name.startsWith(p));
 }
 
@@ -123,6 +128,7 @@ export function mergeTimeline(args: MergeTimelineArgs): TimelineEvent[] {
         }
         if (type === "thinking") {
           const thinkingText = stringField(block, "thinking");
+          if (!thinkingText.trim()) return;
           buf.push({
             tsMs,
             rank: e.jsonl_offset * 100 + idx,

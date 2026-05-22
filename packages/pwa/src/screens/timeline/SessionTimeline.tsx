@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../../components/ui/button";
 import { renderTimelineItem, type RenderTimelineItemContext } from "./renderTimelineItem";
-import { SessionTimelineItem } from "./SessionTimelineItem";
-import { IdleWaitingCard } from "./cards/IdleWaitingCard";
 import type { TimelineEvent } from "./types";
 
 export interface SessionTimelineProps {
@@ -12,7 +10,7 @@ export interface SessionTimelineProps {
   onOpenPermission?: (request_id: string) => void;
 }
 
-export function SessionTimeline({ items, idle, onLoadEarlier, onOpenPermission }: SessionTimelineProps) {
+export function SessionTimeline({ items, onLoadEarlier, onOpenPermission }: SessionTimelineProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const lastLoadAt = useRef(0);
@@ -62,11 +60,6 @@ export function SessionTimeline({ items, idle, onLoadEarlier, onOpenPermission }
           </Button>
         </div>
         {items.map((it) => renderTimelineItem(it, ctx))}
-        {idle && items.length > 0 && (
-          <SessionTimelineItem marker="idle" key="__idle__">
-            <IdleWaitingCard />
-          </SessionTimelineItem>
-        )}
         {items.length === 0 && (
           <p className="text-muted-foreground py-12 text-center text-sm">Send a message to start.</p>
         )}

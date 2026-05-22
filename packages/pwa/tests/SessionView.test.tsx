@@ -129,7 +129,7 @@ test("SessionView omits the connection-lost banner when connected", () => {
   expect(markup).not.toContain("connection-banner");
 });
 
-test("SessionView renders the idle synthetic-last item when idle is true", () => {
+test("SessionView no longer renders the IdleWaitingCard — status chip in the header is the source of truth for idle", () => {
   const markup = renderToStaticMarkup(
     <SessionView
       header={{ name: "session-1", model: "sonnet", cwd: "/x", online: true }}
@@ -143,5 +143,6 @@ test("SessionView renders the idle synthetic-last item when idle is true", () =>
     />,
   );
 
-  expect(markup).toContain("How would you like to proceed");
+  expect(markup).not.toContain("How would you like to proceed");
+  expect(markup).not.toContain("Waiting for input");
 });
