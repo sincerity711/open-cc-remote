@@ -103,12 +103,18 @@ test("idle: session row chip flips to Idle after end_turn", async ({ page }, tes
       await expect(sessionRow.locator("text=/^Idle$/").first()).toBeVisible({ timeout: 120_000 });
     });
 
-    // Note: we don't assert the inverse transition (Idle → Working on a new
-    // PWA chat) here. Real Claude at the interactive prompt receives the
-    // `notifications/claude/channel` MCP frame but doesn't start an LLM
-    // turn from a notification alone, so no JSONL line is written and the
-    // FSM stays idle. Test 12 (mock fake-claude --auto-reply --jsonl-mirror)
-    // covers the round-trip half via a deterministic responder.
+    // Note: we deliberately don't assert the inverse transition (Idle →
+    // Working on PWA chat-input) here. Production path:
+    //
+    //   PWA → hub chat_send → daemon chat_send → plugin chat_in → Claude
+    //   Code MCP `notifications/claude/channel` (channel feature loaded
+    //   via --dangerously-load-development-channels server:cc-remote).
+    //
+    // Claude Code is supposed to auto-enqueue + start a fresh turn when
+    // idle at the ❯ prompt, but empirically the queue-pop doesn't fire
+    // reliably within reasonable test budgets when Claude is fully
+    // settled. Test 12 (mock fake-claude --auto-reply --jsonl-mirror)
+    // covers the chat round-trip half deterministically.
   } finally {
     claude?.stop();
     await session.close();
