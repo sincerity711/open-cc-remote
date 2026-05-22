@@ -83,20 +83,44 @@ export function mergeTimeline(args: MergeTimelineArgs): TimelineEvent[] {
   }
 
   // EventFrameForPwa → tool / thinking / raw fallback.
-  // ts is unix milliseconds when populated by the daemon. History-replayed events
-  // arrive with ts === 0; fall back to jsonl_offset for stable ordering.
+  // ts is unix milliseconds when populated by the daemon. History-replayed
+  // events arrive with ts === 0; fall back to jsonl_offset for stable ordering.
+  // The ts === 0 flag also discriminates historic from live events: for live
+  // user/assistant text, the chat-broadcast path already emitted a bubble, so
+  // we skip the JSONL duplicate. For historic events (the user re-entered a
+  // session and clicked Load earlier — there are no chat broadcasts for past
+  // turns), we DO emit user/assistant text from JSONL — otherwise the
+  // historical conversation would render as just tool cards with no prose.
   for (const e of args.events) {
     const tsMs = e.ts > 0 ? e.ts : 0;
+    const isHistoric = e.ts === 0;
     const payloadType = extractPayloadType(e.payload);
 
-    // Inspect assistant content blocks: thinking / tool_use become rich cards;
-    // text blocks are dropped (chat broadcast covers assistant prose).
+    // Inspect assistant content blocks: thinking / tool_use become rich cards.
+    // Text blocks: live → drop (chat broadcast covers); historic → emit as
+    // assistant bubble.
     if (payloadType === "assistant") {
       const blocks = extractContentBlocks(e.payload);
       blocks.forEach((block, idx) => {
         if (!isObject(block)) return;
         const type = (block as { type?: unknown }).type;
-        if (type === "text") return;
+        if (type === "text") {
+          if (!isHistoric) return;
+          const text = stringField(block, "text");
+          if (!text) return;
+          buf.push({
+            tsMs,
+            rank: e.jsonl_offset * 100 + idx,
+            item: {
+              id: `event:${e.jsonl_offset}:${idx}`,
+              kind: "assistant",
+              title: "Claude",
+              body: text,
+              time: formatClockTime(tsMs),
+            },
+          });
+          return;
+        }
         if (type === "thinking") {
           const thinkingText = stringField(block, "thinking");
           buf.push({
@@ -145,24 +169,57 @@ export function mergeTimeline(args: MergeTimelineArgs): TimelineEvent[] {
       continue;
     }
 
-    // Inspect user content blocks: tool_result mutates the matching tool;
-    // string content (regular user prose) is covered by chat broadcast.
+    // Inspect user content blocks: tool_result mutates the matching tool.
+    // Regular user prose (string content OR text-block content): live → drop
+    // (chat broadcast covers); historic → emit user bubble from JSONL.
     if (payloadType === "user") {
+      // Capture the prose for historic-emit before walking blocks.
+      let userProse: string | null = null;
+      const messageContent = (e.payload as { message?: { content?: unknown } } | null)
+        ?.message?.content;
+      if (typeof messageContent === "string") {
+        userProse = messageContent;
+      }
+
       const blocks = extractContentBlocks(e.payload);
-      // If message.content was a string (regular user prose), extractContentBlocks
-      // returns []; we skip silently — chat broadcast carries the prose.
       for (const block of blocks) {
         if (!isObject(block)) continue;
         const type = (block as { type?: unknown }).type;
-        if (type !== "tool_result") continue;
-        const toolUseId = stringField(block, "tool_use_id");
-        const target = toolUseId ? toolById.get(toolUseId) : undefined;
-        if (!target || target.kind !== "tool") continue;
-        const isError = (block as { is_error?: unknown }).is_error === true;
-        const output = stringifyToolOutput((block as { content?: unknown }).content);
-        target.result = isError ? "failure" : "success";
-        target.output = output;
-        target.summary = firstLine(output, 80);
+        if (type === "tool_result") {
+          const toolUseId = stringField(block, "tool_use_id");
+          const target = toolUseId ? toolById.get(toolUseId) : undefined;
+          if (!target || target.kind !== "tool") continue;
+          const isError = (block as { is_error?: unknown }).is_error === true;
+          const output = stringifyToolOutput((block as { content?: unknown }).content);
+          target.result = isError ? "failure" : "success";
+          target.output = output;
+          target.summary = firstLine(output, 80);
+        } else if (type === "text") {
+          // text blocks inside user content carry prose (less common — happens
+          // when CC injects synthesized user messages alongside tool results).
+          const text = stringField(block, "text");
+          if (text && !userProse) userProse = text;
+        }
+      }
+
+      if (isHistoric && userProse) {
+        // Drop CC-injected meta lines (slash-command echoes etc.) from history.
+        const isMeta =
+          (e.payload as { isMeta?: unknown } | null)?.isMeta === true ||
+          /^<(local-command|command-(name|message|args)|system-reminder)/.test(userProse.trim());
+        if (!isMeta) {
+          buf.push({
+            tsMs,
+            rank: e.jsonl_offset,
+            item: {
+              id: `event:${e.jsonl_offset}:user`,
+              kind: "user",
+              title: "You",
+              body: userProse,
+              time: formatClockTime(tsMs),
+            },
+          });
+        }
       }
       continue;
     }
