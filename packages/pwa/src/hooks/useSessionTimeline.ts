@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { PwaPermissionRequest, PwaPermissionResolved } from "@cc-remote/proto";
 import { mergeTimeline } from "../lib/timeline";
 import type { TimelineEvent } from "../screens/timeline/types";
@@ -18,6 +18,10 @@ export interface SelectedSession {
   session_id: string;
 }
 
+/** How many recent history events to pull when the user enters a session whose
+ * live event buffer is empty (or when they explicitly click "Load earlier"). */
+const HISTORY_PAGE_SIZE = 50;
+
 /**
  * Derives the merged timeline + composer/online flags for one selected session.
  *
@@ -27,19 +31,28 @@ export interface SelectedSession {
  * is no live source for the resolved card. This hook accepts the gap and
  * does not synthesize history. (Spec §2.5 — daemon-side persistence is the
  * future fix.)
+ *
+ * On session enter, if the live event buffer is empty, fires one
+ * requestHistory(before_offset = MAX_SAFE_INTEGER) so the daemon returns
+ * the most recent N JSONL lines. After that, scroll-to-top in
+ * SessionTimeline triggers paged backfill via the same loadEarlier hook,
+ * passing the oldest known offset.
  */
 export function useSessionTimeline(
   hub: UseHubResult,
   selected: SelectedSession | null,
 ): UseSessionTimelineResult {
-  return useMemo(() => {
+  const initialFetchedRef = useRef<Set<string>>(new Set());
+
+  const result = useMemo(() => {
     if (!selected) {
       return {
-        items: [],
+        items: [] as TimelineEvent[],
         loadEarlier: () => {},
         composerBlocked: false,
         online: false,
         idle: false,
+        pendingInThisSession: undefined as PwaPermissionRequest | undefined,
       };
     }
     const k = eventKey(selected.daemon_id, selected.session_id);
@@ -57,11 +70,16 @@ export function useSessionTimeline(
       !!daemon?.online &&
       !!daemon.sessions.some((s) => s.session_id === selected.session_id);
 
-    const oldestOffset = events[0]?.jsonl_offset;
-    const loadEarlier =
-      oldestOffset === undefined
-        ? () => {}
-        : () => hub.requestHistory(selected.daemon_id, selected.session_id, oldestOffset, 50);
+    // before_offset = oldest known event's offset, or MAX_SAFE_INTEGER if the
+    // buffer is empty (daemon then returns the tail of the JSONL file).
+    const beforeOffset = events[0]?.jsonl_offset ?? Number.MAX_SAFE_INTEGER;
+    const loadEarlier = () =>
+      hub.requestHistory(
+        selected.daemon_id,
+        selected.session_id,
+        beforeOffset,
+        HISTORY_PAGE_SIZE,
+      );
 
     return {
       items,
@@ -72,4 +90,27 @@ export function useSessionTimeline(
       pendingInThisSession: pending[0],
     };
   }, [hub, selected]);
+
+  // Auto-load history on first entry into a session whose live buffer is empty.
+  // The set of already-fetched-on-entry session keys lives in a ref so a remount
+  // (e.g. layout reflow) doesn't re-spam requestHistory.
+  useEffect(() => {
+    if (!selected) return;
+    const k = eventKey(selected.daemon_id, selected.session_id);
+    if (initialFetchedRef.current.has(k)) return;
+    if ((hub.events[k]?.length ?? 0) > 0) {
+      // Buffer was populated since selection — no need to backfill.
+      initialFetchedRef.current.add(k);
+      return;
+    }
+    initialFetchedRef.current.add(k);
+    hub.requestHistory(
+      selected.daemon_id,
+      selected.session_id,
+      Number.MAX_SAFE_INTEGER,
+      HISTORY_PAGE_SIZE,
+    );
+  }, [selected, hub]);
+
+  return result;
 }
