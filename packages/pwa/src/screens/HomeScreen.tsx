@@ -182,7 +182,7 @@ function DaemonCard({
           <li className="text-muted-foreground text-sm">No active sessions.</li>
         ) : (
           daemon.sessions.map((s) => (
-            <li key={s.session_id}>
+            <li key={s.session_id} className="min-w-0">
               <SessionRow
                 session={s}
                 selected={selectedSessionId === s.session_id}
@@ -251,13 +251,13 @@ function SessionRow({
   return (
     <div
       className={cn(
-        "bg-surface shadow-card rounded-md border p-3",
+        "bg-surface shadow-card min-w-0 rounded-md border p-3",
         session.state === "waiting" ? "border-warning/45" : "border-border",
         selected && "ring-primary/40 ring-2",
       )}
     >
       <button
-        className="flex min-h-[44px] w-full items-start gap-3 text-left"
+        className="flex min-h-[44px] w-full min-w-0 items-start gap-3 text-left"
         onClick={onSelect}
       >
         <StatusIcon state={session.state} />
