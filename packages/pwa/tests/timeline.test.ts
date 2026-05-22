@@ -444,3 +444,35 @@ test("stringifyToolOutput accepts string, text-block array, and other shapes", (
   ).toBe("a\nb");
   expect(stringifyToolOutput({ unexpected: 1 })).toContain("unexpected");
 });
+
+test("mcp__cc-remote__ tool_use blocks are filtered (channel-internal noise)", () => {
+  // Plugin's reply tool relays PWA chat back to Claude. Chat broadcast path
+  // already renders that surface; the tool_use card would be duplicate noise.
+  const items = mergeTimeline({
+    chat: [],
+    pending: [],
+    resolved: [],
+    events: [
+      {
+        type: "event",
+        daemon_id: "d",
+        session_id: "s",
+        jsonl_offset: 1,
+        ts: 1_700_000_000_000,
+        payload: {
+          type: "assistant",
+          message: {
+            role: "assistant",
+            content: [
+              { type: "tool_use", id: "toolu_internal", name: "mcp__cc-remote__reply", input: { text: "hi" } },
+              { type: "tool_use", id: "toolu_real", name: "Bash", input: { command: "ls" } },
+            ],
+          },
+        },
+      },
+    ],
+  });
+  // Only the Bash tool_use should produce a card.
+  expect(items).toHaveLength(1);
+  expect(items[0]).toMatchObject({ kind: "tool", tool: "Bash" });
+});

@@ -46,6 +46,17 @@ const HIDDEN_PAYLOAD_TYPES = new Set<string>([
 ]);
 
 /**
+ * MCP tools whose tool_use blocks should NOT surface as timeline cards.
+ * These are cc-remote-plugin-internal tools used by the channel-permission
+ * protocol; the chat broadcast path already renders the user-visible result.
+ */
+const HIDDEN_TOOL_NAME_PREFIXES = ["mcp__cc-remote__"];
+
+function isHiddenToolName(name: string): boolean {
+  return HIDDEN_TOOL_NAME_PREFIXES.some((p) => name.startsWith(p));
+}
+
+/**
  * Pure derivation of the visible timeline from the four hub-state slices for one session.
  * Output is sorted by timestamp; ids are deterministic.
  */
@@ -105,6 +116,10 @@ export function mergeTimeline(args: MergeTimelineArgs): TimelineEvent[] {
         if (type === "tool_use") {
           const id = stringField(block, "id");
           const name = stringField(block, "name");
+          // cc-remote-internal MCP tools are pure protocol plumbing — the
+          // chat broadcast path already surfaces what they relay. Don't
+          // render them as user-facing tool cards.
+          if (isHiddenToolName(name)) return;
           const input = (block as { input?: unknown }).input;
           const tool: TimelineEvent = {
             id: `tool:${id}`,
