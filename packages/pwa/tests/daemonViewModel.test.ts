@@ -3,6 +3,7 @@ import type {
   DaemonView,
   EventFrameForPwa,
   PwaPermissionRequest,
+  SessionState,
 } from "@cc-remote/proto";
 import { computeDaemonViewModels } from "../src/lib/daemonViewModel";
 
@@ -17,6 +18,7 @@ const baseSession = {
   started_at: 0,
   claude_client_version: "1.0.0",
   plugin_version: "0.0.1",
+  state: "idle" as SessionState,
 };
 
 const onlineDaemon: DaemonView = {
@@ -30,23 +32,69 @@ const offlineDaemon: DaemonView = {
   daemon_id: "d2",
   hostname: "dev-vm-eu",
   online: false,
-  sessions: [{ ...baseSession, session_id: "s2", cwd: "/srv/api" }],
+  sessions: [{ ...baseSession, session_id: "s2", cwd: "/srv/api", state: "working" }],
 };
 
-test("offline daemon yields offline state for every session", () => {
+test("offline daemon yields offline state for every session regardless of fsm state", () => {
   const models = computeDaemonViewModels({
     daemons: [offlineDaemon],
     events: {},
     pendingPermissions: {},
     completedCounts: {},
-    idleSessions: {},
   });
   expect(models).toHaveLength(1);
   expect(models[0].online).toBe(false);
   expect(models[0].sessions[0].state).toBe("offline");
 });
 
-test("session with a pending permission is in waiting state with permission activity", () => {
+test("session.state from daemon FSM is rendered directly when online", () => {
+  const working: DaemonView = {
+    ...onlineDaemon,
+    sessions: [{ ...baseSession, state: "working" }],
+  };
+  const waiting: DaemonView = {
+    ...onlineDaemon,
+    sessions: [{ ...baseSession, state: "waiting" }],
+  };
+  const idle: DaemonView = {
+    ...onlineDaemon,
+    sessions: [{ ...baseSession, state: "idle" }],
+  };
+  expect(
+    computeDaemonViewModels({
+      daemons: [working], events: {}, pendingPermissions: {}, completedCounts: {},
+    })[0].sessions[0].state,
+  ).toBe("working");
+  expect(
+    computeDaemonViewModels({
+      daemons: [waiting], events: {}, pendingPermissions: {}, completedCounts: {},
+    })[0].sessions[0].state,
+  ).toBe("waiting");
+  expect(
+    computeDaemonViewModels({
+      daemons: [idle], events: {}, pendingPermissions: {}, completedCounts: {},
+    })[0].sessions[0].state,
+  ).toBe("idle");
+});
+
+test("history-replayed events do NOT flip an idle session to working — daemon FSM is the source of truth", () => {
+  // Simulates the bug: PWA enters a session, requests history, gets ts=0 events back.
+  // Pre-FSM the heuristic was events.length > 0 → working. Now state stays whatever the daemon says.
+  const historicEvents: EventFrameForPwa[] = [
+    { type: "event", daemon_id: "d1", session_id: "s1", jsonl_offset: 1, ts: 0, payload: {} },
+    { type: "event", daemon_id: "d1", session_id: "s1", jsonl_offset: 2, ts: 0, payload: {} },
+  ];
+  const models = computeDaemonViewModels({
+    daemons: [onlineDaemon], // baseSession.state === "idle"
+    events: { "d1::s1": historicEvents },
+    pendingPermissions: {},
+    completedCounts: {},
+  });
+  expect(models[0].sessions[0].state).toBe("idle");
+  expect(models[0].sessions[0].unread).toBe(2);
+});
+
+test("waiting state surfaces 'permission needed' activity when a pending request exists", () => {
   const pending: PwaPermissionRequest = {
     type: "permission_request",
     daemon_id: "d1",
@@ -56,55 +104,18 @@ test("session with a pending permission is in waiting state with permission acti
     args_summary: "rm -rf x",
     expires_at: 0,
   };
+  const waiting: DaemonView = {
+    ...onlineDaemon,
+    sessions: [{ ...baseSession, state: "waiting" }],
+  };
   const models = computeDaemonViewModels({
-    daemons: [onlineDaemon],
+    daemons: [waiting],
     events: {},
     pendingPermissions: { r1: pending },
     completedCounts: {},
-    idleSessions: {},
   });
   expect(models[0].sessions[0].state).toBe("waiting");
   expect(models[0].sessions[0].activity).toContain("permission");
-});
-
-test("idle flag wins over event activity when set", () => {
-  const evt: EventFrameForPwa = {
-    type: "event",
-    daemon_id: "d1",
-    session_id: "s1",
-    jsonl_offset: 1,
-    ts: 1,
-    payload: {},
-  };
-  const models = computeDaemonViewModels({
-    daemons: [onlineDaemon],
-    events: { "d1::s1": [evt] },
-    pendingPermissions: {},
-    completedCounts: {},
-    idleSessions: { "d1::s1": true },
-  });
-  expect(models[0].sessions[0].state).toBe("idle");
-});
-
-test("session with events but no pending/idle is working", () => {
-  const evt: EventFrameForPwa = {
-    type: "event",
-    daemon_id: "d1",
-    session_id: "s1",
-    jsonl_offset: 1,
-    ts: 1,
-    payload: {},
-  };
-  const models = computeDaemonViewModels({
-    daemons: [onlineDaemon],
-    events: { "d1::s1": [evt] },
-    pendingPermissions: {},
-    completedCounts: { "d1::s1": 2 },
-    idleSessions: {},
-  });
-  expect(models[0].sessions[0].state).toBe("working");
-  expect(models[0].sessions[0].tasks).toBe(2);
-  expect(models[0].sessions[0].unread).toBe(1);
 });
 
 test("daemon with zero sessions still appears in the model list", () => {
@@ -119,7 +130,6 @@ test("daemon with zero sessions still appears in the model list", () => {
     events: {},
     pendingPermissions: {},
     completedCounts: {},
-    idleSessions: {},
   });
   expect(models[0].sessions).toEqual([]);
 });
@@ -130,7 +140,6 @@ test("name derives from cwd basename (so users see 'repo' not a raw UUID)", () =
     events: {},
     pendingPermissions: {},
     completedCounts: {},
-    idleSessions: {},
   });
   // baseSession.cwd === "/work/repo"
   expect(models[0].sessions[0].name).toBe("repo");
@@ -154,14 +163,12 @@ test("name falls back to short session_id when cwd is empty or root", () => {
     events: {},
     pendingPermissions: {},
     completedCounts: {},
-    idleSessions: {},
   });
   const b = computeDaemonViewModels({
     daemons: [rootCwd],
     events: {},
     pendingPermissions: {},
     completedCounts: {},
-    idleSessions: {},
   });
   // first 8 chars of session_id, no full UUIDs leaked
   expect(a[0].sessions[0].name).toBe(baseSession.session_id.slice(0, 8));

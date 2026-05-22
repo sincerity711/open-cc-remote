@@ -12,6 +12,7 @@ export function fixtureSession(overrides: Partial<SessionSnapshot> = {}): Sessio
     started_at: 1,
     claude_client_version: "test",
     plugin_version: "0.1.0",
+    state: "idle",
     ...overrides,
   };
 }

@@ -24,5 +24,6 @@ export function buildSession(i: BuildSessionInput): SessionSnapshot {
     started_at: i.now,
     claude_client_version: i.claudeClientVersion,
     plugin_version: i.pluginVersion,
+    state: "idle",
   };
 }

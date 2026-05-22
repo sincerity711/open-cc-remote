@@ -17,10 +17,12 @@ import { startWatcher, type WatcherHandle } from "./jsonl-watcher.ts";
 import { openDb } from "./db.ts";
 import { recordRequest, resolveRequest } from "./repos/permissions.ts";
 import { handleHubChatSend, handlePluginChatOut } from "./chat.ts";
+import { SessionFsm } from "./session-fsm.ts";
 
 const cfg = loadConfig();
 const epoch = Math.floor(Date.now() / 1000);
 const sessions = new LiveSessions();
+const fsm = new SessionFsm();
 const db = openDb(join(cfg.state_dir, "db.sqlite"));
 
 const kp = await getOrCreateKeypair(cfg.state_dir);
@@ -79,6 +81,7 @@ const hub = startHubClient({
         decision: frame.decision,
         decided_via: "pwa",
       });
+      fsm.onPermissionResolved(frame.session_id);
     } else if (frame.type === "request_history") {
       const session = sessions.get(frame.session_id);
       if (!session) {
@@ -173,6 +176,7 @@ const hub = startHubClient({
 });
 
 sessions.onAdd((s: SessionSnapshot) => {
+  fsm.register(s.session_id);
   hub.send({ type: "session_open", session: s });
 
   // Asynchronously bind the JSONL: discover the real claude_session_id
@@ -199,7 +203,12 @@ sessions.onAdd((s: SessionSnapshot) => {
           payload,
         });
 
-        // Idle-timer state machine:
+        // Drive the session FSM. Every line is activity → working (unless
+        // currently in `waiting` for a permission, in which case the FSM
+        // remembers we'd be working and will pop back on resolve).
+        fsm.onJsonlLine(s.session_id);
+
+        // Idle timer:
         //   - `user` line               → new turn started, cancel any pending idle.
         //   - `assistant` w/o end_turn  → mid-turn streaming, cancel any pending idle.
         //   - `assistant` w/ end_turn   → fire task_completed + (re)arm idle timer.
@@ -221,6 +230,7 @@ sessions.onAdd((s: SessionSnapshot) => {
             const t = setTimeout(() => {
               idleTimers.delete(s.session_id);
               hub.send({ type: "idle", session_id: s.session_id, ts: Date.now() });
+              fsm.onIdleTimer(s.session_id);
             }, cfg.idle_window_ms);
             t.unref();
             idleTimers.set(s.session_id, t);
@@ -237,6 +247,7 @@ sessions.onAdd((s: SessionSnapshot) => {
 
 sessions.onRemove((session_id: string) => {
   hub.send({ type: "session_close", session_id, reason: "plugin_bye" });
+  fsm.remove(session_id);
   const w = watchers.get(session_id);
   if (w) {
     w.close();
@@ -244,6 +255,19 @@ sessions.onRemove((session_id: string) => {
   }
   const t = idleTimers.get(session_id);
   if (t) { clearTimeout(t); idleTimers.delete(session_id); }
+});
+
+// FSM transitions → reflect into the cached SessionSnapshot AND broadcast a
+// session_state frame so the hub can fan it out to PWAs in real time.
+fsm.onTransition((session_id, state, prev) => {
+  sessions.update(session_id, { state });
+  hub.send({
+    type: "session_state",
+    session_id,
+    state,
+    prev,
+    ts: Date.now(),
+  });
 });
 
 const sockServer = startSocketServer({
@@ -267,6 +291,7 @@ const sockServer = startSocketServer({
       }
       recordRequest(db, frame.request_id, session_id, frame.tool, frame.args_summary);
       requestToClient.set(frame.request_id, client);
+      fsm.onPermissionRequest(session_id);
       hub.send({
         type: "permission_request",
         session_id,

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import type {
   HubToPwa, PwaToHub, DaemonView, EventFrameForPwa, PwaPermissionRequest,
-  PwaChatBroadcast,
+  PwaChatBroadcast, SessionState,
 } from "@cc-remote/proto";
 
 const PER_SESSION_BUFFER = 2000;
@@ -13,7 +13,6 @@ export interface HubState {
   events: Record<string, EventFrameForPwa[]>;
   pendingPermissions: Record<string, PwaPermissionRequest>;
   completedCounts: Record<string, number>;
-  idleSessions: Record<string, true>;
   chatMessages: Record<string, PwaChatBroadcast[]>;
   chatErrors: Record<string, string>;  // keyed by eventKey, value = reason of last error
 }
@@ -37,7 +36,7 @@ export function useHub(
 ): UseHubResult {
   const [state, setState] = useState<HubState>({
     connected: false, daemons: [], events: {}, pendingPermissions: {},
-    completedCounts: {}, idleSessions: {},
+    completedCounts: {},
     chatMessages: {}, chatErrors: {},
   });
   const wsRef = useRef<WebSocket | null>(null);
@@ -89,13 +88,9 @@ export function useHub(
             const trimmed = next.length > PER_SESSION_BUFFER
               ? next.slice(next.length - PER_SESSION_BUFFER)
               : next;
-            // Clear idle flag (any new event = activity)
-            const nextIdleSessions = { ...prev.idleSessions };
-            delete nextIdleSessions[k];
             return {
               ...prev,
               events: { ...prev.events, [k]: trimmed },
-              idleSessions: nextIdleSessions,
             };
           }
           case "history_chunk": {
@@ -139,10 +134,20 @@ export function useHub(
             };
           }
           case "idle": {
-            const k = eventKey(frame.daemon_id, frame.session_id);
+            // Informational notification only — actual state is tracked via
+            // the session_state frame. Kept for forward-compat with downstream
+            // listeners (e.g. push prefs use the daemon's idle frame too).
+            return prev;
+          }
+          case "session_state": {
+            const updateSession = (s: typeof prev.daemons[number]["sessions"][number]) =>
+              s.session_id === frame.session_id ? { ...s, state: frame.state as SessionState } : s;
             return {
               ...prev,
-              idleSessions: { ...prev.idleSessions, [k]: true },
+              daemons: prev.daemons.map((d) =>
+                d.daemon_id === frame.daemon_id
+                  ? { ...d, sessions: d.sessions.map(updateSession) }
+                  : d),
             };
           }
           case "chat": {

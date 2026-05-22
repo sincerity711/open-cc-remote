@@ -30,6 +30,7 @@ async function main() {
     started_at: Math.floor(Date.now() / 1000),
     claude_client_version: "fake-claude",
     plugin_version: "fake",
+    state: "idle",
   };
 
   const client = await connectDaemon(sockPath, {

@@ -142,6 +142,21 @@ export class Router {
         if (this.db && this.push) void this.dispatchIdlePush(daemon_id, frame);
         return;
       }
+      case "session_state": {
+        const state = this.daemons.get(daemon_id);
+        if (!state) return;
+        const s = state.sessions.get(frame.session_id);
+        if (s) state.sessions.set(frame.session_id, { ...s, state: frame.state });
+        this.pwaReg.broadcast({
+          type: "session_state",
+          daemon_id,
+          session_id: frame.session_id,
+          state: frame.state,
+          prev: frame.prev,
+          ts: frame.ts,
+        });
+        return;
+      }
       case "chat_out": {
         const state = this.daemons.get(daemon_id);
         if (!state) return;

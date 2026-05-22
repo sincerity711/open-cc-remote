@@ -30,16 +30,16 @@ export interface ComputeDaemonViewModelsArgs {
   events: Record<string, EventFrameForPwa[]>;
   pendingPermissions: Record<string, PwaPermissionRequest>;
   completedCounts: Record<string, number>;
-  idleSessions: Record<string, true>;
 }
 
 /**
- * Pure derivation. State priority (highest first):
- *   1. !daemon.online                                    → offline
- *   2. any pending permission for this session           → waiting
- *   3. idleSessions[k] is set                            → idle
- *   4. events[k] has at least one frame                  → working
- *   5. otherwise                                          → idle
+ * Pure derivation. Source of truth for the per-session state is the daemon
+ * FSM (carried on SessionSnapshot.state and updated by session_state frames).
+ * The PWA only adds the "offline" projection — daemons can't classify
+ * themselves as offline.
+ *
+ *   1. !daemon.online                      → offline
+ *   2. otherwise                            → session.state (working|waiting|idle)
  */
 export function computeDaemonViewModels(
   args: ComputeDaemonViewModelsArgs,
@@ -57,15 +57,7 @@ export function computeDaemonViewModels(
       const tasks = args.completedCounts[k] ?? 0;
       const unread = evts.length;
 
-      const state: SessionState = !d.online
-        ? "offline"
-        : pending.length > 0
-          ? "waiting"
-          : args.idleSessions[k]
-            ? "idle"
-            : evts.length > 0
-              ? "working"
-              : "idle";
+      const state: SessionState = !d.online ? "offline" : s.state;
 
       const activity = pickActivity(state, pending, tasks);
 

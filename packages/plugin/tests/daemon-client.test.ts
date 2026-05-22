@@ -22,7 +22,7 @@ test("connect, register, bye, close round-trip", async () => {
       type: "register",
       session: { session_id: "s1", claude_session_id: null, tmux_session: null, tmux_pane: null,
                  cwd: "/x", model: "m", pid: 1, started_at: 1,
-                 claude_client_version: "test", plugin_version: "0.0.0" }
+                 claude_client_version: "test", plugin_version: "0.0.0", state: "idle" }
     });
     expect(ack1).toEqual({ type: "ack", ref: "register" });
 

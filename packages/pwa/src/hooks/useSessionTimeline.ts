@@ -66,9 +66,9 @@ export function useSessionTimeline(
     const items = mergeTimeline({ events, chat, pending, resolved });
 
     const daemon = hub.daemons.find((d) => d.daemon_id === selected.daemon_id);
-    const online =
-      !!daemon?.online &&
-      !!daemon.sessions.some((s) => s.session_id === selected.session_id);
+    const session = daemon?.sessions.find((s) => s.session_id === selected.session_id);
+    const online = !!daemon?.online && !!session;
+    const idle = session?.state === "idle";
 
     // before_offset = oldest known event's offset, or MAX_SAFE_INTEGER if the
     // buffer is empty (daemon then returns the tail of the JSONL file).
@@ -86,7 +86,7 @@ export function useSessionTimeline(
       loadEarlier,
       composerBlocked: pending.length > 0,
       online,
-      idle: hub.idleSessions[k] ?? false,
+      idle,
       pendingInThisSession: pending[0],
     };
   }, [hub, selected]);

@@ -1,6 +1,23 @@
 // Subset of frames implemented in Plan 1.
 // Auth, permission, history, file-transfer frames come in later plans.
 
+/**
+ * Daemon-owned session state machine. Source of truth: JSONL events +
+ * permission protocol. The daemon classifies; hub forwards; PWA renders.
+ *
+ * Transitions (see packages/daemon/src/session-fsm.ts):
+ *   register                                    → idle
+ *   jsonl line (any type, !waiting)             → working
+ *   assistant end_turn → idle_window elapsed    → idle
+ *   permission_request                          → waiting (push prev)
+ *   permission_resolved (last pending)          → pop prev
+ *   session_close                               → (removed)
+ *
+ * "offline" is NOT a session-FSM state — it's derived in the PWA from
+ * !daemon.online (the daemon process can't classify itself as offline).
+ */
+export type SessionState = "working" | "waiting" | "idle";
+
 // Plugin-issued routing key (UUID generated at plugin startup) plus
 // derived metadata. claude_session_id is null until the daemon's JSONL
 // bind algorithm resolves it (see packages/daemon/src/jsonl-bind.ts).
@@ -15,6 +32,12 @@ export interface SessionSnapshot {
   started_at: number;                   // unix seconds
   claude_client_version: string;        // from MCP initialize.clientInfo.version
   plugin_version: string;               // from packages/plugin/package.json
+  /**
+   * Current FSM state (daemon-owned). Carried on snapshot / session_open so
+   * the PWA recovers the latest state across reconnect; live transitions
+   * arrive as SessionStateFrame.
+   */
+  state: SessionState;
 }
 
 // ─── plugin ↔ daemon (Unix socket) ────────────────────────────────────
@@ -58,6 +81,7 @@ export type DaemonToHub =
   | DaemonHistoryChunk
   | TaskCompletedFrame
   | IdleFrame
+  | SessionStateFrame
   | PluginChatOut;
 
 export type HubToDaemon =
@@ -89,6 +113,7 @@ export type HubToPwa =
   | PwaHistoryChunk
   | PwaTaskCompletedFrame
   | PwaIdleFrame
+  | PwaSessionStateFrame
   | PwaChatBroadcast
   | HubChatErrorBroadcast;
 
@@ -323,5 +348,28 @@ export interface PwaIdleFrame {
   type: "idle";
   daemon_id: string;
   session_id: string;
+  ts: number;
+}
+
+// ─── session_state (FSM transitions) ──────────────────────────────────
+//
+// Emitted by the daemon on every session-FSM transition. Hub forwards to
+// PWA verbatim (with daemon_id added) and updates its cached SessionSnapshot
+// so reconnecting PWAs see the latest state via the snapshot path.
+
+export interface SessionStateFrame {
+  type: "session_state";
+  session_id: string;
+  state: SessionState;
+  prev: SessionState;
+  ts: number;
+}
+
+export interface PwaSessionStateFrame {
+  type: "session_state";
+  daemon_id: string;
+  session_id: string;
+  state: SessionState;
+  prev: SessionState;
   ts: number;
 }

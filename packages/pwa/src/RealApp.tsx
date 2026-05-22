@@ -49,7 +49,7 @@ export function RealApp() {
       setAuthNotice("Session expired, please sign in again.");
     },
   });
-  const { connected, daemons, events, pendingPermissions, sendPermissionReply, completedCounts, idleSessions, chatErrors } = hub;
+  const { connected, daemons, events, pendingPermissions, sendPermissionReply, completedCounts, chatErrors } = hub;
   const sessionTimeline = useSessionTimeline(hub, selected);
 
   const device = useDevice();
@@ -59,9 +59,8 @@ export function RealApp() {
       events,
       pendingPermissions,
       completedCounts,
-      idleSessions,
     }),
-    [daemons, events, pendingPermissions, completedCounts, idleSessions],
+    [daemons, events, pendingPermissions, completedCounts],
   );
   const permissionQueue = usePermissionQueue(pendingPermissions);
   const pendingApprovalsCount = totalPendingApprovals(pendingPermissions);
