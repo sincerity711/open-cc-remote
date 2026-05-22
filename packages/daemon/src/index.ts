@@ -26,16 +26,16 @@ import { SessionFsm } from "./session-fsm.ts";
  * workspace-trust confirmations.
  *
  * Design: race two pane-watching promises.
- *   - dialog promise → matches a known confirm-dialog pattern; on win we
- *     send Enter and re-race.
- *   - ready promise → matches the interactive TUI footer (post-dialog state);
- *     on win we're done.
- * The whole race aborts after 30s.
+ *   - readyPromise   → resolves when claude's TUI footer appears (no dialog
+ *                       pending). Win → done.
+ *   - dialogPromise  → resolves when a known confirm-dialog pattern appears.
+ *                       Win → send Enter, re-race.
+ * Both polls are infinite; one of them is guaranteed to win in normal claude
+ * boot, so no outer timeout is needed.
  */
 const DIALOG_RE = /Enter to confirm|local development|trust.*workspace|trust.*folder|safety check|created or one you trust/;
 const READY_RE = /for agents|for shortcuts|shift\+tab to cycle|❯ Try/;
 const POLL_INTERVAL_MS = 300;
-const DISMISS_TIMEOUT_MS = 30_000;
 
 function capturePane(tmuxName: string): Promise<string> {
   return new Promise((resolve) => {
@@ -57,10 +57,9 @@ function sendEnter(tmuxName: string): Promise<void> {
   });
 }
 
-function pollForRegex(tmuxName: string, re: RegExp, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
+function pollForRegex(tmuxName: string, re: RegExp): Promise<void> {
+  return new Promise((resolve) => {
     const tick = async () => {
-      if (signal.aborted) return reject(new Error("aborted"));
       const pane = await capturePane(tmuxName);
       if (re.test(pane)) return resolve();
       setTimeout(tick, POLL_INTERVAL_MS).unref();
@@ -71,25 +70,19 @@ function pollForRegex(tmuxName: string, re: RegExp, signal: AbortSignal): Promis
 
 function dismissClaudeDialogs(tmuxName: string): void {
   void (async () => {
-    const ac = new AbortController();
-    const timeoutId = setTimeout(() => ac.abort(), DISMISS_TIMEOUT_MS);
-    timeoutId.unref();
-
-    while (!ac.signal.aborted) {
-      // Race: whichever shows first decides next action.
-      const dialog = pollForRegex(tmuxName, DIALOG_RE, ac.signal).then(() => "dialog" as const);
-      const ready = pollForRegex(tmuxName, READY_RE, ac.signal).then(() => "ready" as const);
-      const winner = await Promise.race([dialog, ready]).catch(() => null);
-      if (winner === null || winner === "ready") {
-        ac.abort();
-        clearTimeout(timeoutId);
-        return;
-      }
-      // dialog won → let it settle, press Enter, then re-race.
+    while (true) {
+      const winner = await Promise.race([
+        pollForRegex(tmuxName, READY_RE).then(() => "ready" as const),
+        pollForRegex(tmuxName, DIALOG_RE).then(() => "dialog" as const),
+      ]);
+      if (winner === "ready") return;
+      // Let the dialog settle, dispatch Enter, give claude time to update the
+      // pane before re-racing (otherwise the dialog regex matches the same
+      // stale capture and we double-press Enter).
       await new Promise((r) => setTimeout(r, 400));
       await sendEnter(tmuxName);
+      await new Promise((r) => setTimeout(r, 400));
     }
-    clearTimeout(timeoutId);
   })();
 }
 
