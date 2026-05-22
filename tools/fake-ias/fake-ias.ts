@@ -114,7 +114,7 @@ export async function startFakeIas(opts: FakeIasOptions = {}): Promise<FakeIasHa
 
 if (import.meta.main) {
   const handle = await startFakeIas({
-    port: Number(process.env.FAKE_IAS_PORT ?? 7770),
+    port: Number(process.env.FAKE_IAS_PORT ?? 17770),
     sub: process.env.FAKE_IAS_SUB,
   });
   console.log(`fake-ias listening at ${handle.url}`);

@@ -14,7 +14,7 @@ import { usePermissionQueue } from "./hooks/usePermissionQueue";
 import { PermissionSurface } from "./screens/PermissionSurface";
 import { SignInScreen } from "./screens/SignInScreen";
 
-const HUB_URL = (import.meta.env.VITE_HUB_URL as string) ?? "ws://localhost:7745";
+const HUB_URL = (import.meta.env.VITE_HUB_URL as string) ?? "ws://localhost:17745";
 
 interface Selected { daemon_id: string; session_id: string }
 

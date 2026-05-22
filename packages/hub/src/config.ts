@@ -25,7 +25,7 @@ export interface HubConfig {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
-  const port = Number(env.HUB_PORT ?? 7745);
+  const port = Number(env.HUB_PORT ?? 17745);
   const db_path = env.HUB_DB_PATH ?? "./hub.sqlite";
   const jwt_secret = env.HUB_JWT_SECRET ?? randomBytes(32).toString("base64url");
   if (!env.HUB_JWT_SECRET) {

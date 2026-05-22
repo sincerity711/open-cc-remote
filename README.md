@@ -19,19 +19,19 @@ In four terminals plus a one-shot pairing step:
 bun install
 
 # 1. Start fake-IAS (terminal A) — substitute real SAP IAS in production
-FAKE_IAS_PORT=7770 bun tools/fake-ias/fake-ias.ts
-# → fake-ias listening at http://localhost:7770
+FAKE_IAS_PORT=17770 bun tools/fake-ias/fake-ias.ts
+# → fake-ias listening at http://localhost:17770
 
 # 2. Start the hub (terminal B)
-HUB_PORT=7745 \
+HUB_PORT=17745 \
 HUB_DB_PATH=./hub.sqlite \
 HUB_JWT_SECRET="$(bun -e 'console.log(crypto.randomBytes(32).toString("base64url"))')" \
-HUB_IAS_ISSUER=http://localhost:7770 \
+HUB_IAS_ISSUER=http://localhost:17770 \
 HUB_IAS_CLIENT_ID=cc-remote \
 HUB_IAS_CLIENT_SECRET=test-secret \
-HUB_IAS_REDIRECT_URI=http://localhost:7745/auth/callback \
+HUB_IAS_REDIRECT_URI=http://localhost:17745/auth/callback \
 HUB_IAS_ALLOWED_SUBJECTS=i060912@sap.com \
-HUB_PWA_URL=http://localhost:5173/ \
+HUB_PWA_URL=http://localhost:15173/ \
 bun run packages/hub/src/index.ts
 
 # 3. Issue a pairing code (one-shot, terminal C)
@@ -41,7 +41,7 @@ bun run packages/hub/src/admin.ts issue-pairing-code i060912@sap.com macbook
 
 # 4. Pair this machine (one-shot, terminal C)
 bun packages/daemon/bin/cc-remote.ts pair \
-    --hub ws://localhost:7745 \
+    --hub ws://localhost:17745 \
     --code ABC-DEF \
     --daemon-id macbook
 # → paired as daemon_id=macbook ...
@@ -54,10 +54,10 @@ bun packages/daemon/bin/cc-remote.ts daemon
 bun tools/fake-claude/fake-claude.ts --session-id demo --cwd "$PWD"
 
 # 7. Run the PWA (terminal E)
-VITE_HUB_URL=ws://localhost:7745 bun run --filter=@cc-remote/pwa dev
-# → http://localhost:5173/
+VITE_HUB_URL=ws://localhost:17745 bun run --filter=@cc-remote/pwa dev
+# → http://localhost:15173/
 
-# 8. Open http://localhost:5173 → click Sign in → fake-IAS auto-redirects
+# 8. Open http://localhost:15173 → click Sign in → fake-IAS auto-redirects
 #    back with bearer in fragment → daemon list shows "macbook" with session "demo".
 #    Add allow_kill: true to ~/.cc-remote/config.json to enable remote kill_session.
 #    Add allow_start: true and allowed_cwd_prefix: ["/your/path"] to enable remote start_session.
@@ -67,7 +67,7 @@ VITE_HUB_URL=ws://localhost:7745 bun run --filter=@cc-remote/pwa dev
 
 | Var | Purpose |
 | --- | --- |
-| `HUB_PORT` | Hub HTTP/WSS port (default 7745) |
+| `HUB_PORT` | Hub HTTP/WSS port (default 17745) |
 | `HUB_DB_PATH` | Hub SQLite path (default ./hub.sqlite) |
 | `HUB_JWT_SECRET` | HS256 secret for daemon JWTs (must be stable across restarts) |
 | `HUB_DISABLE_AUTH` | "1" to bypass /ws/* auth (dev/test only) |
