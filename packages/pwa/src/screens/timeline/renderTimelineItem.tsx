@@ -23,28 +23,25 @@ export interface RenderTimelineItemContext {
 
 /**
  * Pure mapping from a `TimelineEvent` → React node. Per docs/design/light-timeline.png:
- *   - User events render as a right-aligned chat bubble OUTSIDE the rail.
- *   - All other events render inside SessionTimelineItem (small rail glyph
- *     for event type/status) wrapping a card. Cards drop their header icon
- *     when the rail glyph already conveys the type — only Bash / Edit / Read /
- *     Permission cards keep an icon (their tool identity is the point).
+ *   - Every event sits on the rail. The rail glyph = type/status; the card
+ *     icon = tool identity (only when strong, e.g. Bash/Edit/Read).
+ *   - User messages share the same shape as Claude messages — only the card
+ *     tone differs (`purple` vs default) so they read like a chat bubble.
  */
 export function renderTimelineItem(
   event: TimelineEvent,
   ctx: RenderTimelineItemContext = {},
 ): React.ReactElement {
-  // User bubble is special — chat layout, no rail.
-  if (event.kind === "user") {
-    return (
-      <div key={event.id} className="mb-4">
-        <UserBubbleLive body={event.body} time={event.time} />
-      </div>
-    );
-  }
-
   const marker = pickMarker(event);
 
   switch (event.kind) {
+    case "user":
+      return (
+        <SessionTimelineItem key={event.id} marker={marker}>
+          <UserBubbleLive body={event.body} time={event.time} />
+        </SessionTimelineItem>
+      );
+
     case "assistant":
       return (
         <SessionTimelineItem key={event.id} marker={marker}>
@@ -151,9 +148,7 @@ export function renderTimelineItem(
 function pickMarker(event: TimelineEvent): TimelineMarker {
   switch (event.kind) {
     case "user":
-      // Should never reach SessionTimelineItem (handled above as right-aligned
-      // bubble). Fallback maps to claude only as a defensive default.
-      return "claude";
+      return "user";
     case "assistant":
     case "thinking":
       return "claude";
