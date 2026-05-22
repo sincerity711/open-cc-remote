@@ -1,7 +1,19 @@
-import { ChevronRight, Code2, ShieldAlert, ShieldCheck, Terminal } from "lucide-react";
+import {
+  ChevronRight,
+  Code2,
+  FileSearch,
+  type LucideIcon,
+  Pencil,
+  ShieldAlert,
+  ShieldCheck,
+  Sparkles,
+  Terminal,
+  Wrench,
+} from "lucide-react";
+import { useState } from "react";
 import type React from "react";
 import { Button } from "../../components/ui/button";
-import { CatalogCard } from "./cards/CatalogCard";
+import { CatalogCard, type CatalogCardTone } from "./cards/CatalogCard";
 import { CatalogHeader } from "./cards/CatalogHeader";
 import { UserBubbleSurface } from "./cards/UserBubble";
 import { SessionTimelineItem, type TimelineMarker } from "./SessionTimelineItem";
@@ -110,6 +122,25 @@ export function renderTimelineItem(
         </SessionTimelineItem>
       );
 
+    case "tool":
+      return (
+        <SessionTimelineItem key={event.id} marker={marker}>
+          <ToolCardLive event={event} />
+        </SessionTimelineItem>
+      );
+
+    case "thinking":
+      return (
+        <SessionTimelineItem key={event.id} marker={marker}>
+          <CatalogCard>
+            <CatalogHeader icon={Sparkles} title="Reasoning" />
+            <p className="mt-2 text-sm leading-5 whitespace-pre-wrap">
+              {event.body || "(no reasoning text)"}
+            </p>
+          </CatalogCard>
+        </SessionTimelineItem>
+      );
+
     default:
       // Future kinds (thinking / tool / subagent / batch / task / system / error)
       // are produced by mergeTimeline upgrades. Render a minimal raw shell so an
@@ -158,6 +189,103 @@ function UserBubbleBodyLive({ body, time }: { body: string; time: string }) {
         <p className="text-muted-foreground mt-2 text-right text-xs">{time}</p>
       )}
     </div>
+  );
+}
+
+type ToolEvent = Extract<TimelineEvent, { kind: "tool" }>;
+
+function pickToolIcon(name: string): LucideIcon {
+  if (!name) return Wrench;
+  if (name === "Bash" || name.startsWith("mcp__")) return Terminal;
+  if (name === "Read" || name === "Grep" || name === "Glob" || name === "LS") {
+    return FileSearch;
+  }
+  if (name === "Edit" || name === "Write") return Pencil;
+  if (name === "WebFetch") return Code2;
+  return Wrench;
+}
+
+function ToolCardLive({ event }: { event: ToolEvent }) {
+  const [expanded, setExpanded] = useState(false);
+  const icon = pickToolIcon(event.tool);
+  const cardTone: CatalogCardTone = event.result === "failure" ? "danger" : "default";
+  const headerTone =
+    event.result === "failure"
+      ? ("danger" as const)
+      : event.result === "success"
+        ? ("success" as const)
+        : ("default" as const);
+
+  const statusLabel =
+    event.result === "running"
+      ? "Running…"
+      : event.result === "success"
+        ? "Success"
+        : "Failed";
+  const statusClass =
+    event.result === "running"
+      ? "bg-muted text-muted-foreground"
+      : event.result === "success"
+        ? "bg-success-subtle text-success border-success/30"
+        : "bg-danger-subtle text-danger border-danger/30";
+
+  const outputLines = event.output ? event.output.split("\n") : [];
+  const lineCount = outputLines.length;
+  const isShort =
+    event.result === "success" &&
+    !!event.output &&
+    lineCount <= 2 &&
+    event.output.length <= 200;
+  const showExpand =
+    !!event.output && (event.result === "failure" || !isShort);
+
+  return (
+    <CatalogCard tone={cardTone}>
+      <CatalogHeader
+        icon={icon}
+        title={event.tool || "tool"}
+        tone={headerTone}
+        status={
+          <span
+            className={`shrink-0 rounded-md border px-2 py-0.5 text-xs font-medium ${statusClass}`}
+          >
+            {statusLabel}
+          </span>
+        }
+      />
+      {event.command && (
+        <pre className="bg-muted mt-2 max-h-32 overflow-auto rounded-md p-2 font-mono text-xs leading-5 whitespace-pre-wrap break-all">
+          <code>{event.command}</code>
+        </pre>
+      )}
+      {isShort && (
+        <p className="text-muted-foreground mt-2 font-mono text-xs whitespace-pre-wrap">
+          {event.output}
+        </p>
+      )}
+      {showExpand && (
+        <>
+          <Button
+            className="mt-2 w-full justify-between"
+            size="sm"
+            variant="ghost"
+            onClick={() => setExpanded((v) => !v)}
+          >
+            <span>
+              {expanded ? "Hide output" : `View output (${lineCount} lines)`}
+            </span>
+            <ChevronRight
+              className={`size-4 transition-transform ${expanded ? "rotate-90" : ""}`}
+            />
+          </Button>
+          {expanded && (
+            <pre className="bg-muted mt-2 max-h-60 overflow-auto rounded-md p-2 font-mono text-xs leading-5 whitespace-pre-wrap">
+              {event.output}
+            </pre>
+          )}
+        </>
+      )}
+    </CatalogCard>
   );
 }
 
