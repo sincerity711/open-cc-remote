@@ -1,16 +1,17 @@
-// Scenario 06 — task_completed + idle_window_ms quiet → idle frame surfaces
-// → SessionTimeline appends a synthetic IdleWaitingCard. Browser-driven
-// Playwright variant per P6 plan task 10.
-//
-// Per spec §1 invariant 2 / P5.5 hotfix: when the session is idle, the
-// SessionTimeline appends `<SessionTimelineItem marker="idle">` containing
-// `<IdleWaitingCard />` whose distinctive copy is "How would you like to
-// proceed?". After the user sends a chat message, the idle flag clears (any
-// new event drops idleSessions[k]) and the synthetic card disappears.
+// Scenario 06 — task_completed + idle_window_ms quiet → daemon emits an
+// `idle` session_state frame → PWA's session-row StatusChip flips to "Idle".
+// On the next user turn the chip flips back (the daemon transitions to
+// `working` on the new JSONL line). Browser-driven Playwright variant per
+// P6 plan task 10.
 //
 // Idle-timer semantics (daemon): real Claude writes trailing metadata after
 // `assistant end_turn`; daemon arms idle on end_turn and only cancels on a
 // new user/assistant turn — so idle fires reliably.
+//
+// History note: this test originally asserted on a synthetic IdleWaitingCard
+// rendered into the timeline. Commit 338a6fa removed that card (the chip in
+// the home-row already conveys idle; the duplicate card was noise) — the
+// chip is the new ground truth.
 
 import { test, expect } from "@playwright/test";
 import { resolve, dirname } from "node:path";
@@ -44,7 +45,7 @@ test.afterEach(async ({}, testInfo) => {
   await syncIfPassed(testInfo, "06-idle");
 });
 
-test("idle: synthetic IdleWaitingCard renders, clears on next chat", async ({ page }, testInfo) => {
+test("idle: session row chip flips to Idle after end_turn", async ({ page }, testInfo) => {
   test.setTimeout(240_000);
 
   const daemon_id = `idle-${Date.now()}`;
@@ -85,33 +86,29 @@ test("idle: synthetic IdleWaitingCard renders, clears on next chat", async ({ pa
       pluginEntryPath: pluginEntry,
     });
 
+    const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
+    const sessionRow = sessionsList.locator(".bg-surface").first();
+
     await sc.step("session-opened", async () => {
-      const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
-      const sessionRow = sessionsList.locator(".bg-surface").first();
       await sessionRow.waitFor({ timeout: 90_000 });
       await sessionRow.click();
       await session.page.getByTestId("session-view").waitFor({ timeout: 5_000 });
     });
 
-    await sc.step("idle-card-renders", async () => {
-      // Wait for the IdleWaitingCard's distinctive copy. The daemon emits
-      // idle 3s after task_completed; the PWA appends the synthetic item.
-      // Real Claude turn + 3s idle window ≈ 30-90s budget.
-      await expect(session.page.getByText("How would you like to proceed?")).toBeVisible({
-        timeout: 120_000,
-      });
+    await sc.step("row-chip-flips-to-idle", async () => {
+      // The home row stays visible side-by-side on desktop. Wait for the
+      // StatusChip to read "Idle" — daemon transitions: working → idle 3s
+      // after the assistant's end_turn turn.
+      // Real Claude turn + idle window ≈ 30-90s budget.
+      await expect(sessionRow.locator("text=/^Idle$/").first()).toBeVisible({ timeout: 120_000 });
     });
 
-    await sc.step("idle-card-clears-on-new-message", async () => {
-      // Send a chat message; any new event clears the idle flag.
-      await session.page.getByTestId("chat-input").fill("hello");
-      await session.page.getByTestId("chat-input").press("Enter");
-      // The user bubble appears and the idle card disappears.
-      await expect(session.page.getByTestId("timeline")).toContainText("hello", { timeout: 10_000 });
-      await expect(session.page.getByText("How would you like to proceed?")).toHaveCount(0, {
-        timeout: 10_000,
-      });
-    });
+    // Note: we don't assert the inverse transition (Idle → Working on a new
+    // PWA chat) here. Real Claude at the interactive prompt receives the
+    // `notifications/claude/channel` MCP frame but doesn't start an LLM
+    // turn from a notification alone, so no JSONL line is written and the
+    // FSM stays idle. Test 12 (mock fake-claude --auto-reply --jsonl-mirror)
+    // covers the round-trip half via a deterministic responder.
   } finally {
     claude?.stop();
     await session.close();

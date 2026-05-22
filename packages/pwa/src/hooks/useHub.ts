@@ -109,9 +109,18 @@ export function useHub(
             const trimmed = appendEventToBuffer(existing, frame);
             // Dedup hit — bail unchanged so React skips the rerender.
             if (trimmed === existing) return prev;
+            // A new live event invalidates any prior `noMoreHistory[k]=true`
+            // verdict, which was set against a snapshot of the JSONL at
+            // request_history time. The file has grown since; re-checking
+            // earlier offsets is the user's call (Load earlier events
+            // button reappears once items.length > 0).
+            const nextNoMore = prev.noMoreHistory[k]
+              ? (() => { const n = { ...prev.noMoreHistory }; delete n[k]; return n; })()
+              : prev.noMoreHistory;
             return {
               ...prev,
               events: { ...prev.events, [k]: trimmed },
+              noMoreHistory: nextNoMore,
             };
           }
           case "history_chunk": {
