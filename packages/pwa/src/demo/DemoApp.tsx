@@ -955,7 +955,7 @@ function SessionExecutionTimeline() {
 
       <SessionTimelineItem marker="claude">
         <CatalogCard>
-          <CatalogHeader icon={Terminal} title="Claude" meta="10:28 AM" />
+          <CatalogHeader title="Claude" meta="10:28 AM" />
           <p className="mt-2 leading-5">
             Added reset flow and tests. Ready for review.
           </p>
@@ -976,7 +976,7 @@ function SessionExecutionTimeline() {
 function SessionClaudeTurnCard() {
   return (
     <CatalogCard>
-      <CatalogHeader icon={Terminal} title="Claude" meta="10:24 AM" />
+      <CatalogHeader title="Claude" meta="10:24 AM" />
       <p className="mt-2 leading-5">
         I'll plan the implementation and create the necessary endpoints.
       </p>

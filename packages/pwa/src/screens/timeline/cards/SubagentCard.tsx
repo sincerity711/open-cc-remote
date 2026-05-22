@@ -1,4 +1,4 @@
-import { CheckCircle2, ChevronRight, Users } from "lucide-react";
+import { CheckCircle2, ChevronRight } from "lucide-react";
 import { CatalogCard } from "./CatalogCard";
 import { CatalogHeader } from "./CatalogHeader";
 
@@ -14,9 +14,7 @@ export function SubagentCard({ expanded = false }: { expanded?: boolean }) {
     return (
       <CatalogCard>
         <CatalogHeader
-          icon={Users}
           title="Subagent: test-runner"
-          tone="primary"
           status={<span className="text-success text-xs font-semibold">Completed</span>}
         />
         <div className="mt-3 grid gap-1">
@@ -36,7 +34,7 @@ export function SubagentCard({ expanded = false }: { expanded?: boolean }) {
 
   return (
     <CatalogCard>
-      <CatalogHeader icon={Users} title="Subagent: test-runner" tone="primary" />
+      <CatalogHeader title="Subagent: test-runner" />
       <p className="text-muted-foreground mt-2 text-xs">4 steps - 1m 12s</p>
       <div className="mt-4 flex items-center justify-between gap-2">
         <span className="text-muted-foreground text-xs">Click to expand</span>
