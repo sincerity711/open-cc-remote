@@ -33,9 +33,15 @@ async function waitPortFree(port: number, deadlineMs: number): Promise<boolean> 
 
 /** Builds the PWA, then starts vite preview. Resolves once /index.html responds 200. */
 export async function startPreview(): Promise<PreviewHandle> {
-  // 1. Build.
+  // 1. Build. Pin VITE_HUB_URL to the e2e compose's host port (7745) so the
+  //    bundled PWA points at the test hub regardless of the package-level
+  //    default (which is 17745 to avoid host-port conflicts in dev).
   await new Promise<void>((res, rej) => {
-    const p = spawn("bun", ["run", "build"], { cwd: pwaDir, stdio: "inherit" });
+    const p = spawn("bun", ["run", "build"], {
+      cwd: pwaDir,
+      stdio: "inherit",
+      env: { ...process.env, VITE_HUB_URL: "ws://localhost:7745" },
+    });
     p.on("exit", (code) => (code === 0 ? res() : rej(new Error(`vite build exit ${code}`))));
   });
 

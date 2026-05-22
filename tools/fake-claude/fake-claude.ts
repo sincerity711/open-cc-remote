@@ -11,7 +11,9 @@
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync, appendFileSync, existsSync } from "node:fs";
 import { connectDaemon } from "../../packages/plugin/src/daemon-client.ts";
+import { jsonlPath } from "../../packages/daemon/src/jsonl-paths.ts";
 import type { SessionSnapshot } from "@cc-remote/proto";
 
 const args = parseArgs(process.argv.slice(2));
@@ -33,6 +35,22 @@ async function main() {
     state: "idle",
   };
 
+  // --jsonl-mirror: when set, fake-claude maintains a JSONL transcript at the
+  // same path the daemon's bindJsonl will discover (CLAUDE_PROJECTS_DIR is
+  // honored). On chat_in we append a channel-wrapped user line (mirroring
+  // real Claude's behavior); on auto-reply we append an assistant text line.
+  // Without this, mock-driven scenarios that only exercise the chat path see
+  // an empty timeline because (since 81862c0) chat broadcasts are no longer
+  // a render source — JSONL is.
+  const jsonlMirror = args["jsonl-mirror"] === "true";
+  const claudeId = session.claude_session_id ?? session.session_id;
+  const transcriptPath = jsonlPath(session.cwd, claudeId);
+  if (jsonlMirror) {
+    mkdirSync(join(transcriptPath, ".."), { recursive: true });
+    if (!existsSync(transcriptPath)) writeFileSync(transcriptPath, "");
+    process.stderr.write(`fake-claude: jsonl mirror at ${transcriptPath}\n`);
+  }
+
   const client = await connectDaemon(sockPath, {
     timeoutMs: 3000,
     onClose: () => {
@@ -47,9 +65,19 @@ async function main() {
   // daemon, immediately emit a chat_out with `content: text`. Used by the
   // chat round-trip e2e tests.
   const autoReply = args["auto-reply"];
-  if (autoReply) {
+  if (autoReply || jsonlMirror) {
     client.onFrame((frame) => {
-      if (frame.type === "chat_in") {
+      if (frame.type !== "chat_in") return;
+      if (jsonlMirror) {
+        appendUserChannelLine(transcriptPath, claudeId, session.cwd, frame);
+        // Tiny delay so the user line settles in the timeline before the
+        // assistant reply lands — mirrors real Claude's pacing and avoids
+        // both lines arriving at the same ms (mergeTimeline rank tiebreak).
+        setTimeout(() => {
+          if (autoReply) appendAssistantLine(transcriptPath, claudeId, session.cwd, autoReply);
+        }, 30);
+      }
+      if (autoReply) {
         client.sendOneWay({
           type: "chat_out",
           session_id: session.session_id,
@@ -111,3 +139,67 @@ main().catch((e) => {
   process.stderr.write(`fake-claude: ${(e as Error).message}\n`);
   process.exit(1);
 });
+
+// ─── JSONL mirroring helpers ─────────────────────────────────────────────
+
+interface ChatInFrame {
+  message_id: string;
+  user: string;
+  user_id: string;
+  content: string;
+  ts: number;
+}
+
+function appendUserChannelLine(path: string, sessionId: string, cwd: string, frame: ChatInFrame): void {
+  const tsIso = new Date(frame.ts * 1000).toISOString();
+  const envelope =
+    `<channel source="cc-remote" chat_id="pwa" message_id="${frame.message_id}" ` +
+    `user="${frame.user}" user_id="${frame.user_id}" ts="${tsIso}">\n${frame.content}\n</channel>`;
+  const line = {
+    parentUuid: null,
+    isSidechain: false,
+    promptId: `prompt-${frame.message_id}`,
+    type: "user",
+    message: { role: "user", content: envelope },
+    isMeta: true,
+    uuid: `u-${frame.message_id}`,
+    timestamp: tsIso,
+    permissionMode: "default",
+    origin: { kind: "channel", server: "cc-remote" },
+    userType: "external",
+    entrypoint: "cli",
+    cwd,
+    sessionId,
+    version: "fake-claude",
+    gitBranch: "HEAD",
+  };
+  appendFileSync(path, `${JSON.stringify(line)}\n`);
+}
+
+function appendAssistantLine(path: string, sessionId: string, cwd: string, text: string): void {
+  const tsIso = new Date().toISOString();
+  const line = {
+    parentUuid: null,
+    isSidechain: false,
+    message: {
+      model: "fake-claude",
+      id: `msg-${Date.now()}`,
+      type: "message",
+      role: "assistant",
+      content: [{ type: "text", text }],
+      stop_reason: "end_turn",
+      stop_sequence: null,
+      usage: { input_tokens: 0, output_tokens: text.length, service_tier: "standard" },
+    },
+    type: "assistant",
+    uuid: `a-${Date.now()}`,
+    timestamp: tsIso,
+    userType: "external",
+    entrypoint: "cli",
+    cwd,
+    sessionId,
+    version: "fake-claude",
+    gitBranch: "HEAD",
+  };
+  appendFileSync(path, `${JSON.stringify(line)}\n`);
+}

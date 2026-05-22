@@ -98,10 +98,11 @@ test("chat round-trip + disconnect/reconnect flushes queued bubble", async ({ pa
     projectName: testInfo.project.name,
   });
 
-  // Note: chat broadcasts flow over the daemon Unix socket, not via JSONL,
-  // so this scenario does not need the bind-watcher / tape-replay scaffolding
-  // from scenario 18. CLAUDE_PROJECTS_DIR still points at a tmpdir to keep
-  // the daemon's bind subsystem isolated per test.
+  // The user bubble path now goes through JSONL: PWA → daemon chat_in →
+  // fake-claude (--jsonl-mirror) appends a <channel> user line + an
+  // assistant line → daemon's JSONL watcher → hub `event` frame → PWA
+  // timeline. CLAUDE_PROJECTS_DIR keeps the bind subsystem isolated per
+  // test.
 
   let fakeClaude: ChildProcess | undefined;
   try {
@@ -110,8 +111,11 @@ test("chat round-trip + disconnect/reconnect flushes queued bubble", async ({ pa
     });
 
     // Spawn fake-claude with --auto-reply so any chat_in arriving at the
-    // plugin socket is mirrored back as a chat_out. This drives the
-    // claude→PWA broadcast path deterministically.
+    // plugin socket is mirrored back as a chat_out. --jsonl-mirror also has
+    // it append a `<channel>` user line + an assistant line to the JSONL
+    // file the daemon is watching, since (post-81862c0) the timeline
+    // renders only from JSONL — chat broadcasts are notification-layer
+    // only and don't surface in the timeline on their own.
     fakeClaude = spawn(
       "bun",
       [
@@ -121,8 +125,9 @@ test("chat round-trip + disconnect/reconnect flushes queued bubble", async ({ pa
         "--cwd", sessionCwd,
         "--socket", handle.socket_path,
         "--auto-reply", "hi back",
+        "--jsonl-mirror", "true",
       ],
-      { stdio: ["ignore", "pipe", "pipe"], env: process.env },
+      { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, CLAUDE_PROJECTS_DIR: projectsRoot } },
     );
 
     await sc.step("session-opened", async () => {
