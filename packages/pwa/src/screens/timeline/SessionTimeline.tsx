@@ -62,12 +62,12 @@ export function SessionTimeline({ items, idle, onLoadEarlier, onOpenPermission }
           </Button>
         </div>
         {items.map((it) => renderTimelineItem(it, ctx))}
-        {idle && (
+        {idle && items.length > 0 && (
           <SessionTimelineItem marker="idle" key="__idle__">
             <IdleWaitingCard />
           </SessionTimelineItem>
         )}
-        {items.length === 0 && !idle && (
+        {items.length === 0 && (
           <p className="text-muted-foreground py-12 text-center text-sm">Send a message to start.</p>
         )}
       </div>

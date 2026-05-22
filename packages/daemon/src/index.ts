@@ -21,38 +21,76 @@ import { SessionFsm } from "./session-fsm.ts";
 
 /**
  * Best-effort dismissal of Claude Code's interactive boot dialogs in a freshly-
- * spawned tmux session. Polls the pane up to ~25s, presses Enter when a known
- * dialog pattern is visible. Used by start_session — a PWA-spawned tmux pane
- * has nobody attached to press Enter, and otherwise the new claude blocks
- * forever on the dev-channels / workspace-trust confirmations.
+ * spawned tmux session. A PWA-spawned pane has nobody attached to press Enter
+ * — without this the new claude blocks forever on the dev-channels /
+ * workspace-trust confirmations.
+ *
+ * Design: race two pane-watching promises.
+ *   - dialog promise → matches a known confirm-dialog pattern; on win we
+ *     send Enter and re-race.
+ *   - ready promise → matches the interactive TUI footer (post-dialog state);
+ *     on win we're done.
+ * The whole race aborts after 30s.
  */
-function dismissClaudeDialogs(tmuxName: string): void {
-  const patterns = [
-    /Enter to confirm|local development/, // dev-channels
-    /trust.*workspace|trust.*folder|safety check|created or one you trust/, // workspace-trust
-  ];
-  const deadline = Date.now() + 25_000;
-  const dismissed = new Set<number>();
-  const tick = () => {
-    if (Date.now() >= deadline || dismissed.size === patterns.length) return;
-    const r = childSpawn("tmux", ["capture-pane", "-t", tmuxName, "-p"], { stdio: ["ignore", "pipe", "ignore"] });
-    let buf = "";
-    r.stdout?.on("data", (chunk: Buffer) => { buf += chunk.toString(); });
-    r.on("close", () => {
-      patterns.forEach((re, i) => {
-        if (dismissed.has(i)) return;
-        if (re.test(buf)) {
-          dismissed.add(i);
-          setTimeout(() => {
-            childSpawn("tmux", ["send-keys", "-t", tmuxName, "Enter"], { stdio: "ignore" }).unref();
-          }, 400).unref();
-        }
-      });
-      setTimeout(tick, 500).unref();
+const DIALOG_RE = /Enter to confirm|local development|trust.*workspace|trust.*folder|safety check|created or one you trust/;
+const READY_RE = /for agents|for shortcuts|shift\+tab to cycle|❯ Try/;
+const POLL_INTERVAL_MS = 300;
+const DISMISS_TIMEOUT_MS = 30_000;
+
+function capturePane(tmuxName: string): Promise<string> {
+  return new Promise((resolve) => {
+    const r = childSpawn("tmux", ["capture-pane", "-t", tmuxName, "-p"], {
+      stdio: ["ignore", "pipe", "ignore"],
     });
-    r.on("error", () => setTimeout(tick, 500).unref());
-  };
-  setTimeout(tick, 500).unref();
+    let buf = "";
+    r.stdout?.on("data", (c: Buffer) => { buf += c.toString(); });
+    r.on("close", () => resolve(buf));
+    r.on("error", () => resolve(""));
+  });
+}
+
+function sendEnter(tmuxName: string): Promise<void> {
+  return new Promise((resolve) => {
+    const r = childSpawn("tmux", ["send-keys", "-t", tmuxName, "Enter"], { stdio: "ignore" });
+    r.on("close", () => resolve());
+    r.on("error", () => resolve());
+  });
+}
+
+function pollForRegex(tmuxName: string, re: RegExp, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const tick = async () => {
+      if (signal.aborted) return reject(new Error("aborted"));
+      const pane = await capturePane(tmuxName);
+      if (re.test(pane)) return resolve();
+      setTimeout(tick, POLL_INTERVAL_MS).unref();
+    };
+    void tick();
+  });
+}
+
+function dismissClaudeDialogs(tmuxName: string): void {
+  void (async () => {
+    const ac = new AbortController();
+    const timeoutId = setTimeout(() => ac.abort(), DISMISS_TIMEOUT_MS);
+    timeoutId.unref();
+
+    while (!ac.signal.aborted) {
+      // Race: whichever shows first decides next action.
+      const dialog = pollForRegex(tmuxName, DIALOG_RE, ac.signal).then(() => "dialog" as const);
+      const ready = pollForRegex(tmuxName, READY_RE, ac.signal).then(() => "ready" as const);
+      const winner = await Promise.race([dialog, ready]).catch(() => null);
+      if (winner === null || winner === "ready") {
+        ac.abort();
+        clearTimeout(timeoutId);
+        return;
+      }
+      // dialog won → let it settle, press Enter, then re-race.
+      await new Promise((r) => setTimeout(r, 400));
+      await sendEnter(tmuxName);
+    }
+    clearTimeout(timeoutId);
+  })();
 }
 
 const cfg = loadConfig();
