@@ -149,6 +149,7 @@ export function RealApp() {
               chatError={selectedChatError}
               connected={connected}
               idle={sessionTimeline.idle}
+              hasMoreEarlier={sessionTimeline.hasMoreEarlier}
               onLoadEarlier={sessionTimeline.loadEarlier}
               onSendChat={(content) => hub.sendChat(selected.daemon_id, selected.session_id, content)}
               onOpenPermission={() => permissionQueue.openSurface()}

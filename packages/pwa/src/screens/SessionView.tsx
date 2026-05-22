@@ -14,6 +14,7 @@ export interface SessionViewProps {
   chatError?: string;
   connected?: boolean;
   idle?: boolean;
+  hasMoreEarlier?: boolean;
   onLoadEarlier: () => void;
   onSendChat: (content: string) => void;
   onOpenPermission: (request_id: string) => void;
@@ -28,6 +29,7 @@ export function SessionView({
   chatError,
   connected = true,
   idle = false,
+  hasMoreEarlier = true,
   onLoadEarlier,
   onSendChat,
   onOpenPermission,
@@ -88,6 +90,7 @@ export function SessionView({
         <SessionTimeline
           items={items}
           idle={idle}
+          hasMoreEarlier={hasMoreEarlier}
           onLoadEarlier={onLoadEarlier}
           onOpenPermission={onOpenPermission}
         />

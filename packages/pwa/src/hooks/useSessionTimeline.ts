@@ -7,6 +7,7 @@ import { eventKey, type UseHubResult } from "./useHub";
 export interface UseSessionTimelineResult {
   items: TimelineEvent[];
   loadEarlier: () => void;
+  hasMoreEarlier: boolean;
   composerBlocked: boolean;
   online: boolean;
   idle: boolean;
@@ -49,6 +50,7 @@ export function useSessionTimeline(
       return {
         items: [] as TimelineEvent[],
         loadEarlier: () => {},
+        hasMoreEarlier: false,
         composerBlocked: false,
         online: false,
         idle: false,
@@ -84,6 +86,7 @@ export function useSessionTimeline(
     return {
       items,
       loadEarlier,
+      hasMoreEarlier: !hub.noMoreHistory[k],
       composerBlocked: pending.length > 0,
       online,
       idle,

@@ -6,11 +6,12 @@ import type { TimelineEvent } from "./types";
 export interface SessionTimelineProps {
   items: TimelineEvent[];
   idle?: boolean;
+  hasMoreEarlier?: boolean;
   onLoadEarlier: () => void;
   onOpenPermission?: (request_id: string) => void;
 }
 
-export function SessionTimeline({ items, onLoadEarlier, onOpenPermission }: SessionTimelineProps) {
+export function SessionTimeline({ items, hasMoreEarlier = true, onLoadEarlier, onOpenPermission }: SessionTimelineProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const lastLoadAt = useRef(0);
@@ -36,7 +37,12 @@ export function SessionTimeline({ items, onLoadEarlier, onOpenPermission }: Sess
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
     setAutoScroll(atBottom);
     const now = Date.now();
-    if (el.scrollTop < 80 && items.length > 0 && now - lastLoadAt.current > 500) {
+    if (
+      hasMoreEarlier &&
+      el.scrollTop < 80 &&
+      items.length > 0 &&
+      now - lastLoadAt.current > 500
+    ) {
       lastLoadAt.current = now;
       onLoadEarlier();
     }
@@ -54,11 +60,13 @@ export function SessionTimeline({ items, onLoadEarlier, onOpenPermission }: Sess
     >
       <div className="relative px-4 py-4 pl-12">
         <div className="bg-border absolute top-2 bottom-2 left-7 w-px" />
-        <div className="mb-3 flex justify-center">
-          <Button onClick={onLoadEarlier} size="sm" variant="ghost">
-            Load earlier events
-          </Button>
-        </div>
+        {hasMoreEarlier && items.length > 0 && (
+          <div className="mb-3 flex justify-center">
+            <Button onClick={onLoadEarlier} size="sm" variant="ghost">
+              Load earlier events
+            </Button>
+          </div>
+        )}
         {items.map((it) => renderTimelineItem(it, ctx))}
         {items.length === 0 && (
           <p className="text-muted-foreground py-12 text-center text-sm">Send a message to start.</p>

@@ -15,6 +15,12 @@ export interface HubState {
   completedCounts: Record<string, number>;
   chatMessages: Record<string, PwaChatBroadcast[]>;
   chatErrors: Record<string, string>;  // keyed by eventKey, value = reason of last error
+  /**
+   * Per-session flag: daemon has confirmed no more JSONL lines exist older
+   * than the oldest known event. Set when a request_history returns 0 events.
+   * UI uses this to hide the "Load earlier events" button.
+   */
+  noMoreHistory: Record<string, true>;
 }
 
 export function eventKey(daemon_id: string, session_id: string): string {
@@ -38,6 +44,7 @@ export function useHub(
     connected: false, daemons: [], events: {}, pendingPermissions: {},
     completedCounts: {},
     chatMessages: {}, chatErrors: {},
+    noMoreHistory: {},
   });
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -95,6 +102,15 @@ export function useHub(
           }
           case "history_chunk": {
             const k = eventKey(frame.daemon_id, frame.session_id);
+            // An empty chunk means the daemon has no more JSONL lines older
+            // than `before_offset` — track this so the UI can hide the
+            // "Load earlier events" button.
+            if (frame.events.length === 0) {
+              return {
+                ...prev,
+                noMoreHistory: { ...prev.noMoreHistory, [k]: true },
+              };
+            }
             const existing = prev.events[k] ?? [];
             const seen = new Set(existing.map((e) => e.jsonl_offset));
             const incoming: EventFrameForPwa[] = frame.events

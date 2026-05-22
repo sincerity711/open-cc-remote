@@ -221,7 +221,7 @@ export function mergeTimeline(args: MergeTimelineArgs): TimelineEvent[] {
           if (body) {
             buf.push({
               tsMs,
-              rank: e.jsonl_offset,
+              rank: e.jsonl_offset * 100,
               item: {
                 id: `event:${e.jsonl_offset}:user`,
                 kind: "user",
@@ -241,7 +241,7 @@ export function mergeTimeline(args: MergeTimelineArgs): TimelineEvent[] {
 
     buf.push({
       tsMs,
-      rank: e.jsonl_offset,
+      rank: e.jsonl_offset * 100,
       item: {
         id: `event:${e.jsonl_offset}`,
         kind: "raw",
