@@ -88,7 +88,7 @@ cat > "${DEMO_STATE_DIR}/config.json" <<EOF
   "allow_kill": true,
   "allow_start": false,
   "allowed_cwd_prefix": ["${DEMO_STATE_DIR}", "/tmp"],
-  "idle_window_ms": 30000
+  "idle_window_ms": 3000
 }
 EOF
 
