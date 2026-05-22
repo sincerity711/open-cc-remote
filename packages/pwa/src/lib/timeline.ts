@@ -50,6 +50,9 @@ export function mergeTimeline(args: MergeTimelineArgs): TimelineEvent[] {
   for (const e of args.events) {
     const tsMs = e.ts > 0 ? e.ts : 0;
     const payloadType = extractPayloadType(e.payload);
+    // Chat broadcasts already render user/assistant turns as friendly bubbles.
+    // The JSONL stream echoes them; skip the duplicates.
+    if (payloadType === "user" || payloadType === "assistant") continue;
     buf.push({
       tsMs,
       rank: e.jsonl_offset,

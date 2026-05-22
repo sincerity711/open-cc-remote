@@ -93,7 +93,7 @@ test("each EventFrame falls through to raw with payload type as title", () => {
   const items = mergeTimeline({
     events: [
       event(10, 1_700_000_000_000, { type: "session_start", model: "sonnet" }),
-      event(20, 1_700_000_001_000, { type: "user", message: { content: "hi" } }),
+      event(20, 1_700_000_001_000, { type: "tool_use", name: "Bash" }),
       event(30, 1_700_000_002_000, { whatever: true }),
     ],
     chat: [],
@@ -102,7 +102,7 @@ test("each EventFrame falls through to raw with payload type as title", () => {
   });
   expect(items).toHaveLength(3);
   expect(items[0]).toMatchObject({ kind: "raw", title: "session_start" });
-  expect(items[1]).toMatchObject({ kind: "raw", title: "user" });
+  expect(items[1]).toMatchObject({ kind: "raw", title: "tool_use" });
   expect(items[2]).toMatchObject({ kind: "raw", title: "event" });
   // The json field round-trips via JSON.parse for safety.
   for (const item of items) {
@@ -110,6 +110,22 @@ test("each EventFrame falls through to raw with payload type as title", () => {
       expect(() => JSON.parse(item.json)).not.toThrow();
     }
   }
+});
+
+test("user/assistant JSONL events are skipped (chat broadcasts cover them)", () => {
+  const items = mergeTimeline({
+    events: [
+      event(10, 1_700_000_000_000, { type: "user", message: { content: "hi" } }),
+      event(20, 1_700_000_001_000, { type: "assistant", message: { content: "hello" } }),
+      event(30, 1_700_000_002_000, { type: "tool_use" }),
+    ],
+    chat: [],
+    pending: [],
+    resolved: [],
+  });
+  // Only the tool_use event survives; user/assistant are filtered.
+  expect(items).toHaveLength(1);
+  expect(items[0]).toMatchObject({ kind: "raw", title: "tool_use" });
 });
 
 test("pending permissions emit permission-inline items", () => {
