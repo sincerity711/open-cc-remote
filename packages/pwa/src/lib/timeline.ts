@@ -62,8 +62,14 @@ function isHiddenToolName(name: string): boolean {
 }
 
 /**
- * Pure derivation of the visible timeline from the four hub-state slices for one session.
- * Output is sorted by timestamp; ids are deterministic.
+ * Pure derivation of the visible timeline. JSONL is the source of truth for
+ * rendering — chat broadcasts are notification-layer only (badge counts,
+ * push, daemon-offline error banner) and are NOT included here. The args
+ * still carry `chat` for API compat but the field is ignored.
+ *
+ * Timestamps: JSONL events arrive with `ts > 0` for live (daemon watcher)
+ * and `ts === 0` for history-replayed lines. Sorting is by tsMs then
+ * jsonl_offset for stable ordering.
  */
 export function mergeTimeline(args: MergeTimelineArgs): TimelineEvent[] {
   const buf: TimedItem[] = [];
@@ -71,46 +77,16 @@ export function mergeTimeline(args: MergeTimelineArgs): TimelineEvent[] {
   // user/tool_result frame can mutate the same object in place.
   const toolById = new Map<string, TimelineEvent>();
 
-  // Chat broadcasts → user / assistant. Chat ts is unix seconds (per @cc-remote/proto).
-  for (const m of args.chat) {
-    const tsMs = m.ts * 1000;
-    buf.push({
-      tsMs,
-      rank: 0,
-      item: {
-        id: `chat:${m.message_id}`,
-        kind: m.from === "pwa" ? "user" : "assistant",
-        title: m.from === "pwa" ? (m.user ?? "You") : "Claude",
-        body: m.content,
-        time: formatClockTime(tsMs),
-      },
-    });
-  }
-
-  // EventFrameForPwa → tool / thinking / raw fallback.
-  // ts is unix milliseconds when populated by the daemon. History-replayed
-  // events arrive with ts === 0; fall back to jsonl_offset for stable ordering.
-  // The ts === 0 flag also discriminates historic from live events: for live
-  // user/assistant text, the chat-broadcast path already emitted a bubble, so
-  // we skip the JSONL duplicate. For historic events (the user re-entered a
-  // session and clicked Load earlier — there are no chat broadcasts for past
-  // turns), we DO emit user/assistant text from JSONL — otherwise the
-  // historical conversation would render as just tool cards with no prose.
   for (const e of args.events) {
     const tsMs = e.ts > 0 ? e.ts : 0;
-    const isHistoric = e.ts === 0;
     const payloadType = extractPayloadType(e.payload);
 
-    // Inspect assistant content blocks: thinking / tool_use become rich cards.
-    // Text blocks: live → drop (chat broadcast covers); historic → emit as
-    // assistant bubble.
     if (payloadType === "assistant") {
       const blocks = extractContentBlocks(e.payload);
       blocks.forEach((block, idx) => {
         if (!isObject(block)) return;
         const type = (block as { type?: unknown }).type;
         if (type === "text") {
-          if (!isHistoric) return;
           const text = stringField(block, "text");
           if (!text) return;
           buf.push({
@@ -146,9 +122,28 @@ export function mergeTimeline(args: MergeTimelineArgs): TimelineEvent[] {
         if (type === "tool_use") {
           const id = stringField(block, "id");
           const name = stringField(block, "name");
-          // cc-remote-internal MCP tools are pure protocol plumbing — the
-          // chat broadcast path already surfaces what they relay. Don't
-          // render them as user-facing tool cards.
+          // The cc-remote `reply` tool carries Claude's actual chat
+          // response — render it as a normal assistant bubble instead of
+          // hiding (its companion tool_result is just "delivered" plumbing).
+          if (name === "mcp__cc-remote__reply") {
+            const input = (block as { input?: unknown }).input;
+            const replyText = isObject(input) ? stringField(input, "text") : "";
+            if (replyText) {
+              buf.push({
+                tsMs,
+                rank: e.jsonl_offset * 100 + idx,
+                item: {
+                  id: `event:${e.jsonl_offset}:${idx}:reply`,
+                  kind: "assistant",
+                  title: "Claude",
+                  body: replyText,
+                  time: formatClockTime(tsMs),
+                },
+              });
+            }
+            // Drop the matching tool_use card entirely — already rendered as text.
+            return;
+          }
           if (isHiddenToolName(name)) return;
           const input = (block as { input?: unknown }).input;
           const tool: TimelineEvent = {
@@ -176,10 +171,10 @@ export function mergeTimeline(args: MergeTimelineArgs): TimelineEvent[] {
     }
 
     // Inspect user content blocks: tool_result mutates the matching tool.
-    // Regular user prose (string content OR text-block content): live → drop
-    // (chat broadcast covers); historic → emit user bubble from JSONL.
+    // Regular user prose (string content OR text-block content) renders as
+    // a user bubble — channel-injected (PWA chat) messages get their
+    // <channel ...>...</channel> envelope stripped first.
     if (payloadType === "user") {
-      // Capture the prose for historic-emit before walking blocks.
       let userProse: string | null = null;
       const messageContent = (e.payload as { message?: { content?: unknown } } | null)
         ?.message?.content;
@@ -188,10 +183,12 @@ export function mergeTimeline(args: MergeTimelineArgs): TimelineEvent[] {
       }
 
       const blocks = extractContentBlocks(e.payload);
+      let hasToolResult = false;
       for (const block of blocks) {
         if (!isObject(block)) continue;
         const type = (block as { type?: unknown }).type;
         if (type === "tool_result") {
+          hasToolResult = true;
           const toolUseId = stringField(block, "tool_use_id");
           const target = toolUseId ? toolById.get(toolUseId) : undefined;
           if (!target || target.kind !== "tool") continue;
@@ -208,23 +205,32 @@ export function mergeTimeline(args: MergeTimelineArgs): TimelineEvent[] {
         }
       }
 
-      if (isHistoric && userProse) {
-        // Drop CC-injected meta lines (slash-command echoes etc.) from history.
-        const isMeta =
-          (e.payload as { isMeta?: unknown } | null)?.isMeta === true ||
-          /^<(local-command|command-(name|message|args)|system-reminder)/.test(userProse.trim());
-        if (!isMeta) {
-          buf.push({
-            tsMs,
-            rank: e.jsonl_offset,
-            item: {
-              id: `event:${e.jsonl_offset}:user`,
-              kind: "user",
-              title: "You",
-              body: userProse,
-              time: formatClockTime(tsMs),
-            },
-          });
+      // tool_result-only user payloads carry no prose — already mutated the
+      // tool card above, nothing else to render.
+      if (hasToolResult && !userProse) continue;
+
+      if (userProse) {
+        const origin = (e.payload as { origin?: { kind?: unknown } } | null)?.origin;
+        const isChannel = isObject(origin) && (origin as { kind?: unknown }).kind === "channel";
+        const isMetaProtocol =
+          !isChannel &&
+          ((e.payload as { isMeta?: unknown } | null)?.isMeta === true ||
+            /^<(local-command|command-(name|message|args)|system-reminder)/.test(userProse.trim()));
+        if (!isMetaProtocol) {
+          const body = isChannel ? stripChannelEnvelope(userProse) : userProse;
+          if (body) {
+            buf.push({
+              tsMs,
+              rank: e.jsonl_offset,
+              item: {
+                id: `event:${e.jsonl_offset}:user`,
+                kind: "user",
+                title: "You",
+                body,
+                time: formatClockTime(tsMs),
+              },
+            });
+          }
         }
       }
       continue;
@@ -310,6 +316,17 @@ function extractContentBlocks(payload: unknown): unknown[] {
 
 function isObject(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === "object";
+}
+
+/**
+ * Strip the `<channel source="..." ...>BODY</channel>` envelope that Claude
+ * Code wraps cc-remote channel-injected user messages in. We split this out
+ * so PWA-sent chat messages render as plain user prose after a refresh
+ * (chat broadcasts aren't persisted; JSONL is the only source).
+ */
+export function stripChannelEnvelope(content: string): string {
+  const m = content.match(/^<channel\b[^>]*>\s*([\s\S]*?)\s*<\/channel>\s*$/);
+  return (m && m[1] ? m[1] : content).trim();
 }
 
 function stringField(obj: unknown, key: string): string {

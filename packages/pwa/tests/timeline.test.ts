@@ -74,7 +74,7 @@ test("empty inputs produce empty timeline", () => {
   expect(mergeTimeline({ events: [], chat: [], pending: [], resolved: [] })).toEqual([]);
 });
 
-test("chat broadcasts emit user and assistant items in order", () => {
+test("chat broadcasts are NOT rendered into the timeline (JSONL is source of truth; chat is notification-layer)", () => {
   const items = mergeTimeline({
     events: [],
     chat: [
@@ -84,9 +84,7 @@ test("chat broadcasts emit user and assistant items in order", () => {
     pending: [],
     resolved: [],
   });
-  expect(items).toHaveLength(2);
-  expect(items[0]).toMatchObject({ kind: "user", body: "hello" });
-  expect(items[1]).toMatchObject({ kind: "assistant", body: "hi" });
+  expect(items).toEqual([]);
 });
 
 test("each EventFrame falls through to raw with payload type as title", () => {
@@ -112,15 +110,13 @@ test("each EventFrame falls through to raw with payload type as title", () => {
   }
 });
 
-test("user JSONL events with string content are skipped (chat broadcasts cover them)", () => {
+test("user JSONL events with string content render as user bubble (JSONL is source of truth)", () => {
   const items = mergeTimeline({
     events: [
-      // user with string content → covered by chat broadcast, dropped
       event(10, 1_700_000_000_000, {
         type: "user",
         message: { content: "hi" },
       }),
-      // assistant with only text content → text dropped (chat covers it)
       event(20, 1_700_000_001_000, {
         type: "assistant",
         message: { content: [{ type: "text", text: "hello" }] },
@@ -131,9 +127,55 @@ test("user JSONL events with string content are skipped (chat broadcasts cover t
     pending: [],
     resolved: [],
   });
-  // Only the unrecognized event survives; user/assistant text are dropped.
+  expect(items).toHaveLength(3);
+  expect(items[0]).toMatchObject({ kind: "user", body: "hi" });
+  expect(items[1]).toMatchObject({ kind: "assistant", body: "hello" });
+  expect(items[2]).toMatchObject({ kind: "raw", title: "future_x" });
+});
+
+test("channel-injected user messages have their <channel ...>BODY</channel> envelope stripped", () => {
+  const items = mergeTimeline({
+    events: [
+      event(10, 1_700_000_000_000, {
+        type: "user",
+        message: {
+          content:
+            '<channel source="cc-remote" chat_id="pwa" message_id="m1" user="a@b" ts="2026-01-01T00:00:00Z">\nplease add the reset flow\n</channel>',
+        },
+        isMeta: true,                      // CC marks channel injections as meta
+        origin: { kind: "channel", server: "cc-remote" },
+      }),
+    ],
+    chat: [],
+    pending: [],
+    resolved: [],
+  });
   expect(items).toHaveLength(1);
-  expect(items[0]).toMatchObject({ kind: "raw", title: "future_x" });
+  expect(items[0]).toMatchObject({ kind: "user", body: "please add the reset flow" });
+});
+
+test("non-channel meta lines (slash-command echoes, system reminders) are dropped", () => {
+  const items = mergeTimeline({
+    events: [
+      event(10, 1_700_000_000_000, {
+        type: "user",
+        message: { content: "<local-command-stdout>foo</local-command-stdout>" },
+      }),
+      event(20, 1_700_000_001_000, {
+        type: "user",
+        message: { content: "<system-reminder>bar</system-reminder>" },
+      }),
+      event(30, 1_700_000_002_000, {
+        type: "user",
+        message: { content: "noise" },
+        isMeta: true,
+      }),
+    ],
+    chat: [],
+    pending: [],
+    resolved: [],
+  });
+  expect(items).toEqual([]);
 });
 
 test("protocol-internal payload types are dropped from the timeline", () => {
@@ -199,23 +241,21 @@ test("resolved permissions emit permission-resolved items mapped per decision", 
   ]);
 });
 
-test("items are sorted by timestamp; chat (seconds) and events (ms) interleave correctly", () => {
+test("items are sorted by timestamp; pending permission ts (seconds) and event ts (ms) interleave correctly", () => {
   const items = mergeTimeline({
     events: [
-      event(10, 1_700_000_001_000, { type: "session_start" }), // ms
-      event(20, 1_700_000_003_000, { type: "tool_use" }),       // ms
+      event(10, 1_700_000_001_000, { type: "session_start" }), // ms → 1_700_000_001_000
+      event(20, 1_700_000_003_000, { type: "tool_use" }),       // ms → 1_700_000_003_000
     ],
-    chat: [
-      chat("m1", "pwa", "first", 1_700_000_000),                // s → 1_700_000_000_000 ms
-      chat("m2", "claude", "second", 1_700_000_002),            // s → 1_700_000_002_000 ms
+    chat: [],
+    pending: [
+      pending("p1", 1_700_000_002),                             // s → 1_700_000_002_000 ms
     ],
-    pending: [],
     resolved: [],
   });
   expect(items.map((i) => i.id)).toEqual([
-    "chat:m1",
     "event:10",
-    "chat:m2",
+    "perm:p1",
     "event:20",
   ]);
 });
@@ -232,7 +272,7 @@ test("ids are stable and deterministic — same input twice produces same ids", 
   expect(a.map((i) => i.id)).toEqual(b.map((i) => i.id));
 });
 
-test("assistant content blocks: text dropped, thinking + tool_use emitted", () => {
+test("assistant content blocks: text, thinking, tool_use all emit their own items", () => {
   const items = mergeTimeline({
     events: [
       event(10, 1_700_000_000_000, {
@@ -256,13 +296,18 @@ test("assistant content blocks: text dropped, thinking + tool_use emitted", () =
     pending: [],
     resolved: [],
   });
-  expect(items).toHaveLength(2);
+  expect(items).toHaveLength(3);
   expect(items[0]).toMatchObject({
     kind: "thinking",
     title: "Reasoning",
     body: "Let me think...",
   });
   expect(items[1]).toMatchObject({
+    kind: "assistant",
+    title: "Claude",
+    body: "I'll run the tests.",
+  });
+  expect(items[2]).toMatchObject({
     kind: "tool",
     tool: "Bash",
     command: "bun test",
@@ -445,9 +490,11 @@ test("stringifyToolOutput accepts string, text-block array, and other shapes", (
   expect(stringifyToolOutput({ unexpected: 1 })).toContain("unexpected");
 });
 
-test("mcp__cc-remote__ tool_use blocks are filtered (channel-internal noise)", () => {
-  // Plugin's reply tool relays PWA chat back to Claude. Chat broadcast path
-  // already renders that surface; the tool_use card would be duplicate noise.
+test("mcp__cc-remote__reply tool_use becomes an assistant text bubble; other mcp__cc-remote__* tools are filtered", () => {
+  // Plugin's `reply` tool carries Claude's actual chat response in its
+  // `input.text` field — we render that as a normal assistant bubble (it's
+  // the JSONL-side analogue of a chat broadcast). Other cc-remote internal
+  // tools are pure plumbing and stay hidden.
   const items = mergeTimeline({
     chat: [],
     pending: [],
@@ -464,7 +511,7 @@ test("mcp__cc-remote__ tool_use blocks are filtered (channel-internal noise)", (
           message: {
             role: "assistant",
             content: [
-              { type: "tool_use", id: "toolu_internal", name: "mcp__cc-remote__reply", input: { text: "hi" } },
+              { type: "tool_use", id: "toolu_reply", name: "mcp__cc-remote__reply", input: { text: "hi there" } },
               { type: "tool_use", id: "toolu_real", name: "Bash", input: { command: "ls" } },
             ],
           },
@@ -472,7 +519,7 @@ test("mcp__cc-remote__ tool_use blocks are filtered (channel-internal noise)", (
       },
     ],
   });
-  // Only the Bash tool_use should produce a card.
-  expect(items).toHaveLength(1);
-  expect(items[0]).toMatchObject({ kind: "tool", tool: "Bash" });
+  expect(items).toHaveLength(2);
+  expect(items[0]).toMatchObject({ kind: "assistant", body: "hi there" });
+  expect(items[1]).toMatchObject({ kind: "tool", tool: "Bash" });
 });
