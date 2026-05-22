@@ -1,6 +1,8 @@
 // Scenario 05 — real Claude turn completes → task_completed frame surfaces to
-// PWA → per-session badge increments. Browser-driven Playwright variant
-// per P6 plan task 10.
+// PWA → per-session badge increments. Folded in the idle-transition assertion
+// (formerly scenario 06): after end_turn + idle_window the daemon emits
+// session_state idle and the row's StatusChip flips to "Idle". Same Claude
+// turn, no extra tokens — just a few extra seconds at the tail.
 //
 // Per useHub: task_completed only increments completedCounts (no timeline
 // item is added). The visible signal is the SessionRow text on the home
@@ -47,6 +49,9 @@ test("task_completed: PWA badge increments after real Claude turn", async ({ pag
     daemon_id,
     hub_url: "ws://localhost:7745",
     hub_http: "http://localhost:7745",
+    // Tighten idle window from default 30s to 3s so we don't add 30s to the
+    // test budget while waiting for the FSM to fire idle.
+    idle_window_ms: 3_000,
   });
 
   await page.close();
@@ -95,6 +100,15 @@ test("task_completed: PWA badge increments after real Claude turn", async ({ pag
       const sessionRow = sessionsList.locator(".bg-surface").first();
       // Match "tasks 1", "tasks 2", … (NOT "tasks 0").
       await expect(sessionRow).toContainText(/tasks\s+[1-9]\d*/, { timeout: 120_000 });
+    });
+
+    await sc.step("row-chip-flips-to-idle", async () => {
+      // Daemon arms idle on assistant end_turn and fires `idle` after
+      // idle_window_ms (3s here). The session_state frame flips the home
+      // row's StatusChip to "Idle". Folded in from the old scenario 06.
+      const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
+      const sessionRow = sessionsList.locator(".bg-surface").first();
+      await expect(sessionRow.locator("text=/^Idle$/").first()).toBeVisible({ timeout: 30_000 });
     });
   } finally {
     claude?.stop();
