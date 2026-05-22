@@ -43,6 +43,9 @@ export interface DaemonOpts {
    * to false when state_dir is owned by us, true when state_dir is supplied
    * by the caller. */
   preserve_state_on_stop?: boolean;
+  /** Extra environment variables to merge into the daemon's process env.
+   * Useful for `CLAUDE_PROJECTS_DIR` overrides in mock-driven scenarios. */
+  extra_env?: Record<string, string>;
 }
 
 export interface DaemonHandle {
@@ -77,7 +80,7 @@ export async function startDaemon(opts: DaemonOpts): Promise<DaemonHandle> {
   const state_dir = opts.state_dir ?? ensureStateDir(opts.daemon_id);
   writeConfig(state_dir, opts);
 
-  const env = { ...process.env, CC_REMOTE_STATE_DIR: state_dir };
+  const env = { ...process.env, CC_REMOTE_STATE_DIR: state_dir, ...(opts.extra_env ?? {}) };
   const proc = spawn("bun", ["run", daemonEntry], {
     env,
     stdio: ["ignore", "pipe", "pipe"],
