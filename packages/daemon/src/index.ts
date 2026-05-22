@@ -178,7 +178,7 @@ sessions.onAdd((s: SessionSnapshot) => {
   // Asynchronously bind the JSONL: discover the real claude_session_id
   // by watching the cwd's projects dir for a new .jsonl file.
   const projectsDirForCwd = dirname(jsonlPath(s.cwd, "_placeholder"));
-  void bindJsonl({ dir: projectsDirForCwd, registerTimeMs: Date.now(), timeoutMs: 30_000 }).then((claudeId) => {
+  void bindJsonl({ dir: projectsDirForCwd, registerTimeMs: Date.now() }).then((claudeId) => {
     if (!claudeId) {
       process.stderr.write(`daemon: jsonl bind timed out for session ${s.session_id} (cwd=${s.cwd}); history will be unavailable\n`);
       return;
