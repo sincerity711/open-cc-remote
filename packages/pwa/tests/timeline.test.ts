@@ -5,7 +5,7 @@ import type {
   PwaPermissionRequest,
   PwaPermissionResolved,
 } from "@cc-remote/proto";
-import { mergeTimeline } from "../src/lib/timeline";
+import { mergeTimeline, derivedToolCommand, stringifyToolOutput } from "../src/lib/timeline";
 
 const D = "daemon-1";
 const S = "session-1";
@@ -93,7 +93,7 @@ test("each EventFrame falls through to raw with payload type as title", () => {
   const items = mergeTimeline({
     events: [
       event(10, 1_700_000_000_000, { type: "session_start", model: "sonnet" }),
-      event(20, 1_700_000_001_000, { type: "tool_use", name: "Bash" }),
+      event(20, 1_700_000_001_000, { type: "future_x", name: "Bash" }),
       event(30, 1_700_000_002_000, { whatever: true }),
     ],
     chat: [],
@@ -102,7 +102,7 @@ test("each EventFrame falls through to raw with payload type as title", () => {
   });
   expect(items).toHaveLength(3);
   expect(items[0]).toMatchObject({ kind: "raw", title: "session_start" });
-  expect(items[1]).toMatchObject({ kind: "raw", title: "tool_use" });
+  expect(items[1]).toMatchObject({ kind: "raw", title: "future_x" });
   expect(items[2]).toMatchObject({ kind: "raw", title: "event" });
   // The json field round-trips via JSON.parse for safety.
   for (const item of items) {
@@ -112,20 +112,28 @@ test("each EventFrame falls through to raw with payload type as title", () => {
   }
 });
 
-test("user/assistant JSONL events are skipped (chat broadcasts cover them)", () => {
+test("user JSONL events with string content are skipped (chat broadcasts cover them)", () => {
   const items = mergeTimeline({
     events: [
-      event(10, 1_700_000_000_000, { type: "user", message: { content: "hi" } }),
-      event(20, 1_700_000_001_000, { type: "assistant", message: { content: "hello" } }),
-      event(30, 1_700_000_002_000, { type: "tool_use" }),
+      // user with string content → covered by chat broadcast, dropped
+      event(10, 1_700_000_000_000, {
+        type: "user",
+        message: { content: "hi" },
+      }),
+      // assistant with only text content → text dropped (chat covers it)
+      event(20, 1_700_000_001_000, {
+        type: "assistant",
+        message: { content: [{ type: "text", text: "hello" }] },
+      }),
+      event(30, 1_700_000_002_000, { type: "future_x" }),
     ],
     chat: [],
     pending: [],
     resolved: [],
   });
-  // Only the tool_use event survives; user/assistant are filtered.
+  // Only the unrecognized event survives; user/assistant text are dropped.
   expect(items).toHaveLength(1);
-  expect(items[0]).toMatchObject({ kind: "raw", title: "tool_use" });
+  expect(items[0]).toMatchObject({ kind: "raw", title: "future_x" });
 });
 
 test("protocol-internal payload types are dropped from the timeline", () => {
@@ -222,4 +230,217 @@ test("ids are stable and deterministic — same input twice produces same ids", 
   const a = mergeTimeline(args);
   const b = mergeTimeline(args);
   expect(a.map((i) => i.id)).toEqual(b.map((i) => i.id));
+});
+
+test("assistant content blocks: text dropped, thinking + tool_use emitted", () => {
+  const items = mergeTimeline({
+    events: [
+      event(10, 1_700_000_000_000, {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "Let me think...", signature: "sig" },
+            { type: "text", text: "I'll run the tests." },
+            {
+              type: "tool_use",
+              id: "toolu_01",
+              name: "Bash",
+              input: { command: "bun test", description: "Run the tests" },
+            },
+          ],
+        },
+      }),
+    ],
+    chat: [],
+    pending: [],
+    resolved: [],
+  });
+  expect(items).toHaveLength(2);
+  expect(items[0]).toMatchObject({
+    kind: "thinking",
+    title: "Reasoning",
+    body: "Let me think...",
+  });
+  expect(items[1]).toMatchObject({
+    kind: "tool",
+    tool: "Bash",
+    command: "bun test",
+    result: "running",
+  });
+});
+
+test("matching tool_use + tool_result mutates tool to success and populates output", () => {
+  const items = mergeTimeline({
+    events: [
+      event(10, 1_700_000_000_000, {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu_ok",
+              name: "Bash",
+              input: { command: "echo hi" },
+            },
+          ],
+        },
+      }),
+      event(20, 1_700_000_001_000, {
+        type: "user",
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu_ok",
+              content: "PASS\n42 tests",
+              is_error: false,
+            },
+          ],
+        },
+      }),
+    ],
+    chat: [],
+    pending: [],
+    resolved: [],
+  });
+  expect(items).toHaveLength(1);
+  expect(items[0]).toMatchObject({
+    kind: "tool",
+    tool: "Bash",
+    command: "echo hi",
+    result: "success",
+    output: "PASS\n42 tests",
+    summary: "PASS",
+  });
+});
+
+test("tool_result with is_error: true marks the tool as failure", () => {
+  const items = mergeTimeline({
+    events: [
+      event(10, 1_700_000_000_000, {
+        type: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu_bad",
+              name: "Bash",
+              input: { command: "false" },
+            },
+          ],
+        },
+      }),
+      event(20, 1_700_000_001_000, {
+        type: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu_bad",
+              content: "exit 1",
+              is_error: true,
+            },
+          ],
+        },
+      }),
+    ],
+    chat: [],
+    pending: [],
+    resolved: [],
+  });
+  expect(items).toHaveLength(1);
+  expect(items[0]).toMatchObject({
+    kind: "tool",
+    result: "failure",
+    output: "exit 1",
+  });
+});
+
+test("tool_result with array text-block content joins texts with newlines", () => {
+  const items = mergeTimeline({
+    events: [
+      event(10, 1_700_000_000_000, {
+        type: "assistant",
+        message: {
+          content: [
+            { type: "tool_use", id: "toolu_a", name: "Read", input: { file_path: "/a.txt" } },
+          ],
+        },
+      }),
+      event(20, 1_700_000_001_000, {
+        type: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu_a",
+              content: [
+                { type: "text", text: "line one" },
+                { type: "text", text: "line two" },
+              ],
+              is_error: false,
+            },
+          ],
+        },
+      }),
+    ],
+    chat: [],
+    pending: [],
+    resolved: [],
+  });
+  expect(items[0]).toMatchObject({
+    kind: "tool",
+    result: "success",
+    output: "line one\nline two",
+  });
+});
+
+test("orphan tool_result (no matching tool_use) is silently dropped", () => {
+  const items = mergeTimeline({
+    events: [
+      event(10, 1_700_000_000_000, {
+        type: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu_missing",
+              content: "x",
+              is_error: false,
+            },
+          ],
+        },
+      }),
+    ],
+    chat: [],
+    pending: [],
+    resolved: [],
+  });
+  expect(items).toHaveLength(0);
+});
+
+test("derivedToolCommand picks per-tool input fields", () => {
+  expect(derivedToolCommand("Bash", { command: "ls -la" })).toBe("ls -la");
+  expect(derivedToolCommand("Read", { file_path: "/etc/hosts" })).toBe("/etc/hosts");
+  expect(derivedToolCommand("Write", { file_path: "/tmp/out" })).toBe("/tmp/out");
+  expect(derivedToolCommand("Edit", { file_path: "/src/a.ts" })).toBe("/src/a.ts");
+  expect(derivedToolCommand("Grep", { pattern: "TODO" })).toBe("TODO");
+  expect(derivedToolCommand("Glob", { pattern: "**/*.ts" })).toBe("**/*.ts");
+  // Unknown tool falls back to truncated JSON dump.
+  const fallback = derivedToolCommand("UnknownTool", { foo: "bar" });
+  expect(fallback).toContain("foo");
+});
+
+test("stringifyToolOutput accepts string, text-block array, and other shapes", () => {
+  expect(stringifyToolOutput("plain")).toBe("plain");
+  expect(
+    stringifyToolOutput([
+      { type: "text", text: "a" },
+      { type: "text", text: "b" },
+    ]),
+  ).toBe("a\nb");
+  expect(stringifyToolOutput({ unexpected: 1 })).toContain("unexpected");
 });
