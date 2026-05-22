@@ -95,6 +95,21 @@ export function AppShell({
               Sign out
             </Button>
           )}
+          {device !== "desktop" && (
+            <button
+              aria-label={`Permissions (${pendingApprovalsCount} pending)`}
+              className="text-muted-foreground hover:bg-muted hover:text-foreground relative inline-flex size-9 items-center justify-center rounded-md"
+              onClick={onOpenPermission}
+              type="button"
+            >
+              <Bell className="size-4" />
+              {pendingApprovalsCount > 0 && (
+                <span className="bg-warning text-warning-foreground absolute right-0.5 top-0.5 inline-flex size-4 items-center justify-center rounded-full text-[10px] font-bold">
+                  {pendingApprovalsCount}
+                </span>
+              )}
+            </button>
+          )}
           <Button
             aria-label="Open settings"
             onClick={onOpenSettings}
