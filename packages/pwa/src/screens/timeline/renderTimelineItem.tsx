@@ -1,21 +1,18 @@
 import {
   ChevronRight,
-  Code2,
-  FileSearch,
   type LucideIcon,
   Pencil,
   ShieldAlert,
   ShieldCheck,
-  Sparkles,
   Terminal,
-  Wrench,
+  FileText,
 } from "lucide-react";
 import { useState } from "react";
 import type React from "react";
 import { Button } from "../../components/ui/button";
 import { CatalogCard, type CatalogCardTone } from "./cards/CatalogCard";
 import { CatalogHeader } from "./cards/CatalogHeader";
-import { UserBubbleSurface } from "./cards/UserBubble";
+import { UserBubbleLive } from "./cards/UserBubble";
 import { SessionTimelineItem, type TimelineMarker } from "./SessionTimelineItem";
 import type { TimelineEvent } from "./types";
 
@@ -25,37 +22,34 @@ export interface RenderTimelineItemContext {
 }
 
 /**
- * Pure mapping from a `TimelineEvent` to a `SessionTimelineItem` wrapping the right card body.
- * Per spec §1 invariant 2:
- *   user                                          → marker: user
- *   assistant, thinking                           → marker: claude
- *   tool, permission-inline, subagent, batch,
- *     task(status=created)                        → marker: tool
- *   permission-resolved, task(status=completed)   → marker: success
- *   system, compact, session-boundary, metadata,
- *     error, raw                                  → marker: idle
+ * Pure mapping from a `TimelineEvent` → React node. Per docs/design/light-timeline.png:
+ *   - User events render as a right-aligned chat bubble OUTSIDE the rail.
+ *   - All other events render inside SessionTimelineItem (small rail glyph
+ *     for event type/status) wrapping a card. Cards drop their header icon
+ *     when the rail glyph already conveys the type — only Bash / Edit / Read /
+ *     Permission cards keep an icon (their tool identity is the point).
  */
 export function renderTimelineItem(
   event: TimelineEvent,
   ctx: RenderTimelineItemContext = {},
 ): React.ReactElement {
+  // User bubble is special — chat layout, no rail.
+  if (event.kind === "user") {
+    return (
+      <div key={event.id} className="mb-4">
+        <UserBubbleLive body={event.body} time={event.time} />
+      </div>
+    );
+  }
+
   const marker = pickMarker(event);
 
   switch (event.kind) {
-    case "user":
-      return (
-        <SessionTimelineItem key={event.id} marker={marker} meta={event.time} title={event.title}>
-          <CatalogCard>
-            <UserBubbleBodyLive body={event.body} time={event.time} />
-          </CatalogCard>
-        </SessionTimelineItem>
-      );
-
     case "assistant":
       return (
         <SessionTimelineItem key={event.id} marker={marker}>
           <CatalogCard>
-            <CatalogHeader icon={Terminal} title={event.title} meta={event.time} />
+            <CatalogHeader title={event.title || "Claude"} meta={event.time} />
             <p className="mt-2 leading-5 whitespace-pre-wrap">{event.body}</p>
           </CatalogCard>
         </SessionTimelineItem>
@@ -110,7 +104,7 @@ export function renderTimelineItem(
       return (
         <SessionTimelineItem key={event.id} marker={marker}>
           <CatalogCard>
-            <CatalogHeader icon={Code2} title={event.title} />
+            <CatalogHeader title={event.title} />
             <pre className="bg-muted mt-3 max-h-40 overflow-auto rounded-md p-2 font-mono text-xs leading-5">
               {event.json}
             </pre>
@@ -133,7 +127,7 @@ export function renderTimelineItem(
       return (
         <SessionTimelineItem key={event.id} marker={marker}>
           <CatalogCard>
-            <CatalogHeader icon={Sparkles} title="Reasoning" />
+            <CatalogHeader title="Reasoning" />
             <p className="mt-2 text-sm leading-5 whitespace-pre-wrap">
               {event.body || "(no reasoning text)"}
             </p>
@@ -142,13 +136,12 @@ export function renderTimelineItem(
       );
 
     default:
-      // Future kinds (thinking / tool / subagent / batch / task / system / error)
-      // are produced by mergeTimeline upgrades. Render a minimal raw shell so an
-      // unhandled kind never crashes the timeline.
+      // Future kinds are produced by mergeTimeline upgrades. Render a minimal
+      // raw shell so an unhandled kind never crashes the timeline.
       return (
         <SessionTimelineItem key={event.id} marker={marker}>
           <CatalogCard>
-            <CatalogHeader icon={Code2} title={event.kind} />
+            <CatalogHeader title={event.kind} />
           </CatalogCard>
         </SessionTimelineItem>
       );
@@ -158,56 +151,53 @@ export function renderTimelineItem(
 function pickMarker(event: TimelineEvent): TimelineMarker {
   switch (event.kind) {
     case "user":
-      return "user";
+      // Should never reach SessionTimelineItem (handled above as right-aligned
+      // bubble). Fallback maps to claude only as a defensive default.
+      return "claude";
     case "assistant":
     case "thinking":
       return "claude";
     case "tool":
-    case "permission-inline":
     case "subagent":
     case "batch":
       return "tool";
     case "task":
       return event.status === "completed" ? "success" : "tool";
+    case "permission-inline":
+      return "warning";
     case "permission-resolved":
-      return "success";
+      return event.decision === "denied" || event.decision === "expired"
+        ? "error"
+        : "success";
     case "system":
     case "compact":
     case "session-boundary":
     case "metadata":
-    case "error":
     case "raw":
       return "idle";
+    case "error":
+      return "error";
   }
-}
-
-function UserBubbleBodyLive({ body, time }: { body: string; time: string }) {
-  return (
-    <div className="bg-primary-subtle border-primary/20 ml-auto max-w-[92%] rounded-md border p-3">
-      <p className="whitespace-pre-wrap">{body}</p>
-      {time && (
-        <p className="text-muted-foreground mt-2 text-right text-xs">{time}</p>
-      )}
-    </div>
-  );
 }
 
 type ToolEvent = Extract<TimelineEvent, { kind: "tool" }>;
 
-function pickToolIcon(name: string): LucideIcon {
-  if (!name) return Wrench;
-  if (name === "Bash" || name.startsWith("mcp__")) return Terminal;
-  if (name === "Read" || name === "Grep" || name === "Glob" || name === "LS") {
-    return FileSearch;
-  }
-  if (name === "Edit" || name === "Write") return Pencil;
-  if (name === "WebFetch") return Code2;
-  return Wrench;
+/**
+ * Card icons are intentionally narrow — only tools whose identity is strong
+ * enough that the rail glyph (`tool`) doesn't carry it. Other tool calls fall
+ * through to a no-icon header so they don't double up.
+ */
+function pickStrongToolIcon(name: string): LucideIcon | undefined {
+  if (!name) return undefined;
+  if (name === "Bash") return Terminal;
+  if (name === "Edit" || name === "Write" || name === "MultiEdit") return Pencil;
+  if (name === "Read") return FileText;
+  return undefined;
 }
 
 function ToolCardLive({ event }: { event: ToolEvent }) {
   const [expanded, setExpanded] = useState(false);
-  const icon = pickToolIcon(event.tool);
+  const icon = pickStrongToolIcon(event.tool);
   const cardTone: CatalogCardTone = event.result === "failure" ? "danger" : "default";
   const headerTone =
     event.result === "failure"
@@ -218,7 +208,7 @@ function ToolCardLive({ event }: { event: ToolEvent }) {
 
   const statusLabel =
     event.result === "running"
-      ? "Running…"
+      ? "Active"
       : event.result === "success"
         ? "Success"
         : "Failed";
@@ -292,6 +282,3 @@ function ToolCardLive({ event }: { event: ToolEvent }) {
 function stripPermPrefix(id: string): string {
   return id.startsWith("perm:") ? id.slice("perm:".length) : id;
 }
-
-// Keep `UserBubbleSurface` re-export shape stable for tooling/imports.
-export { UserBubbleSurface };

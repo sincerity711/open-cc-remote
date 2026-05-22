@@ -945,9 +945,9 @@ function SessionExecutionTimeline() {
   return (
     <div className="relative pb-3 pl-8">
       <div className="bg-border absolute top-2 bottom-2 left-3.5 w-px" />
-      <SessionTimelineItem marker="user" meta="10:24 AM" title="You">
+      <div className="mb-4">
         <UserBubbleSurface />
-      </SessionTimelineItem>
+      </div>
 
       <SessionTimelineItem marker="claude">
         <SessionClaudeTurnCard />

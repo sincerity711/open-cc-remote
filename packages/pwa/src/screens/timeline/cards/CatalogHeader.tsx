@@ -16,7 +16,7 @@ export function CatalogHeader({
   title,
   tone = "default",
 }: {
-  icon: LucideIcon;
+  icon?: LucideIcon;
   meta?: string;
   status?: React.ReactNode;
   title: string;
@@ -25,25 +25,27 @@ export function CatalogHeader({
   return (
     <div className="flex items-center justify-between gap-2">
       <p className="flex min-w-0 items-center gap-2 font-semibold">
-        <span
-          className={cn(
-            "border-border bg-muted inline-flex size-6 shrink-0 items-center justify-center rounded-md border",
-            tone === "primary" && "border-primary/25 bg-primary-subtle",
-            tone === "success" && "border-success/25 bg-success-subtle",
-            tone === "warning" && "border-warning/30 bg-warning-subtle",
-            tone === "danger" && "border-danger/30 bg-danger-subtle",
-          )}
-        >
-          <Icon
+        {Icon && (
+          <span
             className={cn(
-              "size-3.5",
-              tone === "primary" && "text-primary",
-              tone === "success" && "text-success",
-              tone === "warning" && "text-warning",
-              tone === "danger" && "text-danger",
+              "border-border bg-muted inline-flex size-6 shrink-0 items-center justify-center rounded-md border",
+              tone === "primary" && "border-primary/25 bg-primary-subtle",
+              tone === "success" && "border-success/25 bg-success-subtle",
+              tone === "warning" && "border-warning/30 bg-warning-subtle",
+              tone === "danger" && "border-danger/30 bg-danger-subtle",
             )}
-          />
-        </span>
+          >
+            <Icon
+              className={cn(
+                "size-3.5",
+                tone === "primary" && "text-primary",
+                tone === "success" && "text-success",
+                tone === "warning" && "text-warning",
+                tone === "danger" && "text-danger",
+              )}
+            />
+          </span>
+        )}
         <span className="truncate">{title}</span>
       </p>
       {status ?? (
