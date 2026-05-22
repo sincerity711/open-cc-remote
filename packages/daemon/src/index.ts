@@ -1,4 +1,4 @@
-import { hostname } from "node:os";
+import { hostname, homedir } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import type { Socket } from "node:net";
@@ -139,7 +139,11 @@ const hub = startHubClient({
         process.stderr.write(`daemon: start_session ignored (allow_start=false)\n`);
         return;
       }
-      const cwd = frame.cwd;
+      // Expand a leading "~" to $HOME before the prefix check. PWA composer
+      // currently passes the literal user input.
+      let cwd = frame.cwd;
+      if (cwd === "~") cwd = homedir();
+      else if (cwd.startsWith("~/")) cwd = join(homedir(), cwd.slice(2));
       const allowed = cfg.allowed_cwd_prefix.some((p) => cwd.startsWith(p));
       if (!allowed) {
         process.stderr.write(`daemon: start_session rejected — cwd ${cwd} not in allowed_cwd_prefix\n`);
