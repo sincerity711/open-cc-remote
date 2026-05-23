@@ -97,6 +97,17 @@ export function makeServer(opts: MakeServerOpts = {}) {
       }
     }
 
+    if (url.pathname === "/pair/issue" && req.method === "POST") {
+      if (!opts.db) return new Response("not configured", { status: 503 });
+      const { authenticatePwa } = await import("./auth/pwa-auth.ts");
+      const auth = authenticatePwa(opts.db, req);
+      if ("error" in auth) return new Response(auth.error, { status: 401 });
+      const { issueCode } = await import("./repos/pairing-codes.ts");
+      const ttlMs = 300_000;
+      const code = issueCode(opts.db, "daemon", auth.owner_sub, null, ttlMs);
+      return Response.json({ code, expires_in_sec: ttlMs / 1000 });
+    }
+
     if (url.pathname === "/pair" && req.method === "POST") {
       if (!opts.db || !opts.jwt_secret) return new Response("not configured", { status: 503 });
       try {
