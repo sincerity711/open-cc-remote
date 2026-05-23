@@ -55,4 +55,10 @@ export const MIGRATIONS: ReadonlyArray<Migration> = [
       );
     `,
   },
+  {
+    version: 2,
+    sql: `
+      ALTER TABLE daemons ADD COLUMN display_name TEXT;
+    `,
+  },
 ];

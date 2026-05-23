@@ -51,3 +51,15 @@ test("can insert into and select from users table", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("daemons.display_name column exists after migrations", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ccr-mig-"));
+  const db = openDb(join(dir, "h.sqlite"));
+  try {
+    const cols = db.query("PRAGMA table_info(daemons)").all() as Array<{ name: string }>;
+    expect(cols.map((c) => c.name)).toContain("display_name");
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
