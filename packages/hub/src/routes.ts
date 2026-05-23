@@ -202,6 +202,51 @@ export function makeServer(opts: MakeServerOpts = {}) {
       }
     }
 
+    if (url.pathname === "/daemons" && req.method === "GET") {
+      if (!opts.db) return new Response("not configured", { status: 503 });
+      const { authenticatePwa } = await import("./auth/pwa-auth.ts");
+      const auth = authenticatePwa(opts.db, req);
+      if ("error" in auth) return new Response(auth.error, { status: 401 });
+      const { listDaemonsByOwner } = await import("./repos/daemons.ts");
+      const list = listDaemonsByOwner(opts.db, auth.owner_sub);
+      const connected = router.getConnectedDaemonIds();
+      const enriched = list.map((d) => ({ ...d, connected: connected.has(d.daemon_id) }));
+      enriched.sort((a, b) => {
+        if (a.connected !== b.connected) return a.connected ? -1 : 1;
+        return b.paired_at - a.paired_at;
+      });
+      return Response.json(enriched);
+    }
+
+    {
+      const m = url.pathname.match(/^\/daemons\/([^/]+)$/);
+      if (m && (req.method === "PATCH" || req.method === "DELETE")) {
+        if (!opts.db) return new Response("not configured", { status: 503 });
+        const { authenticatePwa } = await import("./auth/pwa-auth.ts");
+        const auth = authenticatePwa(opts.db, req);
+        if ("error" in auth) return new Response(auth.error, { status: 401 });
+        const daemon_id = decodeURIComponent(m[1]!);
+        if (req.method === "PATCH") {
+          try {
+            const body = await req.json() as { display_name?: unknown };
+            if (typeof body.display_name !== "string") {
+              return new Response("bad request", { status: 400 });
+            }
+            const { renameDaemon } = await import("./repos/daemons.ts");
+            const ok = renameDaemon(opts.db, auth.owner_sub, daemon_id, body.display_name);
+            return new Response(null, { status: ok ? 204 : 404 });
+          } catch (e) {
+            return new Response((e as Error).message, { status: 400 });
+          }
+        } else {
+          const { revokeDaemonAuthorized } = await import("./repos/daemons.ts");
+          const ok = revokeDaemonAuthorized(opts.db, auth.owner_sub, daemon_id);
+          if (ok) router.closeDaemonConnection(daemon_id);
+          return new Response(null, { status: ok ? 204 : 404 });
+        }
+      }
+    }
+
     if (url.pathname === "/ws/pwa") {
       let wsUser: string | undefined;
       let wsUserId: string | undefined;
