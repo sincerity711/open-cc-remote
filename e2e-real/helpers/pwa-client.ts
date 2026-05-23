@@ -34,13 +34,15 @@ async function fetchManual(url: string, init: RequestInit = {}): Promise<Respons
 async function followLocation(res: Response): Promise<string> {
   const loc = res.headers.get("location");
   if (!loc) throw new Error(`expected redirect, got ${res.status} no Location`);
-  return loc;
+  // Resolve relative redirects (oidc-provider returns relative paths like
+  // /interaction/<uid>) against the request URL.
+  return new URL(loc, res.url).toString();
 }
 
 export async function loginAndConnect(opts: LoginAndConnectOpts): Promise<PwaClient> {
   // 1. /auth/login → 302 → fake-IAS authorize URL
   const r1 = await fetchManual(`${opts.hub_http}/auth/login`);
-  if (r1.status !== 302) throw new Error(`/auth/login: expected 302, got ${r1.status} ${await r1.text()}`);
+  if (r1.status !== 302 && r1.status !== 303) throw new Error(`/auth/login: expected 302/303, got ${r1.status} ${await r1.text()}`);
   const authorizeUrl = await followLocation(r1);
 
   // 2. fake-IAS /authorize → 302 → callback
@@ -65,12 +67,12 @@ export async function loginAndConnect(opts: LoginAndConnectOpts): Promise<PwaCli
   // rewrite to use a host-side port (added to compose).
   const rewritten = authorizeUrl.replace(/http:\/\/fake-ias:7770/, "http://localhost:7770");
   const r2 = await fetchManual(rewritten);
-  if (r2.status !== 302) throw new Error(`/authorize: expected 302, got ${r2.status} ${await r2.text()}`);
+  if (r2.status !== 302 && r2.status !== 303) throw new Error(`/authorize: expected 302/303, got ${r2.status} ${await r2.text()}`);
   const callbackUrl = await followLocation(r2);
 
   // 3. /auth/callback → 302 with Location: <pwa_url>#bearer=<token>
   const r3 = await fetchManual(callbackUrl);
-  if (r3.status !== 302) throw new Error(`/auth/callback: expected 302, got ${r3.status} ${await r3.text()}`);
+  if (r3.status !== 302 && r3.status !== 303) throw new Error(`/auth/callback: expected 302/303, got ${r3.status} ${await r3.text()}`);
   const finalLoc = await followLocation(r3);
   const m = /[#&]bearer=([^&]+)/.exec(finalLoc);
   if (!m) throw new Error(`callback redirect missing bearer fragment: ${finalLoc}`);

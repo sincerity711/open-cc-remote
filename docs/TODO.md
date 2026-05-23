@@ -14,14 +14,18 @@ Hit while trying to spawn a new session (`~/SAPDevelop/obsidian-kg`) from the PW
 6. **Init CLI for daemon config** — user wants a `cc-remote init` (or similar) that writes a sane config.json with `allow_start`, `allowed_cwd_prefix=$HOME`, working `spawn_command`. Avoids the hand-edit dance the demo currently does. (Captures the user's "config 以后做初始化的 cli" remark.)
 7. **Plugin auto-reconnect on daemon restart** — `packages/plugin/src/index.ts:35` does `process.exit(0)` in `daemon.onClose`. Any daemon restart (config change, crash, upgrade) kills the plugin → Claude loses its MCP server → user must manually restart Claude. Plan A: plugin holds a backoff-reconnect loop, re-sends `register` with the same `session_id` on reconnect, keeps Claude's stdio transport alive throughout. Caveat: daemon's `bindJsonl` only watches for new files post-register; on re-register it'll miss the existing JSONL — needs daemon to either (a) accept `claude_session_id` from the register frame and skip bind, or (b) `bindJsonl` to detect already-written files. Either way the plugin should remember the bound `claude_session_id` from the first register and pass it on subsequent ones.
 
-## Settings page gaps (surfaced 2026-05-23, brainstorming in progress)
+## Settings page gaps (surfaced 2026-05-23) — DONE
 
-PWA Settings drawer has visible holes (see screenshot in chat 2026-05-23). Spec at `docs/superpowers/specs/2026-05-23-settings-page-design.md`.
+Spec at `docs/superpowers/specs/2026-05-23-settings-page-design.md`. Plan at `docs/superpowers/plans/2026-05-23-settings-page-plan.md`. Tagged `plan-settings-page`.
 
-1. **Pair-code feature missing** — `SettingsDrawer.tsx:32` hardcodes `pairingCode={undefined}` ("v1: always undefined. Reserved for future hub-side pairing."). Hub only issues codes via `packages/hub/src/admin.ts` CLI (`bun admin.ts issue-pairing-code <sub>`); end users have no way to pair a daemon from the PWA. Need PWA-facing `POST /pair/issue` endpoint + UI button to mint a short-lived code with countdown + copy-as-`cc-remote pair <code>`.
-2. **Loading/error tri-state broken** — `useDevices.ts:90,101` catches fetch errors but only sets `error`, never flips `devices`/`pushPrefs` from `null`. Result: user sees both "Failed to fetch" banner AND "Loading…" forever, no retry. Sections need their own loading/empty/error states with retry; top banner should be reserved for cross-section auth failures only.
-3. **Daemon online status invisible** — `DeviceItem` exposes `last_seen_at` but UI never renders it. No indication whether a paired daemon is currently connected (drives whether `start_session` will succeed).
-4. **Channel-based notifications (separate future spec)** — Current push (`packages/hub/src/router.ts:97/130/142/258`) is hardcoded to four kinds (`permission / offline / completed / idle`), triggered by frame-kind branches inside hub router. It is NOT channel-based — new plugins/channels cannot declare their own notification kinds, and users cannot mute notifications per channel. Reworking this is a protocol change (proto + hub router + plugin SDK + PWA) and is out of scope for the 2026-05-23 settings spec; track separately.
+1. ~~**Pair-code feature missing**~~ — DONE. `POST /pair/issue` route + `usePairing` hook + countdown UI + copy-as-`cc-remote pair <code>` shipped.
+2. ~~**Loading/error tri-state broken**~~ — DONE. `Resource<T>` discriminated union with per-section retry; top error banner removed.
+3. ~~**Daemon online status invisible**~~ — DONE. `GET /daemons` includes live `connected` from router's in-memory map; `<StatusDot>` renders `aria-label="online|offline"`.
+4. **Channel-based notifications (separate future spec)** — Current push (`packages/hub/src/router.ts:97/130/142/258`) is hardcoded to four kinds (`permission / offline / completed / idle`). Still out of scope for settings; track separately.
+
+## e2e-real OIDC chain regression (surfaced 2026-05-23)
+
+`e2e-real/tests/15-multi-pending.test.ts` is `test.skip`'d. Broken since commit `228d3de` (oidc-provider subprocess replaces hand-rolled mock). The new chain inserts `/interaction/{uid}` between `/authorize` and `/auth/callback`; `loginAndConnect` (`e2e-real/helpers/pwa-client.ts`) only follows the original 3-hop chain. Single-call scenarios (02/03/04/05/11/14) still pass because oidc-provider auto-grants on first authorize for trusted clients; scenario 15's *second* loginAndConnect hits the consent path. Partial fixes already in place (302/303 status, relative-Location resolution). Full fix needs the test client to follow the interaction chain or configure oidc-provider to skip consent.
 
 ## Backlog (non-UI, no plan written yet)
 
@@ -32,6 +36,10 @@ These are deferred follow-ups beyond what the 16 plans + rework + real-e2e + cha
 3. **Observability** — daemon/hub use `console` logs only; no structured logs, metrics export, or reconnect-failure indicators.
 4. **Real push notification chain** — `plan-11-offline-push` validated against fake VAPID; APNs / FCM not wired.
 5. **Security audit** — IAS device pairing, WS auth, and the channel-permission protocol have not been threat-modeled end-to-end.
+
+## Plan completed (2026-05-23)
+
+- `docs/superpowers/plans/2026-05-23-settings-page-plan.md` — settings page (daemons list, pair code, tri-state errors). **DONE** — tagged `plan-settings-page`. Hub: `daemons.display_name` migration v2 + `listDaemonsByOwner/renameDaemon/revokeDaemonAuthorized` repo helpers + `Router.getConnectedDaemonIds/closeDaemonConnection` + `GET/PATCH/DELETE /daemons` + `POST /pair/issue`. PWA: `Resource<T>` tri-state + `useDaemons/usePairing/usePushPrefs` (replaces `useDevices`) + `SettingsDrawer` rewrite + RealApp/DemoApp wiring. Tests: 293 unit (was 169, +124 incl. count drift) + 18 e2e green / 1 skip (15-multi-pending, OIDC chain regression — see entry above).
 
 ## Plan completed (2026-05-20)
 
