@@ -255,53 +255,80 @@ git commit -m "feat(hub): add listDaemonsByOwner / renameDaemon / revokeDaemonAu
 ## Task 3 — Router exposes connected set + close-connection helper
 
 **Files:**
+- Modify: `packages/hub/src/connections.ts` (add `getWs` accessor)
 - Modify: `packages/hub/src/router.ts`
-- Test: `packages/hub/tests/router.test.ts` (existing — extend)
+- Test: `packages/hub/tests/router.test.ts` (existing — extend, follow inline `new Router(dreg, preg)` pattern used throughout the file)
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Add `getWs` to `DaemonRegistry`**
 
-Append to `packages/hub/tests/router.test.ts` (use the existing `setupRouter` / `mockRegistry` patterns from that file — read the top of the file first to match its conventions):
+In `packages/hub/src/connections.ts`, add to the `DaemonRegistry` class:
+
+```ts
+  getWs(daemon_id: string): W | undefined {
+    return this.entries.get(daemon_id)?.ws;
+  }
+```
+
+- [ ] **Step 2: Write the failing tests**
+
+The existing `router.test.ts` constructs the router inline as `new Router(dreg, preg)` and triggers state via `router.onDaemonFrame(daemon_id, frame)` / `router.onDaemonDisconnect(daemon_id)`. Mirror that pattern. Append:
 
 ```ts
 test("getConnectedDaemonIds returns currently-connected daemon ids", () => {
-  const r = setupRouter(); // existing helper in this file
-  expect([...r.router.getConnectedDaemonIds()]).toEqual([]);
-  r.router.onDaemonFrame("d1", { type: "hello", hostname: "h1", epoch: 1 } as any);
-  r.router.onDaemonFrame("d2", { type: "hello", hostname: "h2", epoch: 1 } as any);
-  expect(new Set(r.router.getConnectedDaemonIds())).toEqual(new Set(["d1", "d2"]));
-  r.router.onDaemonClose("d1", "h1");
-  expect([...r.router.getConnectedDaemonIds()]).toEqual(["d2"]);
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+
+  expect([...router.getConnectedDaemonIds()]).toEqual([]);
+
+  // hello frames register the daemon in the router's in-memory map.
+  // The DaemonRegistry separately needs add() because closeDaemonConnection
+  // pulls the ws via getWs(), but for *this* test only the router map matters.
+  router.onDaemonFrame("d1", { type: "hello", hostname: "h1", epoch: 1 } as any);
+  router.onDaemonFrame("d2", { type: "hello", hostname: "h2", epoch: 1 } as any);
+  expect(new Set(router.getConnectedDaemonIds())).toEqual(new Set(["d1", "d2"]));
+
+  router.onDaemonDisconnect("d1");
+  expect([...router.getConnectedDaemonIds()]).toEqual(["d2"]);
 });
 
-test("closeDaemonConnection closes the underlying ws when connected", () => {
-  const r = setupRouter();
+test("closeDaemonConnection closes the underlying ws when registered + connected", () => {
+  const dreg = new DaemonRegistry<{ close: (code?: number, reason?: string) => void }>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+
   let closed = false;
-  // setupRouter's mockRegistry should let us inject a ws stub when registering.
-  // If it doesn't, drop in the closure manually.
-  r.daemonReg.register("d1", { close: () => { closed = true; } } as any);
-  r.router.onDaemonFrame("d1", { type: "hello", hostname: "h1", epoch: 1 } as any);
-  r.router.closeDaemonConnection("d1");
+  const wsStub = { close: () => { closed = true; } };
+  dreg.add("d1", wsStub, () => {}, undefined);
+  router.onDaemonFrame("d1", { type: "hello", hostname: "h1", epoch: 1 } as any);
+
+  router.closeDaemonConnection("d1");
   expect(closed).toBe(true);
 });
 
 test("closeDaemonConnection of unknown daemon is a no-op", () => {
-  const r = setupRouter();
-  expect(() => r.router.closeDaemonConnection("nope")).not.toThrow();
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+  expect(() => router.closeDaemonConnection("nope")).not.toThrow();
 });
 ```
 
-If `setupRouter` does not exist or has different ergonomics, **read `router.test.ts` first** and adapt the test to match the existing pattern. The behavioural assertions above are the contract.
+If `DaemonRegistry` / `PwaRegistry` aren't already imported at the top of `router.test.ts`, add:
+```ts
+import { DaemonRegistry, PwaRegistry } from "../src/connections.ts";
+```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [ ] **Step 3: Run tests to verify they fail**
 
 ```
 bun test packages/hub/tests/router.test.ts -t "getConnectedDaemonIds|closeDaemonConnection"
 ```
 Expected: FAIL — methods not defined.
 
-- [ ] **Step 3: Implement methods on `Router`**
+- [ ] **Step 4: Implement methods on `Router`**
 
-In `packages/hub/src/router.ts`, add public methods to the `Router` class. To call `ws.close()` we need access to the registered websocket; the registry already holds it via `daemonReg.get(daemon_id)`. Add these methods after the constructor:
+In `packages/hub/src/router.ts`, add public methods to the `Router` class (right after the constructor):
 
 ```ts
   public getConnectedDaemonIds(): Set<string> {
@@ -310,23 +337,23 @@ In `packages/hub/src/router.ts`, add public methods to the `Router` class. To ca
 
   public closeDaemonConnection(daemon_id: string): void {
     if (!this.daemons.has(daemon_id)) return;
-    const ws = this.daemonReg.get(daemon_id);
-    if (ws && typeof (ws as { close?: () => void }).close === "function") {
-      (ws as { close: (code?: number, reason?: string) => void }).close(1008, "revoked");
+    const ws = this.daemonReg.getWs(daemon_id) as { close?: (code?: number, reason?: string) => void } | undefined;
+    if (ws && typeof ws.close === "function") {
+      ws.close(1008, "revoked");
     }
   }
 ```
 
-If `DaemonRegistry` does not expose `get`, add it: open `packages/hub/src/connections.ts` and add a `get(key: string): T | undefined` method that mirrors the existing storage. Keep the test for that helper if your style guide demands it, but a one-line getter doesn't need its own test.
+`this.daemonReg` is the `DaemonRegistry<unknown>` constructor argument (existing field at `router.ts:32`). The `getWs` returns `unknown`; cast to the duck-typed close shape since the WS implementation is environment-dependent (Bun ServerWebSocket in prod, plain object in tests).
 
-- [ ] **Step 4: Run tests**
+- [ ] **Step 5: Run tests**
 
 ```
 bun test packages/hub/tests/router.test.ts
 ```
-Expected: all green.
+Expected: all green (existing + 3 new).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```
 git add packages/hub/src/router.ts packages/hub/src/connections.ts packages/hub/tests/router.test.ts
@@ -727,107 +754,53 @@ git commit -m "feat(pwa): add Resource<T> discriminated union for data hooks"
 
 **Files:**
 - Create: `packages/pwa/src/hooks/useDaemons.ts`
-- Create: `packages/pwa/tests/useDaemons.test.tsx`
+- Create: `packages/pwa/tests/useDaemons.test.ts`
 
-- [ ] **Step 1: Write the failing test file**
+**Test approach:** This codebase tests hooks by extracting pure helpers and unit-testing those (see `packages/pwa/tests/useHub.test.ts` testing `appendEventToBuffer`). React effects/lifecycle are exercised via e2e (scenarios 13 + 20). Do NOT add `@testing-library/react` — it's not a dependency.
 
-Create `packages/pwa/tests/useDaemons.test.tsx`:
+- [ ] **Step 1: Write the failing test for pure helpers**
 
-```tsx
-import { test, expect, mock, beforeEach, afterEach } from "bun:test";
-import { renderHook, act, waitFor } from "@testing-library/react";
-import { useDaemons } from "../src/hooks/useDaemons";
+Create `packages/pwa/tests/useDaemons.test.ts`:
 
-function mockFetchOnce(body: unknown, init: { status?: number } = {}) {
-  // @ts-expect-error overwriting global
-  globalThis.fetch = mock(async () => new Response(JSON.stringify(body), {
-    status: init.status ?? 200,
-    headers: { "content-type": "application/json" },
-  }));
-}
+```ts
+import { test, expect } from "bun:test";
+import { daemonsUrl, sortDaemons, type DaemonItem } from "../src/hooks/useDaemons";
 
-beforeEach(() => {
-  mock.module("react", () => require("react"));
+test("daemonsUrl converts ws→http", () => {
+  expect(daemonsUrl("ws://hub:7745")).toBe("http://hub:7745/daemons");
+  expect(daemonsUrl("wss://hub")).toBe("https://hub/daemons");
+  expect(daemonsUrl("http://hub")).toBe("http://hub/daemons");
 });
 
-afterEach(() => {
-  // @ts-expect-error
-  globalThis.fetch = undefined;
+test("sortDaemons puts connected=true first then paired_at desc", () => {
+  const list: DaemonItem[] = [
+    { daemon_id: "a", display_name: null, hostname: null, paired_at: 100, last_seen_at: null, connected: false },
+    { daemon_id: "b", display_name: null, hostname: null, paired_at: 200, last_seen_at: null, connected: true },
+    { daemon_id: "c", display_name: null, hostname: null, paired_at: 50, last_seen_at: null, connected: true },
+    { daemon_id: "d", display_name: null, hostname: null, paired_at: 300, last_seen_at: null, connected: false },
+  ];
+  expect(sortDaemons(list).map((d) => d.daemon_id)).toEqual(["b", "c", "d", "a"]);
 });
 
-test("useDaemons starts in loading and transitions to ready", async () => {
-  mockFetchOnce([{ daemon_id: "d1", display_name: null, hostname: "h", paired_at: 1, last_seen_at: null, connected: true }]);
-  const { result } = renderHook(() => useDaemons("ws://hub", "tok"));
-  expect(result.current.daemons.status).toBe("loading");
-  await waitFor(() => expect(result.current.daemons.status).toBe("ready"));
-  if (result.current.daemons.status !== "ready") throw new Error("unreachable");
-  expect(result.current.daemons.data[0]?.daemon_id).toBe("d1");
-});
-
-test("useDaemons enters error state with retry on fetch failure", async () => {
-  // @ts-expect-error
-  globalThis.fetch = mock(async () => new Response("bad", { status: 500 }));
-  const { result } = renderHook(() => useDaemons("ws://hub", "tok"));
-  await waitFor(() => expect(result.current.daemons.status).toBe("error"));
-  if (result.current.daemons.status !== "error") throw new Error("unreachable");
-
-  // Now make retry succeed.
-  mockFetchOnce([]);
-  await act(async () => {
-    if (result.current.daemons.status === "error") result.current.daemons.retry();
-  });
-  await waitFor(() => expect(result.current.daemons.status).toBe("ready"));
-});
-
-test("useDaemons rename calls PATCH and refreshes", async () => {
-  const calls: Array<{ url: string; method: string }> = [];
-  // @ts-expect-error
-  globalThis.fetch = mock(async (url: string, init?: RequestInit) => {
-    calls.push({ url, method: init?.method ?? "GET" });
-    if (init?.method === "PATCH") return new Response(null, { status: 204 });
-    return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
-  });
-  const { result } = renderHook(() => useDaemons("ws://hub", "tok"));
-  await waitFor(() => expect(result.current.daemons.status).toBe("ready"));
-  await act(async () => { await result.current.rename("d1", "Work"); });
-  expect(calls.some((c) => c.method === "PATCH" && c.url.endsWith("/daemons/d1"))).toBe(true);
-});
-
-test("useDaemons revoke calls DELETE and refreshes", async () => {
-  const calls: Array<{ url: string; method: string }> = [];
-  // @ts-expect-error
-  globalThis.fetch = mock(async (url: string, init?: RequestInit) => {
-    calls.push({ url, method: init?.method ?? "GET" });
-    if (init?.method === "DELETE") return new Response(null, { status: 204 });
-    return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
-  });
-  const { result } = renderHook(() => useDaemons("ws://hub", "tok"));
-  await waitFor(() => expect(result.current.daemons.status).toBe("ready"));
-  await act(async () => { await result.current.revoke("d1"); });
-  expect(calls.some((c) => c.method === "DELETE" && c.url.endsWith("/daemons/d1"))).toBe(true);
-});
-
-test("useDaemons does not fetch when bearer is null", async () => {
-  let called = 0;
-  // @ts-expect-error
-  globalThis.fetch = mock(async () => { called += 1; return new Response("[]"); });
-  const { result } = renderHook(() => useDaemons("ws://hub", null));
-  await new Promise((r) => setTimeout(r, 20));
-  expect(called).toBe(0);
-  expect(result.current.daemons.status).toBe("loading");
+test("sortDaemons does not mutate input", () => {
+  const list: DaemonItem[] = [
+    { daemon_id: "a", display_name: null, hostname: null, paired_at: 1, last_seen_at: null, connected: false },
+    { daemon_id: "b", display_name: null, hostname: null, paired_at: 2, last_seen_at: null, connected: true },
+  ];
+  const original = [...list];
+  sortDaemons(list);
+  expect(list).toEqual(original);
 });
 ```
 
-If the project does not currently use `@testing-library/react`, check `packages/pwa/package.json` first. If the existing `usePermissionQueue.test.tsx` and `useHub.test.ts` files use a different test-rendering pattern, **read those first** and adapt — keep the assertions identical.
-
-- [ ] **Step 2: Run tests to verify they fail**
+- [ ] **Step 2: Run test to verify it fails**
 
 ```
-bun test packages/pwa/tests/useDaemons.test.tsx
+bun test packages/pwa/tests/useDaemons.test.ts
 ```
 Expected: FAIL — module does not exist.
 
-- [ ] **Step 3: Implement the hook**
+- [ ] **Step 3: Implement the hook + helpers**
 
 Create `packages/pwa/src/hooks/useDaemons.ts`:
 
@@ -846,8 +819,19 @@ export interface DaemonItem {
 
 const POLL_MS = 60_000;
 
-function httpHub(hubUrl: string): string {
-  return hubUrl.replace(/^ws(s?):\/\//, "http$1://");
+export function daemonsUrl(hubUrl: string): string {
+  return hubUrl.replace(/^ws(s?):\/\//, "http$1://") + "/daemons";
+}
+
+function daemonItemUrl(hubUrl: string, daemon_id: string): string {
+  return hubUrl.replace(/^ws(s?):\/\//, "http$1://") + `/daemons/${encodeURIComponent(daemon_id)}`;
+}
+
+export function sortDaemons(list: DaemonItem[]): DaemonItem[] {
+  return [...list].sort((a, b) => {
+    if (a.connected !== b.connected) return a.connected ? -1 : 1;
+    return b.paired_at - a.paired_at;
+  });
 }
 
 async function jsonFetch<T>(url: string, bearer: string, init: RequestInit = {}): Promise<T> {
@@ -868,7 +852,11 @@ export interface UseDaemonsResult {
   lastActionError: string | null;
 }
 
-export function useDaemons(hubUrl: string, bearer: string | null): UseDaemonsResult {
+export function useDaemons(
+  hubUrl: string,
+  bearer: string | null,
+  enabled: boolean = true,
+): UseDaemonsResult {
   const [daemons, setDaemons] = useState<Resource<DaemonItem[]>>({ status: "loading" });
   const [lastActionError, setLastActionError] = useState<string | null>(null);
   const bearerRef = useRef(bearer);
@@ -877,23 +865,26 @@ export function useDaemons(hubUrl: string, bearer: string | null): UseDaemonsRes
   const load = useCallback(() => {
     if (!bearerRef.current) return;
     setDaemons({ status: "loading" });
-    jsonFetch<DaemonItem[]>(`${httpHub(hubUrl)}/daemons`, bearerRef.current)
-      .then((data) => setDaemons({ status: "ready", data }))
+    jsonFetch<DaemonItem[]>(daemonsUrl(hubUrl), bearerRef.current)
+      .then((data) => setDaemons({ status: "ready", data: sortDaemons(data) }))
       .catch((e) => setDaemons({ status: "error", error: (e as Error).message, retry: load }));
   }, [hubUrl]);
 
-  useEffect(() => { load(); }, [load, bearer]);
+  useEffect(() => {
+    if (!enabled || !bearer) return;
+    load();
+  }, [load, bearer, enabled]);
 
   useEffect(() => {
-    if (!bearer) return;
+    if (!enabled || !bearer) return;
     const id = setInterval(load, POLL_MS);
     return () => clearInterval(id);
-  }, [load, bearer]);
+  }, [load, bearer, enabled]);
 
   const rename = useCallback(async (daemon_id: string, display_name: string) => {
     if (!bearerRef.current) return;
     try {
-      await jsonFetch<void>(`${httpHub(hubUrl)}/daemons/${encodeURIComponent(daemon_id)}`, bearerRef.current, {
+      await jsonFetch<void>(daemonItemUrl(hubUrl, daemon_id), bearerRef.current, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ display_name }),
@@ -908,7 +899,7 @@ export function useDaemons(hubUrl: string, bearer: string | null): UseDaemonsRes
   const revoke = useCallback(async (daemon_id: string) => {
     if (!bearerRef.current) return;
     try {
-      await jsonFetch<void>(`${httpHub(hubUrl)}/daemons/${encodeURIComponent(daemon_id)}`, bearerRef.current, {
+      await jsonFetch<void>(daemonItemUrl(hubUrl, daemon_id), bearerRef.current, {
         method: "DELETE",
       });
       setLastActionError(null);
@@ -922,18 +913,20 @@ export function useDaemons(hubUrl: string, bearer: string | null): UseDaemonsRes
 }
 ```
 
+The third `enabled` parameter lets `RealApp.tsx` gate the hook on whether the Settings drawer is open (per spec §6.2). Default `true` so existing test code paths still work.
+
 - [ ] **Step 4: Run tests**
 
 ```
-bun test packages/pwa/tests/useDaemons.test.tsx
+bun test packages/pwa/tests/useDaemons.test.ts
 ```
 Expected: all green.
 
 - [ ] **Step 5: Commit**
 
 ```
-git add packages/pwa/src/hooks/useDaemons.ts packages/pwa/tests/useDaemons.test.tsx
-git commit -m "feat(pwa): useDaemons hook with tri-state resource + 60s poll"
+git add packages/pwa/src/hooks/useDaemons.ts packages/pwa/tests/useDaemons.test.ts
+git commit -m "feat(pwa): useDaemons hook + daemonsUrl/sortDaemons helpers"
 ```
 
 ---
@@ -942,109 +935,66 @@ git commit -m "feat(pwa): useDaemons hook with tri-state resource + 60s poll"
 
 **Files:**
 - Create: `packages/pwa/src/hooks/usePairing.ts`
-- Create: `packages/pwa/tests/usePairing.test.tsx`
+- Create: `packages/pwa/tests/usePairing.test.ts`
 
-- [ ] **Step 1: Write the failing test file**
+**Test approach:** Same as Task 7 — extract a pure `pairingTick` state-transition function and unit-test that. The React effect just calls it on a 1 Hz timer.
 
-Create `packages/pwa/tests/usePairing.test.tsx`:
+- [ ] **Step 1: Write the failing test**
 
-```tsx
-import { test, expect, mock, beforeEach, afterEach } from "bun:test";
-import { renderHook, act, waitFor } from "@testing-library/react";
-import { usePairing } from "../src/hooks/usePairing";
+Create `packages/pwa/tests/usePairing.test.ts`:
 
-beforeEach(() => {
-  // @ts-expect-error
-  globalThis.fetch = mock(async () => new Response(
-    JSON.stringify({ code: "ABC-XYZ", expires_in_sec: 5 }),
-    { status: 200, headers: { "content-type": "application/json" } },
-  ));
+```ts
+import { test, expect } from "bun:test";
+import { pairIssueUrl, pairingTick, type PairingState } from "../src/hooks/usePairing";
+
+test("pairIssueUrl converts ws→http", () => {
+  expect(pairIssueUrl("ws://hub:7745")).toBe("http://hub:7745/pair/issue");
+  expect(pairIssueUrl("wss://hub")).toBe("https://hub/pair/issue");
 });
 
-afterEach(() => {
-  // @ts-expect-error
-  globalThis.fetch = undefined;
-});
-
-test("usePairing starts idle, generate transitions to active with countdown", async () => {
-  const { result } = renderHook(() => usePairing("ws://hub", "tok"));
-  expect(result.current.state.status).toBe("idle");
-  await act(async () => { await result.current.generate(); });
-  expect(result.current.state.status).toBe("active");
-  if (result.current.state.status === "active") {
-    expect(result.current.state.code).toBe("ABC-XYZ");
-    expect(result.current.state.remainingSec).toBe(5);
-  }
-});
-
-test("usePairing countdown ticks down and returns to idle on expiry", async () => {
-  const { result } = renderHook(() => usePairing("ws://hub", "tok"));
-  await act(async () => { await result.current.generate(); });
-  await waitFor(() => {
-    if (result.current.state.status === "active") {
-      expect(result.current.state.remainingSec).toBeLessThan(5);
-    }
-  }, { timeout: 2000 });
-  await waitFor(() => {
-    expect(result.current.state.status).toBe("idle");
-  }, { timeout: 7000 });
-});
-
-test("usePairing onPaired fires when code naturally expires", async () => {
-  let onPairedCalls = 0;
-  const { result } = renderHook(() => usePairing("ws://hub", "tok", () => { onPairedCalls += 1; }));
-  await act(async () => { await result.current.generate(); });
-  await waitFor(() => expect(result.current.state.status).toBe("idle"), { timeout: 7000 });
-  expect(onPairedCalls).toBe(1);
-});
-
-test("usePairing cancel clears active state without invoking onPaired", async () => {
-  let onPairedCalls = 0;
-  const { result } = renderHook(() => usePairing("ws://hub", "tok", () => { onPairedCalls += 1; }));
-  await act(async () => { await result.current.generate(); });
-  expect(result.current.state.status).toBe("active");
-  await act(async () => { result.current.cancel(); });
-  expect(result.current.state.status).toBe("idle");
-  expect(onPairedCalls).toBe(0);
-});
-
-test("usePairing generate while issuing is a no-op", async () => {
-  let calls = 0;
-  // @ts-expect-error
-  globalThis.fetch = mock(async () => {
-    calls += 1;
-    await new Promise((r) => setTimeout(r, 30));
-    return new Response(JSON.stringify({ code: "ABC-XYZ", expires_in_sec: 60 }), {
-      status: 200, headers: { "content-type": "application/json" },
-    });
+test("pairingTick decrements remainingSec while time remains", () => {
+  const state: PairingState = { status: "active", code: "ABC-XYZ", expiresAt: 10_000, remainingSec: 10 };
+  const next = pairingTick(state, 3_000);
+  expect(next).toEqual({
+    state: { status: "active", code: "ABC-XYZ", expiresAt: 10_000, remainingSec: 7 },
+    expired: false,
   });
-  const { result } = renderHook(() => usePairing("ws://hub", "tok"));
-  await act(async () => {
-    const p1 = result.current.generate();
-    const p2 = result.current.generate();
-    await Promise.all([p1, p2]);
-  });
-  expect(calls).toBe(1);
 });
 
-test("usePairing surfaces error on fetch failure and stays idle", async () => {
-  // @ts-expect-error
-  globalThis.fetch = mock(async () => new Response("nope", { status: 500 }));
-  const { result } = renderHook(() => usePairing("ws://hub", "tok"));
-  await act(async () => { await result.current.generate(); });
-  expect(result.current.state.status).toBe("idle");
-  expect(result.current.lastError).toMatch(/500/);
+test("pairingTick returns idle + expired=true at exactly expiresAt", () => {
+  const state: PairingState = { status: "active", code: "ABC-XYZ", expiresAt: 10_000, remainingSec: 1 };
+  const next = pairingTick(state, 10_000);
+  expect(next).toEqual({ state: { status: "idle" }, expired: true });
+});
+
+test("pairingTick returns idle + expired=true when now is past expiresAt", () => {
+  const state: PairingState = { status: "active", code: "ABC-XYZ", expiresAt: 10_000, remainingSec: 1 };
+  const next = pairingTick(state, 12_000);
+  expect(next).toEqual({ state: { status: "idle" }, expired: true });
+});
+
+test("pairingTick on non-active state is a no-op", () => {
+  expect(pairingTick({ status: "idle" }, 1000)).toEqual({ state: { status: "idle" }, expired: false });
+  expect(pairingTick({ status: "issuing" }, 1000)).toEqual({ state: { status: "issuing" }, expired: false });
+});
+
+test("pairingTick rounds up sub-second remainders", () => {
+  // 0.5 s remaining → display "1s remaining" rather than "0s".
+  const state: PairingState = { status: "active", code: "ABC-XYZ", expiresAt: 10_000, remainingSec: 1 };
+  const next = pairingTick(state, 9_500);
+  if (next.state.status !== "active") throw new Error("expected active");
+  expect(next.state.remainingSec).toBe(1);
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [ ] **Step 2: Run test to verify it fails**
 
 ```
-bun test packages/pwa/tests/usePairing.test.tsx
+bun test packages/pwa/tests/usePairing.test.ts
 ```
 Expected: FAIL — module does not exist.
 
-- [ ] **Step 3: Implement the hook**
+- [ ] **Step 3: Implement the hook + pure helpers**
 
 Create `packages/pwa/src/hooks/usePairing.ts`:
 
@@ -1056,8 +1006,23 @@ export type PairingState =
   | { status: "issuing" }
   | { status: "active"; code: string; expiresAt: number; remainingSec: number };
 
-function httpHub(hubUrl: string): string {
-  return hubUrl.replace(/^ws(s?):\/\//, "http$1://");
+export function pairIssueUrl(hubUrl: string): string {
+  return hubUrl.replace(/^ws(s?):\/\//, "http$1://") + "/pair/issue";
+}
+
+export interface PairingTickResult {
+  state: PairingState;
+  expired: boolean;
+}
+
+export function pairingTick(state: PairingState, now: number): PairingTickResult {
+  if (state.status !== "active") return { state, expired: false };
+  if (now >= state.expiresAt) return { state: { status: "idle" }, expired: true };
+  const remainingSec = Math.max(1, Math.ceil((state.expiresAt - now) / 1000));
+  return {
+    state: { ...state, remainingSec },
+    expired: false,
+  };
 }
 
 export interface UsePairingResult {
@@ -1074,22 +1039,25 @@ export function usePairing(
 ): UsePairingResult {
   const [state, setState] = useState<PairingState>({ status: "idle" });
   const [lastError, setLastError] = useState<string | null>(null);
-  const expiredFiredRef = useRef(false);
+  const issuingRef = useRef(false);
+  const onPairedRef = useRef(onPaired);
+  onPairedRef.current = onPaired;
 
   const generate = useCallback(async () => {
     if (!bearer) return;
+    if (issuingRef.current) return;
     if (state.status !== "idle") return;
+    issuingRef.current = true;
     setState({ status: "issuing" });
     setLastError(null);
     try {
-      const res = await fetch(`${httpHub(hubUrl)}/pair/issue`, {
+      const res = await fetch(pairIssueUrl(hubUrl), {
         method: "POST",
         headers: { authorization: `Bearer ${bearer}` },
       });
       if (!res.ok) throw new Error(`POST /pair/issue: ${res.status}`);
       const body = await res.json() as { code: string; expires_in_sec: number };
       const expiresAt = Date.now() + body.expires_in_sec * 1000;
-      expiredFiredRef.current = false;
       setState({
         status: "active",
         code: body.code,
@@ -1099,49 +1067,48 @@ export function usePairing(
     } catch (e) {
       setLastError((e as Error).message);
       setState({ status: "idle" });
+    } finally {
+      issuingRef.current = false;
     }
   }, [hubUrl, bearer, state.status]);
 
   const cancel = useCallback(() => {
-    expiredFiredRef.current = true; // suppress onPaired
     setState({ status: "idle" });
   }, []);
 
+  // 1Hz tick while active. Intentionally subscribe only to status — not to
+  // expiresAt — so the interval is created once per active session.
+  const isActive = state.status === "active";
   useEffect(() => {
-    if (state.status !== "active") return;
+    if (!isActive) return;
     const id = setInterval(() => {
-      const remaining = Math.max(0, Math.ceil((state.expiresAt - Date.now()) / 1000));
-      if (remaining <= 0) {
-        if (!expiredFiredRef.current) {
-          expiredFiredRef.current = true;
-          onPaired?.();
-        }
-        setState({ status: "idle" });
-      } else {
-        setState((prev) => prev.status === "active"
-          ? { ...prev, remainingSec: remaining }
-          : prev);
-      }
+      setState((prev) => {
+        const result = pairingTick(prev, Date.now());
+        if (result.expired) onPairedRef.current?.();
+        return result.state;
+      });
     }, 1000);
     return () => clearInterval(id);
-  }, [state.status, state.status === "active" ? state.expiresAt : 0, onPaired]);
+  }, [isActive]);
 
   return { state, generate, cancel, lastError };
 }
 ```
 
+The pure `pairingTick` does the work; the effect is a thin shell. `issuingRef` guards against double-`generate` races. `onPairedRef` keeps the callback fresh without re-creating the interval.
+
 - [ ] **Step 4: Run tests**
 
 ```
-bun test packages/pwa/tests/usePairing.test.tsx
+bun test packages/pwa/tests/usePairing.test.ts
 ```
 Expected: all green.
 
 - [ ] **Step 5: Commit**
 
 ```
-git add packages/pwa/src/hooks/usePairing.ts packages/pwa/tests/usePairing.test.tsx
-git commit -m "feat(pwa): usePairing hook with idle→issuing→active state machine"
+git add packages/pwa/src/hooks/usePairing.ts packages/pwa/tests/usePairing.test.ts
+git commit -m "feat(pwa): usePairing hook with pure pairingTick state transition"
 ```
 
 ---
@@ -1150,75 +1117,68 @@ git commit -m "feat(pwa): usePairing hook with idle→issuing→active state mac
 
 **Files:**
 - Create: `packages/pwa/src/hooks/usePushPrefs.ts`
-- Create: `packages/pwa/tests/usePushPrefs.test.tsx`
+- Create: `packages/pwa/tests/usePushPrefs.test.ts`
 - Delete: `packages/pwa/src/hooks/useDevices.ts` (after Task 11 wires up replacements)
 
-**Note:** Delete `useDevices.ts` only in Task 11 once `RealApp.tsx` no longer imports it.
+**Test approach:** Same as Task 7/8 — pure helpers only. Hook lifecycle covered by e2e scenario 13.
 
-- [ ] **Step 1: Write the failing test file**
+- [ ] **Step 1: Write the failing test**
 
-Create `packages/pwa/tests/usePushPrefs.test.tsx`:
+Create `packages/pwa/tests/usePushPrefs.test.ts`:
 
-```tsx
-import { test, expect, mock, beforeEach, afterEach } from "bun:test";
-import { renderHook, act, waitFor } from "@testing-library/react";
-import { usePushPrefs } from "../src/hooks/usePushPrefs";
+```ts
+import { test, expect } from "bun:test";
+import {
+  pushPrefsUrl,
+  isPushPrefEnabled,
+  togglePref,
+  type PushPreferences,
+} from "../src/hooks/usePushPrefs";
 
-beforeEach(() => {
-  // default fetch returns prefs
-  // @ts-expect-error
-  globalThis.fetch = mock(async () => new Response(
-    JSON.stringify({ permission: true, offline: false, completed: true, idle: false }),
-    { status: 200, headers: { "content-type": "application/json" } },
-  ));
+test("pushPrefsUrl converts ws→http", () => {
+  expect(pushPrefsUrl("ws://hub:7745")).toBe("http://hub:7745/push/preferences");
+  expect(pushPrefsUrl("wss://hub")).toBe("https://hub/push/preferences");
 });
 
-afterEach(() => {
-  // @ts-expect-error
-  globalThis.fetch = undefined;
+test("isPushPrefEnabled treats 'permission' as default-true", () => {
+  expect(isPushPrefEnabled({}, "permission")).toBe(true);
+  expect(isPushPrefEnabled({ permission: false }, "permission")).toBe(false);
+  expect(isPushPrefEnabled({ permission: true }, "permission")).toBe(true);
 });
 
-test("usePushPrefs loads prefs and exposes ready state", async () => {
-  const { result } = renderHook(() => usePushPrefs("ws://hub", "tok"));
-  await waitFor(() => expect(result.current.prefs.status).toBe("ready"));
-  if (result.current.prefs.status !== "ready") throw new Error("unreachable");
-  expect(result.current.prefs.data.completed).toBe(true);
+test("isPushPrefEnabled treats other keys as default-false", () => {
+  expect(isPushPrefEnabled({}, "offline")).toBe(false);
+  expect(isPushPrefEnabled({ offline: true }, "offline")).toBe(true);
+  expect(isPushPrefEnabled({ offline: false }, "offline")).toBe(false);
 });
 
-test("usePushPrefs error state has retry", async () => {
-  // @ts-expect-error
-  globalThis.fetch = mock(async () => new Response("nope", { status: 500 }));
-  const { result } = renderHook(() => usePushPrefs("ws://hub", "tok"));
-  await waitFor(() => expect(result.current.prefs.status).toBe("error"));
+test("togglePref flips a default-true key", () => {
+  const before: PushPreferences = {};
+  const after = togglePref(before, "permission");
+  expect(after.permission).toBe(false);
+  expect(togglePref(after, "permission").permission).toBe(true);
 });
 
-test("usePushPrefs toggle does optimistic update and PUTs new prefs", async () => {
-  const calls: Array<{ method: string; body: unknown }> = [];
-  // @ts-expect-error
-  globalThis.fetch = mock(async (_url: string, init?: RequestInit) => {
-    calls.push({ method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : null });
-    if (init?.method === "PUT") return new Response(null, { status: 204 });
-    return new Response(JSON.stringify({ permission: true, offline: false, completed: false, idle: false }), {
-      status: 200, headers: { "content-type": "application/json" },
-    });
-  });
-  const { result } = renderHook(() => usePushPrefs("ws://hub", "tok"));
-  await waitFor(() => expect(result.current.prefs.status).toBe("ready"));
-  await act(async () => { await result.current.toggle("offline"); });
-  if (result.current.prefs.status !== "ready") throw new Error("unreachable");
-  expect(result.current.prefs.data.offline).toBe(true);
-  expect(calls.some((c) => c.method === "PUT")).toBe(true);
+test("togglePref flips a default-false key", () => {
+  const before: PushPreferences = { offline: false };
+  expect(togglePref(before, "offline").offline).toBe(true);
+});
+
+test("togglePref does not mutate input", () => {
+  const before: PushPreferences = { offline: false };
+  togglePref(before, "offline");
+  expect(before.offline).toBe(false);
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [ ] **Step 2: Run test to verify it fails**
 
 ```
-bun test packages/pwa/tests/usePushPrefs.test.tsx
+bun test packages/pwa/tests/usePushPrefs.test.ts
 ```
 Expected: FAIL — module does not exist.
 
-- [ ] **Step 3: Implement the hook**
+- [ ] **Step 3: Implement the hook + pure helpers**
 
 Create `packages/pwa/src/hooks/usePushPrefs.ts`:
 
@@ -1235,13 +1195,17 @@ export interface PushPreferences {
 
 const PREF_DEFAULT_TRUE: ReadonlyArray<keyof PushPreferences> = ["permission"];
 
+export function pushPrefsUrl(hubUrl: string): string {
+  return hubUrl.replace(/^ws(s?):\/\//, "http$1://") + "/push/preferences";
+}
+
 export function isPushPrefEnabled(prefs: PushPreferences, key: keyof PushPreferences): boolean {
   if (PREF_DEFAULT_TRUE.includes(key)) return prefs[key] !== false;
   return prefs[key] === true;
 }
 
-function httpHub(hubUrl: string): string {
-  return hubUrl.replace(/^ws(s?):\/\//, "http$1://");
+export function togglePref(prefs: PushPreferences, key: keyof PushPreferences): PushPreferences {
+  return { ...prefs, [key]: !isPushPrefEnabled(prefs, key) };
 }
 
 async function jsonFetch<T>(url: string, bearer: string, init: RequestInit = {}): Promise<T> {
@@ -1269,23 +1233,23 @@ export function usePushPrefs(hubUrl: string, bearer: string | null): UsePushPref
   const load = useCallback(() => {
     if (!bearerRef.current) return;
     setPrefs({ status: "loading" });
-    jsonFetch<PushPreferences>(`${httpHub(hubUrl)}/push/preferences`, bearerRef.current)
+    jsonFetch<PushPreferences>(pushPrefsUrl(hubUrl), bearerRef.current)
       .then((data) => setPrefs({ status: "ready", data }))
       .catch((e) => setPrefs({ status: "error", error: (e as Error).message, retry: load }));
   }, [hubUrl]);
 
-  useEffect(() => { load(); }, [load, bearer]);
+  useEffect(() => {
+    if (!bearer) return;
+    load();
+  }, [load, bearer]);
 
   const toggle = useCallback(async (key: keyof PushPreferences) => {
     if (!bearerRef.current) return;
     if (prefs.status !== "ready") return;
-    const next: PushPreferences = {
-      ...prefs.data,
-      [key]: !isPushPrefEnabled(prefs.data, key),
-    };
+    const next = togglePref(prefs.data, key);
     setPrefs({ status: "ready", data: next });
     try {
-      await jsonFetch<void>(`${httpHub(hubUrl)}/push/preferences`, bearerRef.current, {
+      await jsonFetch<void>(pushPrefsUrl(hubUrl), bearerRef.current, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(next),
@@ -1303,15 +1267,15 @@ export function usePushPrefs(hubUrl: string, bearer: string | null): UsePushPref
 - [ ] **Step 4: Run tests**
 
 ```
-bun test packages/pwa/tests/usePushPrefs.test.tsx
+bun test packages/pwa/tests/usePushPrefs.test.ts
 ```
 Expected: all green.
 
 - [ ] **Step 5: Commit**
 
 ```
-git add packages/pwa/src/hooks/usePushPrefs.ts packages/pwa/tests/usePushPrefs.test.tsx
-git commit -m "feat(pwa): usePushPrefs hook (split from useDevices) with tri-state"
+git add packages/pwa/src/hooks/usePushPrefs.ts packages/pwa/tests/usePushPrefs.test.ts
+git commit -m "feat(pwa): usePushPrefs hook + togglePref/isPushPrefEnabled helpers"
 ```
 
 ---
@@ -1855,7 +1819,7 @@ Old block (around line 162):
 
 Replace with:
 ```tsx
-const daemonsHook = useDaemons(hubUrl, bearer);
+const daemonsHook = useDaemons(hubUrl, bearer, showSettings);
 const pushHook = usePushPrefs(hubUrl, bearer);
 const pairingHook = usePairing(hubUrl, bearer, daemonsHook.refresh);
 
@@ -1969,31 +1933,95 @@ git commit -m "feat(pwa): wire RealApp/DemoApp to useDaemons/usePushPrefs/usePai
 
 ---
 
-## Task 12 — Update existing e2e `13-settings-drawer.test.ts` for daemons
+## Task 12 — Extract CORS bridge helper + update existing e2e `13-settings-drawer.test.ts`
 
 **Files:**
+- Modify: `e2e-real/helpers/pwa-browser.ts` (add `installCorsBridge` helper)
 - Modify: `e2e-real/tests/13-settings-drawer.test.ts`
 
-- [ ] **Step 1: Read current scenario**
+The CORS bridge block in `13-settings-drawer.test.ts` will be reused by the new scenario 20. Extract it first to avoid copy-paste drift.
+
+- [ ] **Step 1: Add the helper to `pwa-browser.ts`**
+
+Read the top of `e2e-real/helpers/pwa-browser.ts` to confirm its current exports, then append:
+
+```ts
+import type { BrowserContext } from "@playwright/test";
+
+/**
+ * Forward cross-origin REST calls to `hubBase` server-side and re-emit the
+ * response with permissive CORS headers. The hub itself emits no CORS headers,
+ * which is fine in production (PWA proxied via vite-dev) but breaks browser
+ * tests across origins. Routes are matched against the absolute hub URL the
+ * PWA fetches; OPTIONS preflights are short-circuited.
+ *
+ * Caller must invoke this BEFORE navigating the PWA (or reload after) since
+ * mounted hooks fire `fetch()` on first render.
+ */
+export async function installCorsBridge(context: BrowserContext, hubBase: string): Promise<void> {
+  const pattern = `${hubBase}/**`;
+  await context.route(pattern, async (route) => {
+    if (route.request().method() === "OPTIONS") {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          "access-control-allow-origin": "*",
+          "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+          "access-control-allow-headers": "authorization,content-type",
+          "access-control-max-age": "600",
+        },
+      });
+      return;
+    }
+    return route.fallback();
+  });
+  await context.route(pattern, async (route) => {
+    const req = route.request();
+    const url = req.url();
+    // IAS auth chain (login/callback) is full-page nav — let it through.
+    if (url.includes("/auth/")) return route.fallback();
+    try {
+      const resp = await fetch(url, {
+        method: req.method(),
+        headers: await req.allHeaders(),
+        body: req.method() === "GET" || req.method() === "HEAD" ? undefined : req.postData() ?? undefined,
+      });
+      const buf = Buffer.from(await resp.arrayBuffer());
+      const headers: Record<string, string> = {};
+      resp.headers.forEach((v, k) => { headers[k] = v; });
+      headers["access-control-allow-origin"] = "*";
+      headers["access-control-allow-methods"] = "GET,POST,PUT,PATCH,DELETE,OPTIONS";
+      headers["access-control-allow-headers"] = "authorization,content-type";
+      await route.fulfill({ status: resp.status, headers, body: buf });
+    } catch (e) {
+      await route.fulfill({ status: 502, body: `bridge error: ${(e as Error).message}` });
+    }
+  });
+}
+```
+
+If `pwa-browser.ts` already imports `BrowserContext`, skip that import line.
+
+- [ ] **Step 2: Read the current scenario 13**
 
 ```
-cat e2e-real/tests/13-settings-drawer.test.ts | head -60
+sed -n '1,80p' e2e-real/tests/13-settings-drawer.test.ts
 ```
 
-- [ ] **Step 2: Apply the daemons-not-devices update**
+- [ ] **Step 3: Replace inline CORS bridge with the helper call**
 
-The scenario already pairs a daemon via `pairAndStartDaemon`, so no setup change is needed. The assertions need to flip from device-row UI to daemon-row UI.
+In `e2e-real/tests/13-settings-drawer.test.ts`:
 
-In the `device-rename` step (around line 145), update:
+- Add the import at the top: `import { installCorsBridge } from "../helpers/pwa-browser.ts";` (or merge into the existing `pwa-browser.ts` import line if `openPwa` is already imported from there).
+- Delete the two `await session.context.route("http://localhost:7745/**", …)` blocks (the OPTIONS handler and the forwarder), and replace with:
 
-- The step name from `"device-rename"` to `"daemon-rename"`.
-- After the rename, also assert the **online dot** is visible. Locate it via the `aria-label="online"` on `<StatusDot>`:
-  ```ts
-  await expect(drawer.locator('[aria-label="online"]').first()).toBeVisible({ timeout: 30_000 });
-  ```
-- The renamed daemon's name must show in the daemon list (as before, this assertion already works because we use `getByText`).
+```ts
+await installCorsBridge(session.context, "http://localhost:7745");
+```
 
-Also rename the section header check if any test asserts the literal string "Paired devices" — change to "Paired daemons".
+The `session.page.reload()` and `home-screen.waitFor` steps stay as-is.
+
+- [ ] **Step 4: Update assertions from devices to daemons**
 
 Replace the existing `await sc.step("device-rename", …)` block with:
 
@@ -2017,18 +2045,18 @@ await sc.step("daemon-online-and-rename", async () => {
 
 The push-pref toggle / appearance / drawer-close steps stay as-is.
 
-- [ ] **Step 3: Run the scenario**
+- [ ] **Step 5: Run the scenario**
 
 ```
 bun test e2e-real/tests/13-settings-drawer.test.ts
 ```
 Expected: green.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 6: Commit**
 
 ```
-git add e2e-real/tests/13-settings-drawer.test.ts
-git commit -m "test(e2e-real): 13-settings-drawer asserts daemon row + online dot"
+git add e2e-real/helpers/pwa-browser.ts e2e-real/tests/13-settings-drawer.test.ts
+git commit -m "test(e2e-real): 13-settings-drawer asserts daemon row + extract installCorsBridge helper"
 ```
 
 ---
@@ -2038,14 +2066,16 @@ git commit -m "test(e2e-real): 13-settings-drawer asserts daemon row + online do
 **Files:**
 - Create: `e2e-real/tests/20-pair-from-pwa.test.ts`
 
+Reuses `installCorsBridge` from Task 12.
+
 - [ ] **Step 1: Inspect existing helpers**
 
 ```
-cat e2e-real/helpers/daemon.ts | head -40
-cat e2e-real/helpers/admin.ts | head -40
+sed -n '1,40p' e2e-real/helpers/daemon.ts
+sed -n '1,40p' e2e-real/helpers/admin.ts
 ```
 
-Specifically: the existing `pairDaemon` helper (in `e2e-real/helpers/daemon.ts`) takes a `code` argument and runs `cc-remote pair`. We will reuse it but with the code obtained from the PWA UI instead of from `issuePairingCode`.
+The existing `pairDaemon` helper takes a `code` argument and runs `cc-remote pair`. We reuse it but with the code obtained from the PWA UI instead of from `issuePairingCode`.
 
 - [ ] **Step 2: Write the scenario**
 
@@ -2058,7 +2088,7 @@ Create `e2e-real/tests/20-pair-from-pwa.test.ts`:
 
 import { test, expect } from "@playwright/test";
 import { upCompose, downCompose } from "../helpers/compose.ts";
-import { openPwa } from "../helpers/pwa-browser.ts";
+import { openPwa, installCorsBridge } from "../helpers/pwa-browser.ts";
 import { startPreview, type PreviewHandle } from "../helpers/preview-server.ts";
 import { startDaemon, pairDaemon, mkStateDir, rmStateDir } from "../helpers/daemon.ts";
 import { makeScenarioContext } from "../helpers/scenario.ts";
@@ -2091,42 +2121,7 @@ test("pair a daemon end-to-end via the PWA Settings UI", async ({ page }, testIn
     artifactsDir: testInfo.outputDir,
   });
 
-  // Same CORS bridge as scenario 13.
-  await session.context.route("http://localhost:7745/**", async (route) => {
-    if (route.request().method() === "OPTIONS") {
-      await route.fulfill({
-        status: 204,
-        headers: {
-          "access-control-allow-origin": "*",
-          "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-          "access-control-allow-headers": "authorization,content-type",
-          "access-control-max-age": "600",
-        },
-      });
-      return;
-    }
-    return route.fallback();
-  });
-  await session.context.route("http://localhost:7745/**", async (route) => {
-    const req = route.request();
-    if (req.url().includes("/auth/")) return route.fallback();
-    try {
-      const resp = await fetch(req.url(), {
-        method: req.method(),
-        headers: await req.allHeaders(),
-        body: req.method() === "GET" || req.method() === "HEAD" ? undefined : req.postData() ?? undefined,
-      });
-      const buf = Buffer.from(await resp.arrayBuffer());
-      const headers: Record<string, string> = {};
-      resp.headers.forEach((v, k) => { headers[k] = v; });
-      headers["access-control-allow-origin"] = "*";
-      headers["access-control-allow-methods"] = "GET,POST,PUT,PATCH,DELETE,OPTIONS";
-      headers["access-control-allow-headers"] = "authorization,content-type";
-      await route.fulfill({ status: resp.status, headers, body: buf });
-    } catch (e) {
-      await route.fulfill({ status: 502, body: `bridge error: ${(e as Error).message}` });
-    }
-  });
+  await installCorsBridge(session.context, "http://localhost:7745");
   await session.page.reload();
   await session.page.getByTestId("home-screen").waitFor({ timeout: 30_000 });
 
@@ -2171,8 +2166,7 @@ test("pair a daemon end-to-end via the PWA Settings UI", async ({ page }, testIn
 
     await sc.step("daemon-shows-up-online", async () => {
       const drawer = session.page.getByTestId("settings-drawer");
-      // Settings polls every 60s; the existing /daemons request will eventually
-      // include the new row. To avoid a slow scenario, also reload the drawer.
+      // Settings polls every 60s; close+reopen forces a fresh /daemons fetch.
       await session.page.getByRole("button", { name: "Close settings" }).click();
       await expect(drawer).toHaveCount(0);
       await session.page.getByRole("button", { name: "Open settings" }).click();
