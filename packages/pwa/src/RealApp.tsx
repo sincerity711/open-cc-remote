@@ -5,7 +5,9 @@ import { SessionView } from "./screens/SessionView";
 import { useSessionTimeline } from "./hooks/useSessionTimeline";
 import { registerPushSubscription } from "./push.ts";
 import { SettingsDrawer, type Appearance } from "./screens/SettingsDrawer";
-import { useDevices } from "./hooks/useDevices";
+import { useDaemons } from "./hooks/useDaemons";
+import { usePushPrefs } from "./hooks/usePushPrefs";
+import { usePairing } from "./hooks/usePairing";
 import { computeDaemonViewModels, totalPendingApprovals } from "./lib/daemonViewModel";
 import { AppShell } from "./screens/AppShell";
 import { HomeScreen } from "./screens/HomeScreen";
@@ -64,7 +66,9 @@ export function RealApp() {
   );
   const permissionQueue = usePermissionQueue(pendingPermissions);
   const pendingApprovalsCount = totalPendingApprovals(pendingPermissions);
-  const deviceData = useDevices(HUB_URL, bearer);
+  const daemonsHook = useDaemons(HUB_URL, bearer, showSettings);
+  const pushHook = usePushPrefs(HUB_URL, bearer);
+  const pairingHook = usePairing(HUB_URL, bearer, daemonsHook.refresh);
   const [appearance, setAppearance] = useState<Appearance>(() => {
     if (typeof window === "undefined") return "system";
     const stored = window.localStorage.getItem("cc_remote_appearance");
@@ -168,14 +172,19 @@ export function RealApp() {
               setShowSettings(false);
             },
           }}
-          devices={deviceData.devices}
-          onRenameDevice={(id, name) => { void deviceData.rename(id, name); }}
-          onRevokeDevice={(id) => { void deviceData.revoke(id); }}
-          pushPrefs={deviceData.pushPrefs}
-          onTogglePref={(key) => { void deviceData.togglePushPref(key); }}
+          daemons={daemonsHook.daemons}
+          onRenameDaemon={daemonsHook.rename}
+          onRevokeDaemon={daemonsHook.revoke}
+          pushPrefs={pushHook.prefs}
+          onTogglePref={pushHook.toggle}
+          pairing={pairingHook.state}
+          onGenerateCode={pairingHook.generate}
+          onCancelPairing={pairingHook.cancel}
+          daemonActionError={daemonsHook.lastActionError}
+          pushActionError={pushHook.lastActionError}
+          pairingError={pairingHook.lastError}
           appearance={appearance}
           onSetAppearance={setAppearance}
-          error={deviceData.error}
           onClose={() => setShowSettings(false)}
         />
       )}

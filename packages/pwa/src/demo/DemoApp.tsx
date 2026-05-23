@@ -70,6 +70,11 @@ import {
 import { AssistantBubbleLive } from "../screens/timeline/cards/AssistantBubble";
 import { SessionTimelineItem } from "../screens/timeline/SessionTimelineItem";
 import type { TimelineEvent } from "../screens/timeline/types";
+import { SettingsDrawer, type Appearance } from "../screens/SettingsDrawer";
+import type { Resource } from "../hooks/types";
+import type { DaemonItem } from "../hooks/useDaemons";
+import type { PushPreferences } from "../hooks/usePushPrefs";
+import type { PairingState } from "../hooks/usePairing";
 
 type Device = "mobile" | "tablet" | "desktop";
 type StepId =
@@ -563,6 +568,25 @@ function Workbench(props: {
   const tablet = device === "tablet";
   const mobile = device === "mobile";
 
+  const [appearance, setAppearance] = useState<Appearance>("system");
+
+  const stubbedDaemons: Resource<DaemonItem[]> = {
+    status: "ready",
+    data: [{
+      daemon_id: "demo-laptop",
+      display_name: "Demo laptop",
+      hostname: "demo",
+      paired_at: Date.now() - 86400_000,
+      last_seen_at: Date.now() - 5_000,
+      connected: true,
+    }],
+  };
+  const stubbedPrefs: Resource<PushPreferences> = {
+    status: "ready",
+    data: { permission: true, offline: true, completed: true, idle: false },
+  };
+  const idlePairing: PairingState = { status: "idle" };
+
   return (
     <div className="bg-background relative h-full overflow-hidden">
       <AppHeader device={device} setStep={setStep} />
@@ -592,7 +616,23 @@ function Workbench(props: {
       {showPermission && (
         <PermissionSurface device={device} setStep={setStep} />
       )}
-      {showSettings && <SettingsSurface device={device} setStep={setStep} />}
+      {showSettings && (
+        <SettingsDrawer
+          device={device}
+          account={{ email: "demo@example.com", onSignOut: () => {} }}
+          daemons={stubbedDaemons}
+          onRenameDaemon={() => {}}
+          onRevokeDaemon={() => {}}
+          pushPrefs={stubbedPrefs}
+          onTogglePref={() => {}}
+          pairing={idlePairing}
+          onGenerateCode={() => {}}
+          onCancelPairing={() => {}}
+          appearance={appearance}
+          onSetAppearance={setAppearance}
+          onClose={() => setStep("home")}
+        />
+      )}
     </div>
   );
 }
