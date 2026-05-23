@@ -3,17 +3,15 @@ import { Copy, X } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { cn } from "../lib/utils";
 import type { Device } from "../hooks/useMediaQuery";
-import type { DeviceItem, PushPreferences } from "../hooks/useDevices";
-import { isPushPrefEnabled } from "../hooks/useDevices";
+import type { Resource } from "../hooks/types";
+import type { DaemonItem } from "../hooks/useDaemons";
+import type { PushPreferences } from "../hooks/usePushPrefs";
+import { isPushPrefEnabled } from "../hooks/usePushPrefs";
+import type { PairingState } from "../hooks/usePairing";
 
 export type Appearance = "system" | "light" | "dark";
 
-export interface PushToggleSpec {
-  key: keyof PushPreferences;
-  label: string;
-}
-
-const PUSH_TOGGLES: ReadonlyArray<PushToggleSpec> = [
+const PUSH_TOGGLES: ReadonlyArray<{ key: keyof PushPreferences; label: string }> = [
   { key: "permission", label: "Permission alerts" },
   { key: "offline", label: "Daemon offline (≥ 30s)" },
   { key: "completed", label: "Claude finished a turn" },
@@ -23,33 +21,31 @@ const PUSH_TOGGLES: ReadonlyArray<PushToggleSpec> = [
 export interface SettingsDrawerProps {
   device: Device;
   account: { email: string; onSignOut: () => void };
-  devices: DeviceItem[] | null;
-  onRenameDevice: (device_id: string, display_name: string) => void;
-  onRevokeDevice: (device_id: string) => void;
-  pushPrefs: PushPreferences | null;
+  daemons: Resource<DaemonItem[]>;
+  onRenameDaemon: (daemon_id: string, display_name: string) => void;
+  onRevokeDaemon: (daemon_id: string) => void;
+  pushPrefs: Resource<PushPreferences>;
   onTogglePref: (key: keyof PushPreferences) => void;
-  /** v1: always undefined. Reserved for future hub-side pairing. */
-  pairingCode?: { code: string; expiresInSec: number };
+  pairing: PairingState;
+  onGenerateCode: () => void;
+  onCancelPairing: () => void;
   appearance: Appearance;
   onSetAppearance: (mode: Appearance) => void;
-  error: string | null;
+  daemonActionError?: string | null;
+  pushActionError?: string | null;
+  pairingError?: string | null;
   onClose: () => void;
 }
 
-export function SettingsDrawer({
-  device,
-  account,
-  devices,
-  onRenameDevice,
-  onRevokeDevice,
-  pushPrefs,
-  onTogglePref,
-  pairingCode,
-  appearance,
-  onSetAppearance,
-  error,
-  onClose,
-}: SettingsDrawerProps) {
+export function SettingsDrawer(props: SettingsDrawerProps) {
+  const {
+    device, account, daemons, onRenameDaemon, onRevokeDaemon,
+    pushPrefs, onTogglePref, pairing, onGenerateCode, onCancelPairing,
+    appearance, onSetAppearance,
+    daemonActionError, pushActionError, pairingError,
+    onClose,
+  } = props;
+
   return (
     <div
       className="bg-overlay fixed inset-0 z-50 flex"
@@ -70,12 +66,6 @@ export function SettingsDrawer({
           </Button>
         </div>
 
-        {error && (
-          <div className="bg-danger-subtle text-danger mt-4 rounded-md px-3 py-2 text-sm">
-            {error}
-          </div>
-        )}
-
         <div className="mt-5 space-y-5">
           <Section title="Account">
             <p className="text-muted-foreground text-sm">{account.email}</p>
@@ -84,58 +74,42 @@ export function SettingsDrawer({
             </Button>
           </Section>
 
-          <Section title="Paired devices">
-            {devices === null ? (
-              <p className="text-muted-foreground text-sm">Loading…</p>
-            ) : devices.length === 0 ? (
-              <p className="text-muted-foreground text-sm">No devices.</p>
-            ) : (
-              devices.map((d) => (
-                <DeviceRow
-                  key={d.device_id}
-                  device={d}
-                  onRename={onRenameDevice}
-                  onRevoke={onRevokeDevice}
-                />
-              ))
+          <Section title="Paired daemons">
+            <ResourceView
+              resource={daemons}
+              empty={<p className="text-muted-foreground text-sm">No daemons paired.</p>}
+              render={(list) => list.map((d) => (
+                <DaemonRow key={d.daemon_id} daemon={d} onRename={onRenameDaemon} onRevoke={onRevokeDaemon} />
+              ))}
+            />
+            {daemonActionError && (
+              <p className="text-danger mt-2 text-sm">{daemonActionError}</p>
             )}
           </Section>
 
           <Section title="Pair new daemon">
-            <div className="rounded-card border-border bg-muted border p-4 text-center">
-              <p className="text-muted-foreground text-sm">Pairing code</p>
-              <p className="mt-3 font-mono text-2xl font-semibold">
-                {pairingCode?.code ?? "— —"}
-              </p>
-              <p className="text-muted-foreground mt-2 text-xs">
-                {pairingCode
-                  ? `Expires in ${formatCountdown(pairingCode.expiresInSec)}`
-                  : "Run cc-remote pair on your machine"}
-              </p>
-              <Button
-                className="mt-3"
-                onClick={() => copyCommand("cc-remote pair")}
-                size="sm"
-                variant="secondary"
-              >
-                <Copy className="size-4" />
-                Copy command
-              </Button>
-            </div>
+            <PairCodeBox
+              pairing={pairing}
+              onGenerate={onGenerateCode}
+              onCancel={onCancelPairing}
+              error={pairingError ?? null}
+            />
           </Section>
 
           <Section title="Notifications">
-            {pushPrefs === null ? (
-              <p className="text-muted-foreground text-sm">Loading…</p>
-            ) : (
-              PUSH_TOGGLES.map(({ key, label }) => (
+            <ResourceView
+              resource={pushPrefs}
+              render={(prefs) => PUSH_TOGGLES.map(({ key, label }) => (
                 <ToggleRow
                   key={key}
-                  enabled={isPushPrefEnabled(pushPrefs, key)}
+                  enabled={isPushPrefEnabled(prefs, key)}
                   label={label}
                   onToggle={() => onTogglePref(key)}
                 />
-              ))
+              ))}
+            />
+            {pushActionError && (
+              <p className="text-danger mt-2 text-sm">{pushActionError}</p>
             )}
           </Section>
 
@@ -168,17 +142,45 @@ function Section({ children, title }: { children: React.ReactNode; title: string
   );
 }
 
-function DeviceRow({
-  device,
-  onRename,
-  onRevoke,
+function ResourceView<T extends Array<unknown> | object>({
+  resource, render, empty,
 }: {
-  device: DeviceItem;
-  onRename: (device_id: string, display_name: string) => void;
-  onRevoke: (device_id: string) => void;
+  resource: Resource<T>;
+  render: (data: T) => React.ReactNode;
+  empty?: React.ReactNode;
+}) {
+  if (resource.status === "loading") {
+    return <p className="text-muted-foreground text-sm">Loading…</p>;
+  }
+  if (resource.status === "error") {
+    return (
+      <p className="text-muted-foreground text-sm">
+        <span dangerouslySetInnerHTML={{ __html: "Couldn't load." }} />{" "}
+        <button
+          className="text-primary underline"
+          onClick={() => resource.retry()}
+          type="button"
+        >
+          Retry
+        </button>
+      </p>
+    );
+  }
+  if (Array.isArray(resource.data) && resource.data.length === 0 && empty) {
+    return <>{empty}</>;
+  }
+  return <>{render(resource.data)}</>;
+}
+
+function DaemonRow({
+  daemon, onRename, onRevoke,
+}: {
+  daemon: DaemonItem;
+  onRename: (daemon_id: string, display_name: string) => void;
+  onRevoke: (daemon_id: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(device.display_name ?? "");
+  const [draft, setDraft] = useState(daemon.display_name ?? "");
 
   return (
     <div className="rounded-card border-border bg-surface mb-2 border p-3">
@@ -190,13 +192,7 @@ function DeviceRow({
             onChange={(e) => setDraft(e.target.value)}
             value={draft}
           />
-          <Button
-            onClick={() => {
-              onRename(device.device_id, draft);
-              setEditing(false);
-            }}
-            size="sm"
-          >
+          <Button onClick={() => { onRename(daemon.daemon_id, draft); setEditing(false); }} size="sm">
             Save
           </Button>
           <Button onClick={() => setEditing(false)} size="sm" variant="secondary">
@@ -206,12 +202,16 @@ function DeviceRow({
       ) : (
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <p className="truncate font-semibold">{device.display_name ?? "(unnamed)"}</p>
-            <p className="text-muted-foreground truncate font-mono text-xs">
-              {device.device_id}
+            <p className="flex items-center gap-2 truncate font-semibold">
+              <StatusDot connected={daemon.connected} />
+              {daemon.display_name ?? "(unnamed)"}
             </p>
-            <p className="text-muted-foreground text-xs">
-              paired {new Date(device.paired_at).toLocaleString()}
+            <p className="text-muted-foreground truncate font-mono text-xs">
+              {daemon.daemon_id}
+              {daemon.hostname ? ` @ ${daemon.hostname}` : ""}
+            </p>
+            <p className="text-muted-foreground text-xs" title={daemon.last_seen_at ? new Date(daemon.last_seen_at).toLocaleString() : ""}>
+              {statusLabel(daemon)}
             </p>
           </div>
           <div className="flex shrink-0 gap-2">
@@ -220,9 +220,7 @@ function DeviceRow({
             </Button>
             <Button
               onClick={() => {
-                if (confirm("Revoke this device? It will be signed out everywhere.")) {
-                  onRevoke(device.device_id);
-                }
+                if (confirm("Revoke this daemon? It will be signed out.")) onRevoke(daemon.daemon_id);
               }}
               size="sm"
               variant="secondary"
@@ -236,10 +234,85 @@ function DeviceRow({
   );
 }
 
+function StatusDot({ connected }: { connected: boolean }) {
+  return (
+    <span
+      aria-label={connected ? "online" : "offline"}
+      className={cn("inline-block size-2 rounded-full", connected ? "bg-success" : "bg-muted-foreground")}
+    />
+  );
+}
+
+function statusLabel(d: DaemonItem): string {
+  if (d.connected) return "Online";
+  if (d.last_seen_at == null) return "Never connected";
+  const ageSec = Math.floor((Date.now() - d.last_seen_at) / 1000);
+  if (ageSec < 30) return "Just now";
+  return `Last seen ${formatRelative(ageSec)}`;
+}
+
+function formatRelative(sec: number): string {
+  if (sec < 60) return `${sec}s ago`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+  return `${Math.floor(sec / 86400)}d ago`;
+}
+
+function PairCodeBox({
+  pairing, onGenerate, onCancel, error,
+}: {
+  pairing: PairingState;
+  onGenerate: () => void;
+  onCancel: () => void;
+  error: string | null;
+}) {
+  return (
+    <div className="rounded-card border-border bg-muted border p-4 text-center">
+      <p className="text-muted-foreground text-sm">Pairing code</p>
+      <p className="mt-3 font-mono text-2xl font-semibold">
+        {pairing.status === "active" ? pairing.code : "— —"}
+      </p>
+      {pairing.status === "idle" && (
+        <>
+          <Button className="mt-3" onClick={onGenerate} size="sm">
+            Generate code
+          </Button>
+          <p className="text-muted-foreground mt-2 text-xs">
+            Run cc-remote pair on your machine
+          </p>
+        </>
+      )}
+      {pairing.status === "issuing" && (
+        <Button className="mt-3" disabled size="sm">
+          Generating…
+        </Button>
+      )}
+      {pairing.status === "active" && (
+        <>
+          <Button
+            className="mt-3"
+            onClick={() => copyCommand(`cc-remote pair ${pairing.code}`)}
+            size="sm"
+            variant="secondary"
+          >
+            <Copy className="size-4" />
+            Copy "cc-remote pair {pairing.code}"
+          </Button>
+          <p className="text-muted-foreground mt-2 text-xs">
+            Expires in {formatCountdown(pairing.remainingSec)}{" "}
+            <button className="text-primary underline" onClick={onCancel} type="button">
+              Cancel
+            </button>
+          </p>
+        </>
+      )}
+      {error && <p className="text-danger mt-2 text-sm">{error}</p>}
+    </div>
+  );
+}
+
 function ToggleRow({
-  enabled,
-  label,
-  onToggle,
+  enabled, label, onToggle,
 }: {
   enabled: boolean;
   label: string;
@@ -255,9 +328,7 @@ function ToggleRow({
       <span
         className={cn(
           "rounded-full px-2 py-1 text-xs font-semibold",
-          enabled
-            ? "bg-success-subtle text-success"
-            : "bg-muted text-muted-foreground",
+          enabled ? "bg-success-subtle text-success" : "bg-muted text-muted-foreground",
         )}
       >
         {enabled ? "On" : "Off"}
