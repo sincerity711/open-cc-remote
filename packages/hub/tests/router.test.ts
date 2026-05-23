@@ -753,3 +753,39 @@ test("onPwaChatSend preserves reply_to when provided", () => {
 
   expect(sentToDaemon[0]!.reply_to).toBe("m_prior");
 });
+
+test("getConnectedDaemonIds returns currently-connected daemon ids", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+
+  expect([...router.getConnectedDaemonIds()]).toEqual([]);
+
+  router.onDaemonFrame("d1", { type: "hello", hostname: "h1", epoch: 1, daemon_id: "d1", agent_version: "0", sessions: [] } as any);
+  router.onDaemonFrame("d2", { type: "hello", hostname: "h2", epoch: 1, daemon_id: "d2", agent_version: "0", sessions: [] } as any);
+  expect(new Set(router.getConnectedDaemonIds())).toEqual(new Set(["d1", "d2"]));
+
+  router.onDaemonDisconnect("d1");
+  expect([...router.getConnectedDaemonIds()]).toEqual(["d2"]);
+});
+
+test("closeDaemonConnection closes the underlying ws when registered + connected", () => {
+  const dreg = new DaemonRegistry<{ close: (code?: number, reason?: string) => void }>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+
+  let closed = false;
+  const wsStub = { close: () => { closed = true; } };
+  dreg.add("d1", wsStub, () => {}, undefined);
+  router.onDaemonFrame("d1", { type: "hello", hostname: "h1", epoch: 1, daemon_id: "d1", agent_version: "0", sessions: [] } as any);
+
+  router.closeDaemonConnection("d1");
+  expect(closed).toBe(true);
+});
+
+test("closeDaemonConnection of unknown daemon is a no-op", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+  expect(() => router.closeDaemonConnection("nope")).not.toThrow();
+});

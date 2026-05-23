@@ -38,6 +38,18 @@ export class Router {
     this.offlinePushDelayMs = options.offline_push_delay_ms ?? DEFAULT_OFFLINE_PUSH_DELAY_MS;
   }
 
+  public getConnectedDaemonIds(): Set<string> {
+    return new Set(this.daemons.keys());
+  }
+
+  public closeDaemonConnection(daemon_id: string): void {
+    if (!this.daemons.has(daemon_id)) return;
+    const ws = this.daemonReg.getWs(daemon_id) as { close?: (code?: number, reason?: string) => void } | undefined;
+    if (ws && typeof ws.close === "function") {
+      ws.close(1008, "revoked");
+    }
+  }
+
   onDaemonFrame(daemon_id: string, frame: DaemonToHub): void {
     switch (frame.type) {
       case "hello": {

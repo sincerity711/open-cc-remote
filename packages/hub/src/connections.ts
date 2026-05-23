@@ -35,6 +35,10 @@ export class DaemonRegistry<W> {
     e.send(frame);
     return true;
   }
+
+  getWs(daemon_id: string): W | undefined {
+    return this.entries.get(daemon_id)?.ws;
+  }
 }
 
 export class PwaRegistry<W> {
