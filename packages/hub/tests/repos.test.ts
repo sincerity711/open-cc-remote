@@ -2,10 +2,13 @@ import { test, expect } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openDb } from "../src/db.ts";
+import { openDb, type Db } from "../src/db.ts";
 import * as Codes from "../src/repos/pairing-codes.ts";
 import * as Daemons from "../src/repos/daemons.ts";
 import * as Devices from "../src/repos/devices.ts";
+import {
+  pairDaemon, listDaemonsByOwner, renameDaemon, revokeDaemonAuthorized, findDaemon,
+} from "../src/repos/daemons.ts";
 
 function tmpDb() {
   const dir = mkdtempSync(join(tmpdir(), "ccr-repo-"));
@@ -125,4 +128,66 @@ test("revokeDevice sets revoked_at", () => {
     Devices.revokeDevice(db, c.device_id);
     expect(Devices.findDeviceByToken(db, c.bearer)?.revoked_at).not.toBeNull();
   } finally { cleanup(); }
+});
+
+// ─── daemons extended ──────────────────────────────────────────────────
+
+function withDb(fn: (db: Db) => void): void {
+  const dir = mkdtempSync(join(tmpdir(), "ccr-repo-"));
+  const db = openDb(join(dir, "h.sqlite"));
+  try {
+    db.prepare("INSERT INTO users (sub, created_at) VALUES (?, ?)").run("u1", 1);
+    db.prepare("INSERT INTO users (sub, created_at) VALUES (?, ?)").run("u2", 1);
+    fn(db);
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("listDaemonsByOwner returns owner's non-revoked daemons sorted by paired_at desc", () => {
+  withDb((db) => {
+    pairDaemon(db, "d1", "u1", "{}", "alpha");
+    pairDaemon(db, "d2", "u1", "{}", "beta");
+    pairDaemon(db, "d3", "u2", "{}", "gamma");
+    db.prepare("UPDATE daemons SET revoked_at = ? WHERE daemon_id = ?").run(Date.now(), "d2");
+    const list = listDaemonsByOwner(db, "u1");
+    expect(list.map((d) => d.daemon_id)).toEqual(["d1"]);
+    expect(list[0]).toMatchObject({
+      daemon_id: "d1",
+      hostname: "alpha",
+      display_name: null,
+    });
+  });
+});
+
+test("renameDaemon updates only owner's row", () => {
+  withDb((db) => {
+    pairDaemon(db, "d1", "u1", "{}", null);
+    pairDaemon(db, "d2", "u2", "{}", null);
+    expect(renameDaemon(db, "u1", "d1", "Work")).toBe(true);
+    expect(renameDaemon(db, "u1", "d2", "Hijack")).toBe(false);
+    expect(listDaemonsByOwner(db, "u1")[0]?.display_name).toBe("Work");
+    expect(listDaemonsByOwner(db, "u2")[0]?.display_name).toBe(null);
+  });
+});
+
+test("revokeDaemonAuthorized sets revoked_at and clears jti", () => {
+  withDb((db) => {
+    pairDaemon(db, "d1", "u1", "{}", null);
+    db.prepare("UPDATE daemons SET jwt_jti = 'abc', jwt_exp = ? WHERE daemon_id = 'd1'").run(Date.now() + 60_000);
+    expect(revokeDaemonAuthorized(db, "u1", "d1")).toBe(true);
+    const row = findDaemon(db, "d1");
+    expect(row?.revoked_at).toBeGreaterThan(0);
+    expect(row?.jwt_jti).toBe(null);
+    expect(revokeDaemonAuthorized(db, "u1", "d1")).toBe(false);
+  });
+});
+
+test("revokeDaemonAuthorized of someone else's daemon returns false and does not modify", () => {
+  withDb((db) => {
+    pairDaemon(db, "d1", "u1", "{}", null);
+    expect(revokeDaemonAuthorized(db, "u2", "d1")).toBe(false);
+    expect(findDaemon(db, "d1")?.revoked_at).toBe(null);
+  });
 });

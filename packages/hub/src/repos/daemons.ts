@@ -39,3 +39,38 @@ export function revokeDaemon(db: Db, daemon_id: string): void {
 export function touchDaemon(db: Db, daemon_id: string): void {
   db.prepare("UPDATE daemons SET last_seen_at = ? WHERE daemon_id = ?").run(Date.now(), daemon_id);
 }
+
+export interface DaemonListItem {
+  daemon_id: string;
+  display_name: string | null;
+  hostname: string | null;
+  paired_at: number;
+  last_seen_at: number | null;
+}
+
+export function listDaemonsByOwner(db: Db, owner_sub: string): DaemonListItem[] {
+  return db.query(
+    `SELECT daemon_id, display_name, hostname, paired_at, last_seen_at
+     FROM daemons
+     WHERE owner_sub = ? AND revoked_at IS NULL
+     ORDER BY paired_at DESC`,
+  ).all(owner_sub) as DaemonListItem[];
+}
+
+export function renameDaemon(
+  db: Db, owner_sub: string, daemon_id: string, display_name: string,
+): boolean {
+  const result = db.prepare(
+    "UPDATE daemons SET display_name = ? WHERE daemon_id = ? AND owner_sub = ? AND revoked_at IS NULL",
+  ).run(display_name, daemon_id, owner_sub);
+  return result.changes === 1;
+}
+
+export function revokeDaemonAuthorized(
+  db: Db, owner_sub: string, daemon_id: string,
+): boolean {
+  const result = db.prepare(
+    "UPDATE daemons SET revoked_at = ?, jwt_jti = NULL WHERE daemon_id = ? AND owner_sub = ? AND revoked_at IS NULL",
+  ).run(Date.now(), daemon_id, owner_sub);
+  return result.changes === 1;
+}
