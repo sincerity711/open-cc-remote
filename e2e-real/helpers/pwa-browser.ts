@@ -84,3 +84,53 @@ export async function openPwa(opts: {
     },
   };
 }
+
+/**
+ * Forward cross-origin REST calls to `hubBase` server-side and re-emit the
+ * response with permissive CORS headers. The hub itself emits no CORS headers,
+ * which is fine in production (PWA proxied via vite-dev) but breaks browser
+ * tests across origins. Routes are matched against the absolute hub URL the
+ * PWA fetches; OPTIONS preflights are short-circuited.
+ *
+ * Caller must invoke this BEFORE navigating the PWA (or reload after) since
+ * mounted hooks fire `fetch()` on first render.
+ */
+export async function installCorsBridge(context: BrowserContext, hubBase: string): Promise<void> {
+  const pattern = `${hubBase}/**`;
+  await context.route(pattern, async (route) => {
+    if (route.request().method() === "OPTIONS") {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          "access-control-allow-origin": "*",
+          "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+          "access-control-allow-headers": "authorization,content-type",
+          "access-control-max-age": "600",
+        },
+      });
+      return;
+    }
+    return route.fallback();
+  });
+  await context.route(pattern, async (route) => {
+    const req = route.request();
+    const url = req.url();
+    if (url.includes("/auth/")) return route.fallback();
+    try {
+      const resp = await fetch(url, {
+        method: req.method(),
+        headers: await req.allHeaders(),
+        body: req.method() === "GET" || req.method() === "HEAD" ? undefined : req.postData() ?? undefined,
+      });
+      const buf = Buffer.from(await resp.arrayBuffer());
+      const headers: Record<string, string> = {};
+      resp.headers.forEach((v, k) => { headers[k] = v; });
+      headers["access-control-allow-origin"] = "*";
+      headers["access-control-allow-methods"] = "GET,POST,PUT,PATCH,DELETE,OPTIONS";
+      headers["access-control-allow-headers"] = "authorization,content-type";
+      await route.fulfill({ status: resp.status, headers, body: buf });
+    } catch (e) {
+      await route.fulfill({ status: 502, body: `bridge error: ${(e as Error).message}` });
+    }
+  });
+}

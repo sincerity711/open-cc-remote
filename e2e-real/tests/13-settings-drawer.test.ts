@@ -19,7 +19,7 @@
 
 import { test, expect } from "@playwright/test";
 import { upCompose, downCompose } from "../helpers/compose.ts";
-import { openPwa } from "../helpers/pwa-browser.ts";
+import { openPwa, installCorsBridge } from "../helpers/pwa-browser.ts";
 import { startPreview, type PreviewHandle } from "../helpers/preview-server.ts";
 import { pairAndStartDaemon, makeScenarioContext } from "../helpers/scenario.ts";
 import { preflightOrThrow } from "../helpers/preflight.ts";
@@ -65,46 +65,7 @@ test("settings drawer: rename / push-pref toggle / appearance / close", async ({
   // Bridge cross-origin REST calls to the hub: forward server-side and
   // re-emit the response with permissive CORS headers. Routes are matched
   // against the absolute hub URL the PWA fetches.
-  // Order matters: the OPTIONS preflight handler is added first so that the
-  // generic forwarder catches everything else.
-  await session.context.route("http://localhost:7745/**", async (route) => {
-    if (route.request().method() === "OPTIONS") {
-      await route.fulfill({
-        status: 204,
-        headers: {
-          "access-control-allow-origin": "*",
-          "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-          "access-control-allow-headers": "authorization,content-type",
-          "access-control-max-age": "600",
-        },
-      });
-      return;
-    }
-    return route.fallback();
-  });
-  await session.context.route("http://localhost:7745/**", async (route) => {
-    const req = route.request();
-    const url = req.url();
-    // The IAS auth chain (login/callback) is full-page navigations — let
-    // those flow through normally; CORS doesn't apply to top-level nav.
-    if (url.includes("/auth/")) return route.fallback();
-    try {
-      const resp = await fetch(url, {
-        method: req.method(),
-        headers: await req.allHeaders(),
-        body: req.method() === "GET" || req.method() === "HEAD" ? undefined : req.postData() ?? undefined,
-      });
-      const buf = Buffer.from(await resp.arrayBuffer());
-      const headers: Record<string, string> = {};
-      resp.headers.forEach((v, k) => { headers[k] = v; });
-      headers["access-control-allow-origin"] = "*";
-      headers["access-control-allow-methods"] = "GET,POST,PUT,PATCH,DELETE,OPTIONS";
-      headers["access-control-allow-headers"] = "authorization,content-type";
-      await route.fulfill({ status: resp.status, headers, body: buf });
-    } catch (e) {
-      await route.fulfill({ status: 502, body: `bridge error: ${(e as Error).message}` });
-    }
-  });
+  await installCorsBridge(session.context, "http://localhost:7745");
 
   // openPwa already navigated and the initial useDevices fetch ran BEFORE
   // these route handlers were attached (failing with CORS). Reload so the
@@ -142,24 +103,18 @@ test("settings drawer: rename / push-pref toggle / appearance / close", async ({
       await expect(drawer.getByRole("button", { name: "Sign out" })).toBeVisible();
     });
 
-    await sc.step("device-rename", async () => {
+    await sc.step("daemon-online-and-rename", async () => {
       const drawer = session.page.getByTestId("settings-drawer");
-      // First "Rename" button corresponds to the first device card. The
-      // device list resolves async after `/devices` returns; waiting for the
-      // button itself is a strictly stronger condition than waiting for
-      // "Loading…" to disappear.
+      await expect(drawer.locator('[aria-label="online"]').first()).toBeVisible({ timeout: 30_000 });
+
       const renameBtn = drawer.getByRole("button", { name: "Rename" }).first();
-      await renameBtn.waitFor({ timeout: 30_000 });
       await renameBtn.click();
 
       const newName = `renamed-${Date.now()}`;
-      // The edit form uses an autoFocused <input> with no label/testid; grab
-      // it via the visible Save button's sibling input. Scope to drawer.
       const input = drawer.locator("input").first();
       await input.fill(newName);
       await drawer.getByRole("button", { name: "Save" }).click();
 
-      // Refresh: the renamed name appears in the device list.
       await expect(drawer.getByText(newName, { exact: false })).toBeVisible({ timeout: 10_000 });
     });
 
