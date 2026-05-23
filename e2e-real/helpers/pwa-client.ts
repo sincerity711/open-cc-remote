@@ -39,43 +39,50 @@ async function followLocation(res: Response): Promise<string> {
   return new URL(loc, res.url).toString();
 }
 
+/**
+ * Follow redirects until we land on a non-redirect response, with hub/IAS
+ * hostname rewriting (fake-ias → localhost). Stops at /auth/callback's final
+ * fragment redirect (which carries the bearer in the URL hash, not a route to
+ * follow). Caps at MAX_HOPS so a misconfiguration can't loop forever.
+ */
+const MAX_HOPS = 10;
+
+function rewriteHost(url: string): string {
+  return url.replace(/http:\/\/fake-ias:7770/g, "http://localhost:7770");
+}
+
+async function followChain(initialUrl: string, hubHttp: string): Promise<{ finalUrl: string; finalRes: Response }> {
+  let url = rewriteHost(initialUrl);
+  let res: Response | null = null;
+  for (let hop = 0; hop < MAX_HOPS; hop++) {
+    res = await fetchManual(url);
+    if (res.status !== 302 && res.status !== 303) {
+      return { finalUrl: url, finalRes: res };
+    }
+    const loc = res.headers.get("location");
+    if (!loc) throw new Error(`hop ${hop}: ${res.status} but no Location header`);
+    const next = rewriteHost(new URL(loc, url).toString());
+    // /auth/callback#bearer=… — the bearer is the fragment of the redirect's
+    // *target* URL. Once we see it we're done; the next "hop" would just be
+    // the PWA SPA loading. Match by hub origin + "#bearer=".
+    if (next.startsWith(hubHttp) === false && next.includes("#bearer=")) {
+      return { finalUrl: next, finalRes: res };
+    }
+    if (next.includes("#bearer=")) {
+      return { finalUrl: next, finalRes: res };
+    }
+    url = next;
+  }
+  throw new Error(`auth chain exceeded ${MAX_HOPS} hops; last url=${url}`);
+}
+
 export async function loginAndConnect(opts: LoginAndConnectOpts): Promise<PwaClient> {
-  // 1. /auth/login → 302 → fake-IAS authorize URL
-  const r1 = await fetchManual(`${opts.hub_http}/auth/login`);
-  if (r1.status !== 302 && r1.status !== 303) throw new Error(`/auth/login: expected 302/303, got ${r1.status} ${await r1.text()}`);
-  const authorizeUrl = await followLocation(r1);
-
-  // 2. fake-IAS /authorize → 302 → callback
-  // fake-ias serves the issuer at http://fake-ias:7770; the redirect URL contains
-  // that hostname. We need to swap to localhost since our test runs on the host.
-  // Actually fake-IAS returns Location pointing to HUB_IAS_REDIRECT_URI, which is
-  // http://localhost:7745/auth/callback?code=...&state=...
-  // But the authorize URL itself lives at the issuer. Reach it via container's
-  // mapped port? Compose only exposes hub:7745. So we must hit fake-IAS via the
-  // hub container... or expose fake-IAS too.
-  //
-  // Simpler: the fake-IAS issuer URL the hub publishes is "http://fake-ias:7770",
-  // which the host can't resolve. We need to either expose fake-IAS, or hit
-  // /authorize via a host-accessible URL.
-  //
-  // Looking at fake-ias behaviour: /authorize immediately returns a 302 to the
-  // redirect_uri with a JWT-encoded "code". The host can't resolve fake-ias.
-  // Solution: rewrite the host part of the authorize URL to localhost via
-  // a port we expose. We'll add a port mapping for fake-ias if needed.
-  //
-  // For now: fake-ias redirects URL is "http://fake-ias:7770/authorize?...". We
-  // rewrite to use a host-side port (added to compose).
-  const rewritten = authorizeUrl.replace(/http:\/\/fake-ias:7770/, "http://localhost:7770");
-  const r2 = await fetchManual(rewritten);
-  if (r2.status !== 302 && r2.status !== 303) throw new Error(`/authorize: expected 302/303, got ${r2.status} ${await r2.text()}`);
-  const callbackUrl = await followLocation(r2);
-
-  // 3. /auth/callback → 302 with Location: <pwa_url>#bearer=<token>
-  const r3 = await fetchManual(callbackUrl);
-  if (r3.status !== 302 && r3.status !== 303) throw new Error(`/auth/callback: expected 302/303, got ${r3.status} ${await r3.text()}`);
-  const finalLoc = await followLocation(r3);
-  const m = /[#&]bearer=([^&]+)/.exec(finalLoc);
-  if (!m) throw new Error(`callback redirect missing bearer fragment: ${finalLoc}`);
+  // Follow the full auth chain: /auth/login → fake-ias /authorize →
+  // [/interaction/{uid} → /authorize/{uid} (oidc-provider consent hops)] →
+  // /auth/callback → SPA URL with #bearer=<token>.
+  const { finalUrl } = await followChain(`${opts.hub_http}/auth/login`, opts.hub_http);
+  const m = /[#&]bearer=([^&]+)/.exec(finalUrl);
+  if (!m) throw new Error(`auth chain ended without bearer fragment: ${finalUrl}`);
   const bearer = decodeURIComponent(m[1]!);
 
   // 4. Open WSS /ws/pwa?bearer=...

@@ -50,13 +50,7 @@ test.afterEach(async ({}, testInfo) => {
   await syncIfPassed(testInfo, "15-multi-pending");
 });
 
-// FIXME(2026-05-23): broken since commit 228d3de (oidc-provider subprocess
-// replaces hand-rolled mock). The oidc-provider /authorize chain redirects
-// through /interaction/{uid} for consent before /auth/callback, but
-// loginAndConnect (helpers/pwa-client.ts) only follows the original 3-hop
-// chain. The second loginAndConnect call in this scenario (out-of-band
-// device) hits the new path. Tracking in docs/TODO.md. Until then, skip.
-test.skip("multi-pending: queue advance + already-handled toast", async ({ page }, testInfo) => {
+test("multi-pending: queue advance + already-handled toast", async ({ page }, testInfo) => {
   test.setTimeout(360_000);
 
   const daemon_id = `multi-${Date.now()}`;

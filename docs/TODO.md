@@ -23,9 +23,9 @@ Spec at `docs/superpowers/specs/2026-05-23-settings-page-design.md`. Plan at `do
 3. ~~**Daemon online status invisible**~~ — DONE. `GET /daemons` includes live `connected` from router's in-memory map; `<StatusDot>` renders `aria-label="online|offline"`.
 4. **Channel-based notifications (separate future spec)** — Current push (`packages/hub/src/router.ts:97/130/142/258`) is hardcoded to four kinds (`permission / offline / completed / idle`). Still out of scope for settings; track separately.
 
-## e2e-real OIDC chain regression (surfaced 2026-05-23)
+## e2e-real OIDC chain regression (surfaced and fixed 2026-05-23)
 
-`e2e-real/tests/15-multi-pending.test.ts` is `test.skip`'d. Broken since commit `228d3de` (oidc-provider subprocess replaces hand-rolled mock). The new chain inserts `/interaction/{uid}` between `/authorize` and `/auth/callback`; `loginAndConnect` (`e2e-real/helpers/pwa-client.ts`) only follows the original 3-hop chain. Single-call scenarios (02/03/04/05/11/14) still pass because oidc-provider auto-grants on first authorize for trusted clients; scenario 15's *second* loginAndConnect hits the consent path. Partial fixes already in place (302/303 status, relative-Location resolution). Full fix needs the test client to follow the interaction chain or configure oidc-provider to skip consent.
+`loginAndConnect` (`e2e-real/helpers/pwa-client.ts`) was broken since commit `228d3de` (oidc-provider subprocess replaces hand-rolled mock). The new chain inserts `/interaction/{uid}` and `/authorize/{uid}` consent hops between `/authorize` and `/auth/callback`. Most scenarios silently passed because oidc-provider's middleware auto-completes interactions on first hit, but `15-multi-pending.test.ts` second loginAndConnect failed when the test client only followed 3 fixed hops. Fixed by replacing the 3-hop helper with a generic `followChain` that follows up to 10 redirects and stops at the bearer fragment.
 
 ## Backlog (non-UI, no plan written yet)
 
@@ -39,7 +39,7 @@ These are deferred follow-ups beyond what the 16 plans + rework + real-e2e + cha
 
 ## Plan completed (2026-05-23)
 
-- `docs/superpowers/plans/2026-05-23-settings-page-plan.md` — settings page (daemons list, pair code, tri-state errors). **DONE** — tagged `plan-settings-page`. Hub: `daemons.display_name` migration v2 + `listDaemonsByOwner/renameDaemon/revokeDaemonAuthorized` repo helpers + `Router.getConnectedDaemonIds/closeDaemonConnection` + `GET/PATCH/DELETE /daemons` + `POST /pair/issue`. PWA: `Resource<T>` tri-state + `useDaemons/usePairing/usePushPrefs` (replaces `useDevices`) + `SettingsDrawer` rewrite + RealApp/DemoApp wiring. Tests: 293 unit (was 169, +124 incl. count drift) + 18 e2e green / 1 skip (15-multi-pending, OIDC chain regression — see entry above).
+- `docs/superpowers/plans/2026-05-23-settings-page-plan.md` — settings page (daemons list, pair code, tri-state errors). **DONE** — tagged `plan-settings-page`. Hub: `daemons.display_name` migration v2 + `listDaemonsByOwner/renameDaemon/revokeDaemonAuthorized` repo helpers + `Router.getConnectedDaemonIds/closeDaemonConnection` + `GET/PATCH/DELETE /daemons` + `POST /pair/issue`. PWA: `Resource<T>` tri-state + `useDaemons/usePairing/usePushPrefs` (replaces `useDevices`) + `SettingsDrawer` rewrite + RealApp/DemoApp wiring. Tests: 293 unit (was 169) + 19 e2e green incl. new `20-pair-from-pwa`. Side-effect: fixed `loginAndConnect` OIDC chain (allowed 302/303, relative Location, multi-hop consent path) so scenario 15 passes again.
 
 ## Plan completed (2026-05-20)
 
