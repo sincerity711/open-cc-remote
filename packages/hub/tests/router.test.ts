@@ -110,7 +110,7 @@ test("event frame is broadcast to PWAs with daemon_id added", () => {
     session_id: "s1",
     jsonl_offset: 42,
     ts: 1000,
-    payload: { type: "user", message: { content: "hi" } },
+    payload: [],
   });
 
   expect(broadcasts).toEqual([{
@@ -119,7 +119,7 @@ test("event frame is broadcast to PWAs with daemon_id added", () => {
     session_id: "s1",
     jsonl_offset: 42,
     ts: 1000,
-    payload: { type: "user", message: { content: "hi" } },
+    payload: [],
   }]);
 });
 
@@ -131,7 +131,7 @@ test("ring buffer caps at 200", () => {
     hostname: "h", agent_version: "0", sessions: [] });
   for (let i = 0; i < 250; i++) {
     router.onDaemonFrame("d-1", {
-      type: "event", session_id: "s1", jsonl_offset: i, ts: i, payload: { i },
+      type: "event", session_id: "s1", jsonl_offset: i, ts: i, payload: [],
     });
   }
   const buf = router.bufferOf("d-1");
@@ -298,8 +298,8 @@ test("history_chunk from daemon is broadcast to PWAs with daemon_id", () => {
     session_id: "s1",
     request_id: "rh1",
     events: [
-      { jsonl_offset: 10, payload: { line: 1 } },
-      { jsonl_offset: 22, payload: { line: 2 } },
+      { jsonl_offset: 10, payload: [] },
+      { jsonl_offset: 22, payload: [] },
     ],
   });
   expect(broadcasts).toEqual([{
@@ -308,8 +308,8 @@ test("history_chunk from daemon is broadcast to PWAs with daemon_id", () => {
     session_id: "s1",
     request_id: "rh1",
     events: [
-      { jsonl_offset: 10, payload: { line: 1 } },
-      { jsonl_offset: 22, payload: { line: 2 } },
+      { jsonl_offset: 10, payload: [] },
+      { jsonl_offset: 22, payload: [] },
     ],
   }]);
 });
