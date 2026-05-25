@@ -1,3 +1,5 @@
+import type { AGUIEvent } from "./agui/events";
+
 // Subset of frames implemented in Plan 1.
 // Auth, permission, history, file-transfer frames come in later plans.
 
@@ -64,7 +66,7 @@ export interface EventFrame {
   session_id: string;
   jsonl_offset: number;     // byte offset *after* this line in the JSONL file
   ts: number;               // ms epoch when daemon read it
-  payload: unknown;         // raw parsed JSONL line
+  payload: AGUIEvent[];     // post-adapter; one source row → N AG-UI events
 }
 
 export interface EventFrameForPwa extends EventFrame {
@@ -175,7 +177,7 @@ export interface HubToDaemonRequestHistory {
 
 export interface HistoryEvent {
   jsonl_offset: number;
-  payload: unknown;
+  payload: AGUIEvent[];     // post-adapter; one source row → N AG-UI events
 }
 
 export interface DaemonHistoryChunk {
