@@ -1,6 +1,7 @@
-import { expect, test } from "bun:test";
+import { expect, test, describe } from "bun:test";
 import { SessionFsm } from "../src/session-fsm";
-import type { SessionState } from "@cc-remote/proto";
+import type { SessionState, AGUIEvent } from "@cc-remote/proto";
+import { EventType } from "@cc-remote/proto";
 
 interface Transition {
   session_id: string;
@@ -174,4 +175,45 @@ test("multiple sessions are isolated", () => {
     { session_id: "s1", state: "working", prev: "idle" },
     { session_id: "s2", state: "waiting", prev: "idle" },
   ]);
+});
+
+describe("SessionFsm RUN_* emissions", () => {
+  test("emits RUN_STARTED on first onJsonlLine after register", () => {
+    const fsm = new SessionFsm();
+    const events: AGUIEvent[] = [];
+    fsm.onRunEvent((_, ev) => events.push(ev));
+    fsm.register("s1");
+    fsm.onJsonlLine("s1");
+    const started = events.find((e) => e.type === EventType.RUN_STARTED);
+    expect(started).toBeDefined();
+    expect((started as { threadId: string }).threadId).toBe("s1");
+  });
+
+  test("emits RUN_FINISHED on idle timer fire", () => {
+    const fsm = new SessionFsm();
+    const events: AGUIEvent[] = [];
+    fsm.onRunEvent((_, ev) => events.push(ev));
+    fsm.register("s1");
+    fsm.onJsonlLine("s1");          // idle → working, emits RUN_STARTED
+    fsm.onIdleTimer("s1");          // working → idle, emits RUN_FINISHED
+    expect(events.find((e) => e.type === EventType.RUN_FINISHED)).toBeDefined();
+  });
+
+  test("emits RUN_ERROR via onError API", () => {
+    const fsm = new SessionFsm();
+    const events: AGUIEvent[] = [];
+    fsm.onRunEvent((_, ev) => events.push(ev));
+    fsm.register("s1");
+    fsm.onError("s1", { message: "spawn failed" });
+    expect(events.find((e) => e.type === EventType.RUN_ERROR)).toBeDefined();
+  });
+
+  test("does NOT emit RUN_STARTED on permission-only activity (waiting state)", () => {
+    const fsm = new SessionFsm();
+    const events: AGUIEvent[] = [];
+    fsm.onRunEvent((_, ev) => events.push(ev));
+    fsm.register("s1");
+    fsm.onPermissionRequest("s1");
+    expect(events.filter((e) => e.type === EventType.RUN_STARTED).length).toBe(0);
+  });
 });

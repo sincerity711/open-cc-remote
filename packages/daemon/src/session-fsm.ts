@@ -1,4 +1,5 @@
-import type { SessionState } from "@cc-remote/proto";
+import type { SessionState, AGUIEvent } from "@cc-remote/proto";
+import { EventType } from "@cc-remote/proto";
 
 /**
  * Session state machine. The daemon owns this — JSONL events and the
@@ -35,9 +36,26 @@ export class SessionFsm {
     { state: SessionState; pendingCount: number; prevBeforeWaiting: SessionState }
   >();
   private listeners: ((session_id: string, state: SessionState, prev: SessionState) => void)[] = [];
+  private runListeners: ((session_id: string, ev: AGUIEvent) => void)[] = [];
 
   onTransition(l: (session_id: string, state: SessionState, prev: SessionState) => void): void {
     this.listeners.push(l);
+  }
+
+  onRunEvent(l: (session_id: string, ev: AGUIEvent) => void): void {
+    this.runListeners.push(l);
+  }
+
+  private fireRun(session_id: string, ev: AGUIEvent): void {
+    for (const l of this.runListeners) l(session_id, ev);
+  }
+
+  onError(session_id: string, opts: { message: string; code?: string }): void {
+    this.fireRun(session_id, {
+      type: EventType.RUN_ERROR,
+      message: opts.message,
+      ...(opts.code ? { code: opts.code } : {}),
+    } as AGUIEvent);
   }
 
   /** Get the current state, or undefined if the session is unknown. */
@@ -108,5 +126,21 @@ export class SessionFsm {
     if (prev === next) return;
     cur.state = next;
     for (const l of this.listeners) l(session_id, next, prev);
+    // Emit RUN_* lifecycle events alongside state-transition notifications.
+    if (prev === "idle" && next === "working") {
+      const runId = `${session_id}:${Date.now()}`;
+      this.fireRun(session_id, {
+        type: EventType.RUN_STARTED,
+        threadId: session_id,
+        runId,
+      } as AGUIEvent);
+    } else if (prev === "working" && next === "idle") {
+      const runId = `${session_id}:${Date.now()}`;
+      this.fireRun(session_id, {
+        type: EventType.RUN_FINISHED,
+        threadId: session_id,
+        runId,
+      } as AGUIEvent);
+    }
   }
 }

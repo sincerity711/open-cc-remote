@@ -365,6 +365,19 @@ fsm.onTransition((session_id, state, prev) => {
   });
 });
 
+// FSM RUN_* lifecycle events → forward to hub as synthetic EventFrames.
+// Negative jsonl_offset ensures these never collide with real positive JSONL
+// offsets in the PWA reducer's dedup map.
+fsm.onRunEvent((session_id, ev) => {
+  hub.send({
+    type: "event",
+    session_id,
+    jsonl_offset: -Date.now(),
+    ts: Date.now(),
+    payload: [ev],
+  });
+});
+
 const sockServer = startSocketServer({
   path: cfg.socket_path,
   onFrame: (frame: PluginToDaemon, client) => {
