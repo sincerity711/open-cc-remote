@@ -1,10 +1,9 @@
 import type {
   DaemonView,
-  EventFrameForPwa,
   PwaPermissionRequest,
 } from "@cc-remote/proto";
 import type { SessionState } from "../screens/primitives/StatusChip";
-import { eventKey } from "../hooks/useHub";
+import { eventKey, type BufferedEvent } from "../hooks/useHub";
 
 export interface SessionRowViewModel {
   daemon_id: string;
@@ -27,7 +26,7 @@ export interface DaemonViewModel {
 
 export interface ComputeDaemonViewModelsArgs {
   daemons: DaemonView[];
-  events: Record<string, EventFrameForPwa[]>;
+  events: Record<string, BufferedEvent[]>;
   pendingPermissions: Record<string, PwaPermissionRequest>;
   completedCounts: Record<string, number>;
 }

@@ -1,31 +1,55 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import type {
   HubToPwa, PwaToHub, DaemonView, EventFrameForPwa, PwaPermissionRequest,
-  PwaChatBroadcast, SessionState,
+  PwaChatBroadcast, SessionState, AGUIEvent,
 } from "@cc-remote/proto";
 
 const PER_SESSION_BUFFER = 2000;
 const PER_SESSION_CHAT_BUFFER = 500;
 
 /**
- * Append a live `event` frame to the per-session buffer with `jsonl_offset`
- * dedup + trim. Pure helper so it can be unit-tested independently of the
- * React reducer (see tests/useHub.test.ts).
+ * Flat record for a single AG-UI event within a JSONL row.
+ * Keyed logically by (jsonl_offset, event_index) — each source row
+ * produces N of these (one per element of EventFrame.payload[]).
+ */
+export interface BufferedEvent {
+  daemon_id: string;
+  session_id: string;
+  jsonl_offset: number;
+  event_index: number;       // position within the frame's payload[]
+  ts: number;
+  event: AGUIEvent;
+}
+
+/**
+ * Append a live `event` frame to the per-session buffer, flattening
+ * frame.payload[] into individual BufferedEvent records.
+ * Dedup is idempotent by jsonl_offset: same row writes once.
+ * Pure helper so it can be unit-tested independently of the React reducer.
  */
 export function appendEventToBuffer(
-  existing: EventFrameForPwa[],
+  existing: BufferedEvent[],
   frame: EventFrameForPwa,
   max: number = PER_SESSION_BUFFER,
-): EventFrameForPwa[] {
+): BufferedEvent[] {
+  // Idempotent dedup by jsonl_offset: same row writes once.
   if (existing.some((e) => e.jsonl_offset === frame.jsonl_offset)) return existing;
-  const next = existing.concat([frame]);
+  const flat: BufferedEvent[] = frame.payload.map((event, event_index) => ({
+    daemon_id: frame.daemon_id,
+    session_id: frame.session_id,
+    jsonl_offset: frame.jsonl_offset,
+    event_index,
+    ts: frame.ts,
+    event,
+  }));
+  const next = existing.concat(flat);
   return next.length > max ? next.slice(next.length - max) : next;
 }
 
 export interface HubState {
   connected: boolean;
   daemons: DaemonView[];
-  events: Record<string, EventFrameForPwa[]>;
+  events: Record<string, BufferedEvent[]>;
   pendingPermissions: Record<string, PwaPermissionRequest>;
   completedCounts: Record<string, number>;
   chatMessages: Record<string, PwaChatBroadcast[]>;
@@ -135,19 +159,23 @@ export function useHub(
               };
             }
             const existing = prev.events[k] ?? [];
-            const seen = new Set(existing.map((e) => e.jsonl_offset));
-            const incoming: EventFrameForPwa[] = frame.events
-              .filter((e) => !seen.has(e.jsonl_offset))
-              .map((e) => ({
-                type: "event",
-                daemon_id: frame.daemon_id,
-                session_id: frame.session_id,
-                jsonl_offset: e.jsonl_offset,
-                ts: 0,
-                payload: e.payload,
-              }));
-            if (incoming.length === 0) return prev;
-            const merged = [...incoming, ...existing].sort((a, b) => a.jsonl_offset - b.jsonl_offset);
+            const dedupedOffsets = new Set(existing.map((e) => e.jsonl_offset));
+            const newFlat: BufferedEvent[] = [];
+            for (const h of frame.events) {
+              if (dedupedOffsets.has(h.jsonl_offset)) continue;
+              h.payload.forEach((event, event_index) => {
+                newFlat.push({
+                  daemon_id: frame.daemon_id,
+                  session_id: frame.session_id,
+                  jsonl_offset: h.jsonl_offset,
+                  event_index,
+                  ts: 0, // history doesn't carry ts; renderer derives from event.timestamp if needed
+                  event,
+                });
+              });
+            }
+            if (newFlat.length === 0) return prev;
+            const merged = [...newFlat, ...existing].sort((a, b) => a.jsonl_offset - b.jsonl_offset);
             const trimmed = merged.length > PER_SESSION_BUFFER
               ? merged.slice(merged.length - PER_SESSION_BUFFER)
               : merged;
