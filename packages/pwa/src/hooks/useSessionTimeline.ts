@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { PwaPermissionRequest, PwaPermissionResolved } from "@cc-remote/proto";
 import { mergeTimeline } from "../lib/timeline";
-import type { TimelineEvent } from "../screens/timeline/types";
+import type { RenderItem } from "../screens/timeline/types";
 import { eventKey, type UseHubResult } from "./useHub";
 
 export interface UseSessionTimelineResult {
-  items: TimelineEvent[];
+  items: RenderItem[];
   loadEarlier: () => void;
   hasMoreEarlier: boolean;
   composerBlocked: boolean;
@@ -48,7 +48,7 @@ export function useSessionTimeline(
   const result = useMemo(() => {
     if (!selected) {
       return {
-        items: [] as TimelineEvent[],
+        items: [] as RenderItem[],
         loadEarlier: () => {},
         hasMoreEarlier: false,
         composerBlocked: false,

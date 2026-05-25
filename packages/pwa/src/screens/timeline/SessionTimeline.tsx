@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../../components/ui/button";
 import { renderTimelineItem, type RenderTimelineItemContext } from "./renderTimelineItem";
-import type { TimelineEvent } from "./types";
+import type { RenderItem } from "./types";
 
 export interface SessionTimelineProps {
-  items: TimelineEvent[];
+  items: RenderItem[];
   idle?: boolean;
   hasMoreEarlier?: boolean;
   onLoadEarlier: () => void;

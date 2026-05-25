@@ -4,11 +4,11 @@ import type { PwaPermissionRequest } from "@cc-remote/proto";
 import { Button } from "../components/ui/button";
 import { StatusChip } from "./primitives/StatusChip";
 import { SessionTimeline } from "./timeline/SessionTimeline";
-import type { TimelineEvent } from "./timeline/types";
+import type { RenderItem } from "./timeline/types";
 
 export interface SessionViewProps {
   header: { name: string; model: string | null; cwd: string; online: boolean };
-  items: TimelineEvent[];
+  items: RenderItem[];
   composerBlocked: boolean;
   pendingPermissionInThisSession?: PwaPermissionRequest;
   chatError?: string;

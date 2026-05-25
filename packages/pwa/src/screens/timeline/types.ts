@@ -1,84 +1,15 @@
-export type TimelineEvent =
-  | {
-      id: string;
-      kind: "user" | "assistant";
-      title: string;
-      body: string;
-      time: string;
-    }
-  | {
-      id: string;
-      kind: "thinking";
-      title: string;
-      body: string;
-      tokens: string;
-      time: string;
-    }
-  | {
-      id: string;
-      kind: "tool";
-      tool: string;
-      command: string;
-      cwd: string;
-      duration: string;
-      result: "success" | "failure" | "running";
-      summary: string;
-      output: string;
-      risk?: "warning" | "danger";
-    }
-  | {
-      id: string;
-      kind: "permission-inline";
-      tool: string;
-      command: string;
-      risk: string;
-    }
-  | {
-      id: string;
-      kind: "permission-resolved";
-      decision: "allowed" | "denied" | "expired";
-      via: string;
-      time: string;
-    }
-  | {
-      id: string;
-      kind: "subagent";
-      name: string;
-      status: "running" | "completed";
-      summary: string;
-      children: string[];
-    }
-  | {
-      id: string;
-      kind: "batch";
-      summary: string;
-      tools: string[];
-      duration: string;
-    }
-  | {
-      id: string;
-      kind: "task";
-      title: string;
-      status: "created" | "completed";
-      detail: string;
-    }
-  | {
-      id: string;
-      kind: "system" | "compact" | "session-boundary" | "metadata";
-      title: string;
-      detail: string;
-    }
-  | {
-      id: string;
-      kind: "error";
-      title: string;
-      detail: string;
-    }
-  | {
-      id: string;
-      kind: "raw";
-      title: string;
-      json: string;
-    };
+import type { AGUIEvent, PwaPermissionRequest, PwaPermissionResolved, PwaChatBroadcast } from "@cc-remote/proto";
 
-export type TimelineEventKind = TimelineEvent["kind"];
+/**
+ * What the timeline renderer consumes — a thin sum of:
+ *   - AG-UI session events (the bulk),
+ *   - control-class items that aren't AG-UI (chat broadcasts, permission
+ *     requests/resolutions).
+ *
+ * Render dispatch keys off the `tag` and, for `agui` items, off `event.type`.
+ */
+export type RenderItem =
+  | { tag: "agui"; id: string; ts: number; event: AGUIEvent }
+  | { tag: "chat"; id: string; ts: number; chat: PwaChatBroadcast }
+  | { tag: "permission-inline"; id: string; ts: number; pending: PwaPermissionRequest }
+  | { tag: "permission-resolved"; id: string; ts: number; resolved: PwaPermissionResolved };
