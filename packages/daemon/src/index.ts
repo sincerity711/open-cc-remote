@@ -173,7 +173,7 @@ const hub = startHubClient({
         return;
       }
       const path = jsonlPath(session.cwd, claudeId);
-      readHistory(path, frame.before_offset, frame.limit).then((events) => {
+      readHistory(path, frame.before_offset, frame.limit, frame.session_id).then((events) => {
         hub.send({
           type: "history_chunk",
           session_id: frame.session_id,
