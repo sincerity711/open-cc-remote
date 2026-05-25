@@ -1,39 +1,21 @@
 import {
-  AlertCircle,
   ArrowLeft,
   Bell,
-  Bot,
-  Braces,
-  CheckCircle2,
   ChevronRight,
-  Circle,
-  Clock,
   Copy,
-  FileSearch,
-  FileText,
-  GitBranch,
   Layers,
   Laptop,
-  LoaderCircle,
-  MessageSquare,
   Monitor,
   Moon,
   MoreHorizontal,
-  PackageCheck,
-  Pencil,
   Plus,
-  Radio,
   Send,
   Settings,
   ShieldAlert,
-  Sparkles,
-  Split,
   Smartphone,
   Sun,
   Tablet,
-  Terminal,
   Trash2,
-  Wrench,
   X,
 } from "lucide-react";
 import type React from "react";
@@ -51,7 +33,6 @@ import {
   BashToolCard,
   BatchSummaryCard,
   FileEditCard,
-  IdleWaitingCard,
   PermissionInlineCard,
   PermissionResolvedCard,
   RawJsonCard,
@@ -59,8 +40,6 @@ import {
   ReasoningCard,
   SubagentCard,
   SystemNoticeCard,
-  TaskCompletedCard,
-  TaskCreatedCard,
   ToolFailureCard,
   ToolResultLongCard,
   ToolResultShortCard,
@@ -69,7 +48,8 @@ import {
 } from "../screens/timeline/cards";
 import { AssistantBubbleLive } from "../screens/timeline/cards/AssistantBubble";
 import { SessionTimelineItem } from "../screens/timeline/SessionTimelineItem";
-import type { TimelineEvent } from "../screens/timeline/types";
+import { EventType } from "@cc-remote/proto";
+import type { TextMessageChunkEvent } from "@cc-remote/proto";
 import { SettingsDrawer, type Appearance } from "../screens/SettingsDrawer";
 import type { Resource } from "../hooks/types";
 import type { DaemonItem } from "../hooks/useDaemons";
@@ -165,148 +145,6 @@ const sessions: Array<{
     unread: 0,
     tasks: 3,
   },
-];
-
-const timelineEvents: TimelineEvent[] = [
-  {
-    id: "session-start",
-    kind: "session-boundary",
-    title: "Session resumed",
-    detail: "repo-web on mbp-m3.local - cwd /Users/me/repo-web",
-  },
-  {
-    id: "user-1",
-    kind: "user",
-    title: "You",
-    body: "Fix the failing tests and keep the patch focused.",
-    time: "10:41",
-  },
-  {
-    id: "assistant-1",
-    kind: "assistant",
-    title: "Codex",
-    body: "I will inspect the test failures, run the smallest useful suite, and patch only the failing auth path.",
-    time: "10:41",
-  },
-  {
-    id: "thinking-1",
-    kind: "thinking",
-    title: "Reasoning captured",
-    body: "Condensed thinking block from the transcript. Hidden by default because it is useful for audit, but noisy during normal remote control.",
-    tokens: "428 output tokens",
-    time: "10:41",
-  },
-  {
-    id: "tool-read",
-    kind: "tool",
-    tool: "Read",
-    command: "packages/pwa/src/auth.ts",
-    cwd: "/Users/me/repo-web",
-    duration: "40ms",
-    result: "success",
-    summary: "Read 96 lines",
-    output:
-      "1 import { decodeJwt } from './jwt';\n2 export function consumeFragment() {\n...\n96 }",
-  },
-  {
-    id: "tool-bash",
-    kind: "tool",
-    tool: "Bash",
-    command: "bun test --filter auth",
-    cwd: "/Users/me/repo-web",
-    duration: "12s",
-    result: "failure",
-    summary: "2 failed, 48 passed",
-    output:
-      "FAIL src/auth.test.ts\nExpected 200, received 401\nMock token issuer did not match test tenant.",
-  },
-  {
-    id: "permission-inline",
-    kind: "permission-inline",
-    tool: "Bash",
-    command: "rm -rf node_modules",
-    risk: "Deletes a project directory recursively. Needs explicit approval.",
-  },
-  {
-    id: "permission-resolved",
-    kind: "permission-resolved",
-    decision: "allowed",
-    via: "PWA - Allow once",
-    time: "10:43",
-  },
-  {
-    id: "subagent",
-    kind: "subagent",
-    name: "test-reviewer",
-    status: "completed",
-    summary: "Reviewed auth regression scope in parallel.",
-    children: [
-      "Checked failing assertions",
-      "Confirmed no unrelated route failures",
-      "Suggested adding issuer fixture coverage",
-    ],
-  },
-  {
-    id: "batch",
-    kind: "batch",
-    summary: "3 tools completed before next model call",
-    tools: ["Read", "Grep", "Bash"],
-    duration: "13.1s",
-  },
-  {
-    id: "task-created",
-    kind: "task",
-    title: "Task created",
-    status: "created",
-    detail: "Patch auth fixture and rerun focused test.",
-  },
-  {
-    id: "task-completed",
-    kind: "task",
-    title: "Task completed",
-    status: "completed",
-    detail: "Focused auth suite passes after fixture update.",
-  },
-  {
-    id: "compact",
-    kind: "compact",
-    title: "Context compacted",
-    detail: "Older tool output summarized to preserve working context.",
-  },
-  {
-    id: "metadata",
-    kind: "metadata",
-    title: "Cwd changed",
-    detail: "/Users/me/repo-web -> /Users/me/repo-web/packages/pwa",
-  },
-  {
-    id: "error",
-    kind: "error",
-    title: "PostToolUseFailure",
-    detail:
-      "Bash exited with non-zero status code 1. Hook added context for Codex.",
-  },
-  {
-    id: "assistant-2",
-    kind: "assistant",
-    title: "Codex",
-    body: "Found the issue in auth.test.ts. I am updating the mock setup and will rerun the focused test before summarizing.",
-    time: "10:44",
-  },
-  {
-    id: "raw",
-    kind: "raw",
-    title: "Unknown future event",
-    json: '{ "type": "ConfigChange", "source": ".claude/settings.json" }',
-  },
-];
-
-const sessionPreviewEvents: TimelineEvent[] = [
-  timelineEvents.find((event) => event.id === "user-1")!,
-  timelineEvents.find((event) => event.id === "assistant-1")!,
-  timelineEvents.find((event) => event.id === "tool-bash")!,
-  timelineEvents.find((event) => event.id === "permission-inline")!,
-  timelineEvents.find((event) => event.id === "task-completed")!,
 ];
 
 export function DemoApp() {
@@ -1012,17 +850,14 @@ function SessionExecutionTimeline() {
 
       <SessionTimelineItem marker="claude">
         <AssistantBubbleLive
-          body="Added reset flow and tests. Ready for review."
-          time="10:28 AM"
+          event={{
+            type: EventType.TEXT_MESSAGE_CHUNK,
+            messageId: "demo-live",
+            role: "assistant",
+            delta: "Added reset flow and tests. Ready for review.",
+          } as TextMessageChunkEvent}
+          ts={Date.now()}
         />
-      </SessionTimelineItem>
-
-      <SessionTimelineItem marker="success">
-        <TaskCompletedCard />
-      </SessionTimelineItem>
-
-      <SessionTimelineItem marker="idle">
-        <IdleWaitingCard />
       </SessionTimelineItem>
     </div>
   );
@@ -1111,8 +946,6 @@ function MiniTimelinePreview() {
         <BashToolCard />
         <FileEditCard />
         <ReadSearchCard />
-        <TaskCompletedCard />
-        <IdleWaitingCard />
       </div>
       <div className="border-border border-t p-4">
         <div className="border-border bg-muted flex h-11 items-center justify-between rounded-md border px-3">
@@ -1129,7 +962,7 @@ function CardCatalog({ device }: { device: Device }) {
     <section>
       <div className="mb-3 flex items-center justify-between gap-3">
         <h3 className="text-sm font-semibold">Session Timeline Card Components</h3>
-        <p className="text-muted-foreground text-xs">20 card types</p>
+        <p className="text-muted-foreground text-xs">17 card types</p>
       </div>
       <div className="space-y-3">
         <CatalogGroup device={device}>
@@ -1184,22 +1017,13 @@ function CardCatalog({ device }: { device: Device }) {
           <CatalogTile number={15} title="Subagent Group (Expanded)">
             <SubagentCard expanded />
           </CatalogTile>
-          <CatalogTile number={16} title="Task Created (Chip Row)">
-            <TaskCreatedCard />
+          <CatalogTile number={16} title="System Metadata / Notice">
+            <SystemNoticeCard />
           </CatalogTile>
         </CatalogGroup>
         <CatalogGroup device={device}>
-          <CatalogTile number={17} title="Task Completed">
-            <TaskCompletedCard />
-          </CatalogTile>
-          <CatalogTile number={18} title="System Metadata / Notice">
-            <SystemNoticeCard />
-          </CatalogTile>
-          <CatalogTile number={19} title="Unknown / Raw JSON">
+          <CatalogTile number={17} title="Unknown / Raw JSON">
             <RawJsonCard />
-          </CatalogTile>
-          <CatalogTile number={20} title="Idle / Waiting">
-            <IdleWaitingCard />
           </CatalogTile>
         </CatalogGroup>
       </div>
@@ -1266,526 +1090,9 @@ function CatalogPermissionReview() {
   );
 }
 
-function TimelineLegend({ compact }: { compact: boolean }) {
-  const items = [
-    { label: "Chat", icon: MessageSquare },
-    { label: "Tools", icon: Wrench },
-    { label: "Decision", icon: ShieldAlert },
-    { label: "System", icon: Layers },
-  ];
 
-  return (
-    <div className="border-border bg-background/95 sticky top-0 z-10 -mx-4 mt-3 border-y px-4 py-2 backdrop-blur">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-muted-foreground text-xs font-semibold tracking-[0.12em] uppercase">
-          Event timeline
-        </p>
-        {!compact && (
-          <div className="flex gap-1.5">
-            {items.map(({ icon: Icon, label }) => (
-              <span
-                className="border-border bg-surface text-muted-foreground inline-flex h-7 items-center gap-1.5 rounded-full border px-2 text-xs"
-                key={label}
-              >
-                <Icon className="size-3.5" />
-                {label}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
-function EventTimeline({
-  events,
-  expandedOutput,
-  setExpandedOutput,
-}: {
-  events: TimelineEvent[];
-  expandedOutput: boolean;
-  setExpandedOutput: (expanded: boolean) => void;
-}) {
-  return (
-    <div className="relative mt-3 space-y-3 pb-3">
-      <div className="bg-border absolute top-0 bottom-0 left-4 w-px" />
-      {events.map((event) => (
-        <TimelineEventCard
-          event={event}
-          expandedOutput={expandedOutput}
-          key={event.id}
-          setExpandedOutput={setExpandedOutput}
-        />
-      ))}
-    </div>
-  );
-}
 
-function TimelineEventCard({
-  event,
-  expandedOutput,
-  setExpandedOutput,
-}: {
-  event: TimelineEvent;
-  expandedOutput: boolean;
-  setExpandedOutput: (expanded: boolean) => void;
-}) {
-  switch (event.kind) {
-    case "user":
-      return (
-        <TimelineShell marker="chat">
-          <ChatBubble align="right" title={event.title}>
-            {event.body}
-            <span className="text-muted-foreground mt-2 block text-xs">
-              {event.time}
-            </span>
-          </ChatBubble>
-        </TimelineShell>
-      );
-    case "assistant":
-      return (
-        <TimelineShell marker="assistant">
-          <ChatBubble title={event.title}>
-            {event.body}
-            <span className="text-muted-foreground mt-2 block text-xs">
-              {event.time}
-            </span>
-          </ChatBubble>
-        </TimelineShell>
-      );
-    case "thinking":
-      return (
-        <TimelineShell marker="system">
-          <ThinkingCard event={event} />
-        </TimelineShell>
-      );
-    case "tool":
-      return (
-        <TimelineShell marker={event.result === "failure" ? "error" : "tool"}>
-          <ToolCard
-            event={event}
-            expanded={expandedOutput}
-            setExpanded={setExpandedOutput}
-          />
-        </TimelineShell>
-      );
-    case "permission-inline":
-      return (
-        <TimelineShell marker="permission">
-          <InlinePermissionCard event={event} />
-        </TimelineShell>
-      );
-    case "permission-resolved":
-      return (
-        <TimelineShell marker="success">
-          <PermissionResolvedNotice event={event} />
-        </TimelineShell>
-      );
-    case "subagent":
-      return (
-        <TimelineShell marker="subagent">
-          <SubagentLiveCard event={event} />
-        </TimelineShell>
-      );
-    case "batch":
-      return (
-        <TimelineShell marker="tool">
-          <ToolBatchCard event={event} />
-        </TimelineShell>
-      );
-    case "task":
-      return (
-        <TimelineShell
-          marker={event.status === "completed" ? "success" : "tool"}
-        >
-          <TaskCard event={event} />
-        </TimelineShell>
-      );
-    case "system":
-    case "compact":
-    case "session-boundary":
-    case "metadata":
-      return (
-        <TimelineShell marker="system">
-          <SystemNotice event={event} />
-        </TimelineShell>
-      );
-    case "error":
-      return (
-        <TimelineShell marker="error">
-          <ErrorCard event={event} />
-        </TimelineShell>
-      );
-    case "raw":
-      return (
-        <TimelineShell marker="raw">
-          <RawEventCard event={event} />
-        </TimelineShell>
-      );
-  }
-}
-
-function TimelineShell({
-  children,
-  marker,
-}: {
-  children: React.ReactNode;
-  marker:
-    | "assistant"
-    | "chat"
-    | "error"
-    | "permission"
-    | "raw"
-    | "subagent"
-    | "success"
-    | "system"
-    | "tool";
-}) {
-  const markerClasses = {
-    assistant: "border-primary/30 bg-primary-subtle text-primary",
-    chat: "border-primary/30 bg-primary text-primary-foreground",
-    error: "border-danger/35 bg-danger-subtle text-danger",
-    permission: "border-warning/35 bg-warning-subtle text-warning",
-    raw: "border-border bg-muted text-muted-foreground",
-    subagent: "border-primary/30 bg-surface text-primary",
-    success: "border-success/30 bg-success-subtle text-success",
-    system: "border-border bg-surface text-muted-foreground",
-    tool: "border-border bg-muted text-foreground",
-  };
-
-  const markerIcons = {
-    assistant: Bot,
-    chat: MessageSquare,
-    error: AlertCircle,
-    permission: ShieldAlert,
-    raw: Braces,
-    subagent: Split,
-    success: CheckCircle2,
-    system: Layers,
-    tool: Wrench,
-  };
-  const Icon = markerIcons[marker];
-
-  return (
-    <div className="relative grid grid-cols-[32px_minmax(0,1fr)] gap-3">
-      <span
-        className={cn(
-          "shadow-card relative z-10 flex size-8 items-center justify-center rounded-full border",
-          markerClasses[marker],
-        )}
-      >
-        <Icon className="size-4" />
-      </span>
-      <div className="min-w-0">{children}</div>
-    </div>
-  );
-}
-
-function ChatBubble({
-  align = "left",
-  children,
-  title,
-}: {
-  align?: "left" | "right";
-  children: React.ReactNode;
-  title: string;
-}) {
-  return (
-    <article
-      className={cn(
-        "rounded-card shadow-card max-w-[88%] border p-3",
-        align === "right"
-          ? "border-primary/25 bg-primary-subtle ml-auto"
-          : "border-border bg-surface mr-auto",
-      )}
-    >
-      <p className="text-muted-foreground text-xs font-semibold">{title}</p>
-      <p className="mt-1 text-sm leading-6">{children}</p>
-    </article>
-  );
-}
-
-function ToolCard({
-  event,
-  expanded,
-  setExpanded,
-}: {
-  event: Extract<TimelineEvent, { kind: "tool" }>;
-  expanded: boolean;
-  setExpanded: (expanded: boolean) => void;
-}) {
-  const failed = event.result === "failure";
-  const running = event.result === "running";
-
-  return (
-    <article
-      className={cn(
-        "rounded-card bg-muted shadow-card border p-3",
-        failed ? "border-danger/40" : "border-border",
-      )}
-    >
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          {running ? (
-            <LoaderCircle className="text-primary size-4 animate-spin" />
-          ) : (
-            <Terminal className={cn("size-4", failed && "text-danger")} />
-          )}
-          <p className="font-mono text-sm font-semibold">{event.tool}</p>
-        </div>
-        <span className="text-muted-foreground text-xs">{event.duration}</span>
-      </div>
-      <code className="bg-code text-code-foreground mt-2 block rounded-md px-3 py-2 font-mono text-xs">
-        {event.command}
-      </code>
-      <p className="text-muted-foreground mt-2 truncate font-mono text-xs">
-        cwd: {event.cwd}
-      </p>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <StatusChip
-          label={failed ? "Failed" : running ? "Running" : "Succeeded"}
-          tone={failed ? "error" : running ? "working" : "online"}
-        />
-        <span className="text-muted-foreground text-xs">{event.summary}</span>
-        {event.risk && (
-          <span className="border-warning/30 bg-warning-subtle text-warning rounded-full border px-2 py-1 text-xs font-semibold">
-            {event.risk}
-          </span>
-        )}
-      </div>
-      {expanded && (
-        <pre className="border-code-border bg-code text-code-foreground mt-3 max-h-40 overflow-auto rounded-md border p-3 font-mono text-xs leading-5">
-          {event.output}
-        </pre>
-      )}
-      <Button
-        className="mt-2"
-        onClick={() => setExpanded(!expanded)}
-        size="sm"
-        variant="tertiary"
-      >
-        {expanded ? "Collapse" : "View output"}
-      </Button>
-    </article>
-  );
-}
-
-function ThinkingCard({
-  event,
-}: {
-  event: Extract<TimelineEvent, { kind: "thinking" }>;
-}) {
-  return (
-    <details className="rounded-card border-border bg-surface shadow-card border p-3">
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
-        <span className="flex items-center gap-2 font-semibold">
-          <Sparkles className="text-primary size-4" />
-          {event.title}
-        </span>
-        <span className="text-muted-foreground text-xs">{event.tokens}</span>
-      </summary>
-      <p className="text-muted-foreground mt-3 text-sm leading-6">
-        {event.body}
-      </p>
-    </details>
-  );
-}
-
-function InlinePermissionCard({
-  event,
-}: {
-  event: Extract<TimelineEvent, { kind: "permission-inline" }>;
-}) {
-  return (
-    <article className="rounded-card border-warning/35 bg-warning-subtle shadow-card border p-3">
-      <div className="flex items-start gap-3">
-        <ShieldAlert className="text-warning mt-0.5 size-5 shrink-0" />
-        <div className="min-w-0 flex-1">
-          <p className="font-semibold">PermissionRequest</p>
-          <p className="text-muted-foreground mt-1 text-sm">
-            {event.tool} needs approval before execution.
-          </p>
-          <code className="bg-code text-code-foreground mt-2 block truncate rounded-md px-3 py-2 font-mono text-xs">
-            {event.command}
-          </code>
-          <p className="text-warning mt-2 text-sm">{event.risk}</p>
-        </div>
-      </div>
-    </article>
-  );
-}
-
-function PermissionResolvedNotice({
-  event,
-}: {
-  event: Extract<TimelineEvent, { kind: "permission-resolved" }>;
-}) {
-  return (
-    <article className="rounded-card border-success/30 bg-success-subtle border p-3">
-      <p className="text-success font-semibold">Permission {event.decision}</p>
-      <p className="text-muted-foreground mt-1 text-sm">
-        {event.via} - {event.time}
-      </p>
-    </article>
-  );
-}
-
-function SubagentLiveCard({
-  event,
-}: {
-  event: Extract<TimelineEvent, { kind: "subagent" }>;
-}) {
-  return (
-    <details
-      open
-      className="rounded-card border-border bg-surface shadow-card border p-3"
-    >
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
-        <span className="flex min-w-0 items-center gap-2">
-          <Split className="text-primary size-4" />
-          <span className="truncate font-semibold">{event.name}</span>
-        </span>
-        <StatusChip
-          label={event.status === "completed" ? "Done" : "Running"}
-          tone={event.status === "completed" ? "online" : "working"}
-        />
-      </summary>
-      <p className="text-muted-foreground mt-3 text-sm">{event.summary}</p>
-      <ul className="mt-3 grid gap-1 text-sm">
-        {event.children.map((child) => (
-          <li className="flex items-center gap-2" key={child}>
-            <CheckCircle2 className="text-success size-3.5" />
-            {child}
-          </li>
-        ))}
-      </ul>
-    </details>
-  );
-}
-
-function ToolBatchCard({
-  event,
-}: {
-  event: Extract<TimelineEvent, { kind: "batch" }>;
-}) {
-  return (
-    <article className="rounded-card border-border bg-muted border p-3">
-      <div className="flex items-center justify-between gap-3">
-        <p className="flex items-center gap-2 font-semibold">
-          <PackageCheck className="text-primary size-4" />
-          PostToolBatch
-        </p>
-        <span className="text-muted-foreground text-xs">{event.duration}</span>
-      </div>
-      <p className="text-muted-foreground mt-1 text-sm">{event.summary}</p>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {event.tools.map((tool) => (
-          <span
-            className="border-border bg-surface rounded-full border px-2 py-1 font-mono text-xs"
-            key={tool}
-          >
-            {tool}
-          </span>
-        ))}
-      </div>
-    </article>
-  );
-}
-
-function TaskCard({
-  event,
-}: {
-  event: Extract<TimelineEvent, { kind: "task" }>;
-}) {
-  return (
-    <article className="rounded-card border-border bg-surface border p-3">
-      <div className="flex items-center justify-between gap-3">
-        <p className="flex items-center gap-2 font-semibold">
-          {event.status === "completed" ? (
-            <CheckCircle2 className="text-success size-4" />
-          ) : (
-            <Clock className="text-primary size-4" />
-          )}
-          {event.title}
-        </p>
-        <StatusChip
-          label={event.status === "completed" ? "Completed" : "Created"}
-          tone={event.status === "completed" ? "online" : "working"}
-        />
-      </div>
-      <p className="text-muted-foreground mt-1 text-sm">{event.detail}</p>
-    </article>
-  );
-}
-
-function SystemNotice({
-  event,
-}: {
-  event: Extract<
-    TimelineEvent,
-    { kind: "compact" | "metadata" | "session-boundary" | "system" }
-  >;
-}) {
-  const icon =
-    event.kind === "compact"
-      ? Layers
-      : event.kind === "metadata"
-        ? GitBranch
-        : event.kind === "session-boundary"
-          ? FileText
-          : Bell;
-  const Icon = icon;
-
-  return (
-    <article className="rounded-card border-border bg-surface/70 border px-3 py-2">
-      <p className="flex items-center gap-2 text-sm font-semibold">
-        <Icon className="text-muted-foreground size-4" />
-        {event.title}
-      </p>
-      <p className="text-muted-foreground mt-1 text-sm">{event.detail}</p>
-    </article>
-  );
-}
-
-function ErrorCard({
-  event,
-}: {
-  event: Extract<TimelineEvent, { kind: "error" }>;
-}) {
-  return (
-    <article className="rounded-card border-danger/40 bg-danger-subtle shadow-card border p-3">
-      <p className="text-danger flex items-center gap-2 font-semibold">
-        <AlertCircle className="size-4" />
-        {event.title}
-      </p>
-      <p className="text-muted-foreground mt-1 text-sm leading-6">
-        {event.detail}
-      </p>
-      <Button className="mt-3" size="sm" variant="danger">
-        Inspect failure
-      </Button>
-    </article>
-  );
-}
-
-function RawEventCard({
-  event,
-}: {
-  event: Extract<TimelineEvent, { kind: "raw" }>;
-}) {
-  return (
-    <details className="rounded-card border-border bg-muted border p-3">
-      <summary className="flex cursor-pointer list-none items-center gap-2 font-semibold">
-        <Braces className="text-muted-foreground size-4" />
-        {event.title}
-      </summary>
-      <pre className="bg-code text-code-foreground mt-3 overflow-auto rounded-md p-3 font-mono text-xs">
-        {event.json}
-      </pre>
-    </details>
-  );
-}
 
 function Composer({
   blocked,

@@ -5,7 +5,6 @@ import {
   BashToolCard,
   BatchSummaryCard,
   FileEditCard,
-  IdleWaitingCard,
   PermissionInlineCard,
   PermissionResolvedCard,
   RawJsonCard,
@@ -13,8 +12,6 @@ import {
   ReasoningCard,
   SubagentCard,
   SystemNoticeCard,
-  TaskCompletedCard,
-  TaskCreatedCard,
   ToolFailureCard,
   ToolResultLongCard,
   ToolResultShortCard,
@@ -36,11 +33,8 @@ const cases: Array<[string, JSX.Element, string]> = [
   ["BatchSummaryCard", <BatchSummaryCard />, "Batch complete"],
   ["SubagentCard collapsed", <SubagentCard />, "Click to expand"],
   ["SubagentCard expanded", <SubagentCard expanded />, "Run integration tests"],
-  ["TaskCreatedCard", <TaskCreatedCard />, "email-token"],
-  ["TaskCompletedCard", <TaskCompletedCard />, "feat: add password reset flow"],
   ["SystemNoticeCard", <SystemNoticeCard />, "Claude Sonnet 3.5"],
   ["RawJsonCard", <RawJsonCard />, "event_unknown"],
-  ["IdleWaitingCard", <IdleWaitingCard />, "How would you like to proceed?"],
 ];
 
 for (const [name, element, signature] of cases) {
