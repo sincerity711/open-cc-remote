@@ -1,28 +1,45 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SessionView } from "../src/screens/SessionView";
-import type { TimelineEvent } from "../src/screens/timeline/types";
+import type { RenderItem } from "../src/screens/timeline/types";
+import { EventType } from "@cc-remote/proto";
 
-const items: TimelineEvent[] = [
+const items: RenderItem[] = [
   {
+    tag: "chat",
     id: "chat:m1",
-    kind: "user",
-    title: "alice@example.com",
-    body: "hello claude",
-    time: "10:24 AM",
+    ts: 1_700_000_000_000,
+    chat: {
+      type: "chat",
+      daemon_id: "d",
+      session_id: "s",
+      message_id: "m1",
+      from: "pwa",
+      user: "alice@example.com",
+      content: "hello claude",
+      reply_to: null,
+      ts: 1_700_000_000_000,
+    },
   },
   {
-    id: "chat:m2",
-    kind: "assistant",
-    title: "Claude",
-    body: "hello back",
-    time: "10:24 AM",
+    tag: "agui",
+    id: "agui:m2",
+    ts: 1_700_000_001_000,
+    event: {
+      type: EventType.TEXT_MESSAGE_CHUNK,
+      messageId: "m2",
+      role: "assistant",
+      delta: "hello back",
+    },
   },
   {
-    id: "event:1",
-    kind: "raw",
-    title: "session_start",
-    json: '{"type":"session_start"}',
+    tag: "agui",
+    id: "agui:raw1",
+    ts: 1_700_000_002_000,
+    event: {
+      type: EventType.RAW,
+      event: { type: "session_start" },
+    },
   },
 ];
 

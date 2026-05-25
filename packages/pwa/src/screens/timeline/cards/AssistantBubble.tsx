@@ -1,11 +1,18 @@
+import type { TextMessageChunkEvent } from "@cc-remote/proto";
+import { EventType } from "@cc-remote/proto";
 import { ChatBubble } from "../../primitives/ChatBubble";
 
 /** Static demo bubble (kept for /demo & catalog preview). */
 export function AssistantBubble() {
   return (
     <AssistantBubbleLive
-      body="I'll plan the implementation and create the necessary endpoints."
-      time="10:24 AM"
+      event={{
+        type: EventType.TEXT_MESSAGE_CHUNK,
+        messageId: "demo",
+        role: "assistant",
+        delta: "I'll plan the implementation.",
+      } as TextMessageChunkEvent}
+      ts={Date.now()}
     />
   );
 }
@@ -16,15 +23,16 @@ export function AssistantBubble() {
  * has no header / no avatar — just text + a quiet timestamp.
  */
 export function AssistantBubbleLive({
-  body,
-  time,
+  event,
+  ts,
 }: {
-  body: string;
-  time: string;
+  event: TextMessageChunkEvent;
+  ts: number;
 }) {
+  const time = new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   return (
     <ChatBubble align="start" tone="neutral">
-      <p className="whitespace-pre-wrap">{body}</p>
+      <p className="whitespace-pre-wrap">{event.delta ?? ""}</p>
       <p className="text-muted-foreground mt-1 text-[11px]">{time}</p>
     </ChatBubble>
   );

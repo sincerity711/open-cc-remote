@@ -1,4 +1,6 @@
 import { Check } from "lucide-react";
+import type { TextMessageChunkEvent } from "@cc-remote/proto";
+import { EventType } from "@cc-remote/proto";
 import { ChatBubble } from "../../primitives/ChatBubble";
 
 export type UserBubbleStatus = "sending" | "sent" | "failed";
@@ -7,8 +9,13 @@ export type UserBubbleStatus = "sending" | "sent" | "failed";
 export function UserBubble() {
   return (
     <UserBubbleLive
-      body="Please add password reset flow using email tokens."
-      time="10:24 AM"
+      event={{
+        type: EventType.TEXT_MESSAGE_CHUNK,
+        messageId: "demo",
+        role: "user",
+        delta: "Please add password reset flow using email tokens.",
+      } as TextMessageChunkEvent}
+      ts={Date.now()}
     />
   );
 }
@@ -24,17 +31,18 @@ export function UserBubbleSurface() {
  * events (`tool` / `permission` / `failure` / `task`), not chat.
  */
 export function UserBubbleLive({
-  body,
+  event,
   status = "sent",
-  time,
+  ts,
 }: {
-  body: string;
+  event: TextMessageChunkEvent;
   status?: UserBubbleStatus;
-  time: string;
+  ts: number;
 }) {
+  const time = new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   return (
     <ChatBubble align="end" tone="primary">
-      <p className="whitespace-pre-wrap">{body}</p>
+      <p className="whitespace-pre-wrap">{event.delta ?? ""}</p>
       <div className="text-muted-foreground mt-1 flex items-center justify-end gap-1 text-[11px]">
         <span>{time}</span>
         {status === "sent" && <Check className="size-3" />}

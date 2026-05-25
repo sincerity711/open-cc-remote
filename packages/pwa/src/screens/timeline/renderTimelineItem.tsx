@@ -9,65 +9,50 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import type React from "react";
+import {
+  EventType,
+  type AGUIEvent,
+  type ToolCallChunkEvent,
+  type ToolCallResultEvent,
+  type ReasoningMessageChunkEvent,
+  type RawEvent,
+  type TextMessageChunkEvent,
+} from "@cc-remote/proto";
 import { Button } from "../../components/ui/button";
 import { CatalogCard, type CatalogCardTone } from "./cards/CatalogCard";
 import { CatalogHeader } from "./cards/CatalogHeader";
 import { AssistantBubbleLive } from "./cards/AssistantBubble";
 import { UserBubbleLive } from "./cards/UserBubble";
 import { SessionTimelineItem, type TimelineMarker } from "./SessionTimelineItem";
-import type { TimelineEvent } from "./types";
+import type { RenderItem } from "./types";
+import { toolStatusFromResult } from "../../lib/view-helpers";
 
 export interface RenderTimelineItemContext {
-  /** Called when the user taps "Review" on an inline permission card. */
   onOpenPermission?: (request_id: string) => void;
 }
 
-/**
- * Pure mapping from a `TimelineEvent` → React node. Per docs/design/light-timeline.png:
- *   - Every event sits on the rail. The rail glyph = type/status; the card
- *     icon = tool identity (only when strong, e.g. Bash/Edit/Read).
- *   - User messages share the same shape as Claude messages — only the card
- *     tone differs (`purple` vs default) so they read like a chat bubble.
- */
 export function renderTimelineItem(
-  event: TimelineEvent,
+  item: RenderItem,
   ctx: RenderTimelineItemContext = {},
 ): React.ReactElement {
-  const marker = pickMarker(event);
+  const marker = pickMarker(item);
 
-  switch (event.kind) {
-    case "user":
-      return (
-        <SessionTimelineItem key={event.id} align="end" marker={marker}>
-          <UserBubbleLive body={event.body} time={event.time} />
-        </SessionTimelineItem>
-      );
-
-    case "assistant":
-      return (
-        <SessionTimelineItem key={event.id} marker={marker}>
-          <AssistantBubbleLive body={event.body} time={event.time} />
-        </SessionTimelineItem>
-      );
-
+  switch (item.tag) {
     case "permission-inline":
       return (
-        <SessionTimelineItem key={event.id} marker={marker}>
+        <SessionTimelineItem key={item.id} marker={marker}>
           <CatalogCard tone="warning">
             <CatalogHeader icon={ShieldAlert} title="Permission required" tone="warning" />
             <div className="mt-3 grid gap-1 text-xs">
               <p>
-                Tool <span className="ml-6 font-mono">{event.tool}</span>
-              </p>
-              <p>
-                Command <span className="font-mono">{event.command}</span>
+                Tool <span className="ml-6 font-mono">{item.pending.tool}</span>
               </p>
             </div>
             <Button
               className="mt-3 w-full"
               size="sm"
               variant="secondary"
-              onClick={() => ctx.onOpenPermission?.(stripPermPrefix(event.id))}
+              onClick={() => ctx.onOpenPermission?.(item.pending.request_id)}
             >
               Review
             </Button>
@@ -77,109 +62,170 @@ export function renderTimelineItem(
 
     case "permission-resolved":
       return (
-        <SessionTimelineItem key={event.id} marker={marker}>
-          <CatalogCard tone={event.decision === "allowed" ? "success" : "danger"}>
+        <SessionTimelineItem key={item.id} marker={marker}>
+          <CatalogCard
+            tone={item.resolved.decision === "allow" ? "success" : "danger"}
+          >
             <CatalogHeader
               icon={ShieldCheck}
               title={
-                event.decision === "allowed"
+                item.resolved.decision === "allow"
                   ? "Permission granted"
-                  : event.decision === "denied"
+                  : item.resolved.decision === "deny"
                     ? "Permission denied"
                     : "Permission expired"
               }
-              tone={event.decision === "allowed" ? "success" : "danger"}
+              tone={item.resolved.decision === "allow" ? "success" : "danger"}
             />
-            <p className="text-muted-foreground mt-2 text-xs">via {event.via}</p>
           </CatalogCard>
         </SessionTimelineItem>
       );
 
-    case "raw":
+    case "chat":
       return (
-        <SessionTimelineItem key={event.id} marker={marker}>
-          <CatalogCard>
-            <CatalogHeader title={event.title} />
-            <pre className="bg-muted mt-3 max-h-40 overflow-auto rounded-md p-2 font-mono text-xs leading-5">
-              {event.json}
-            </pre>
-            <div className="mt-3 flex items-center justify-between">
-              <span className="text-primary text-xs font-semibold">Raw payload</span>
-              <ChevronRight className="text-muted-foreground size-4" />
-            </div>
-          </CatalogCard>
+        <SessionTimelineItem key={item.id} align="end" marker={marker}>
+          <UserBubbleLive
+            event={{
+              type: EventType.TEXT_MESSAGE_CHUNK,
+              messageId: item.id,
+              role: "user",
+              delta: item.chat.content,
+            } as TextMessageChunkEvent}
+            ts={item.ts}
+          />
         </SessionTimelineItem>
       );
 
-    case "tool":
+    case "agui":
+      return renderAgUi(item.id, item.event, item.ts, marker);
+  }
+}
+
+function renderAgUi(
+  id: string,
+  event: AGUIEvent,
+  ts: number,
+  marker: TimelineMarker,
+): React.ReactElement {
+  switch (event.type) {
+    case EventType.TEXT_MESSAGE_CHUNK: {
+      const ev = event as TextMessageChunkEvent;
+      if (ev.role === "user") {
+        return (
+          <SessionTimelineItem key={id} align="end" marker={marker}>
+            <UserBubbleLive event={ev} ts={ts} />
+          </SessionTimelineItem>
+        );
+      }
       return (
-        <SessionTimelineItem key={event.id} marker={marker}>
-          <ToolCardLive event={event} />
+        <SessionTimelineItem key={id} marker={marker}>
+          <AssistantBubbleLive event={ev} ts={ts} />
         </SessionTimelineItem>
       );
+    }
 
-    case "thinking":
+    case EventType.REASONING_MESSAGE_CHUNK: {
+      const ev = event as ReasoningMessageChunkEvent;
       return (
-        <SessionTimelineItem key={event.id} marker={marker}>
+        <SessionTimelineItem key={id} marker={marker}>
           <CatalogCard>
             <CatalogHeader title="Reasoning" />
             <p className="mt-2 text-sm leading-5 whitespace-pre-wrap">
-              {event.body || "(no reasoning text)"}
+              {ev.delta ?? "(no reasoning text)"}
             </p>
           </CatalogCard>
         </SessionTimelineItem>
       );
+    }
+
+    case EventType.TOOL_CALL_CHUNK: {
+      const ev = event as ToolCallChunkEvent;
+      return (
+        <SessionTimelineItem key={id} marker={marker}>
+          <ToolChunkCard event={ev} ts={ts} />
+        </SessionTimelineItem>
+      );
+    }
+
+    case EventType.TOOL_CALL_RESULT: {
+      const ev = event as ToolCallResultEvent;
+      return (
+        <SessionTimelineItem key={id} marker={marker}>
+          <ToolResultCard event={ev} />
+        </SessionTimelineItem>
+      );
+    }
+
+    case EventType.RUN_STARTED:
+    case EventType.RUN_FINISHED:
+      // FSM markers — not rendered as cards in v1; SessionView shows
+      // working/idle state via the daemon view model.
+      return <></>;
+
+    case EventType.RUN_ERROR: {
+      const msg = (event as { message?: string }).message ?? "Run error";
+      return (
+        <SessionTimelineItem key={id} marker={marker}>
+          <CatalogCard tone="danger">
+            <CatalogHeader title="Run error" tone="danger" />
+            <p className="mt-2 text-xs">{msg}</p>
+          </CatalogCard>
+        </SessionTimelineItem>
+      );
+    }
+
+    case EventType.RAW: {
+      const ev = event as RawEvent;
+      return (
+        <SessionTimelineItem key={id} marker={marker}>
+          <CatalogCard>
+            <CatalogHeader title="Raw event" />
+            <pre className="bg-muted mt-3 max-h-40 overflow-auto rounded-md p-2 font-mono text-xs leading-5">
+              {JSON.stringify((ev as { event?: unknown }).event, null, 2)}
+            </pre>
+          </CatalogCard>
+        </SessionTimelineItem>
+      );
+    }
 
     default:
-      // Future kinds are produced by mergeTimeline upgrades. Render a minimal
-      // raw shell so an unhandled kind never crashes the timeline.
       return (
-        <SessionTimelineItem key={event.id} marker={marker}>
+        <SessionTimelineItem key={id} marker={marker}>
           <CatalogCard>
-            <CatalogHeader title={event.kind} />
+            <CatalogHeader title={String(event.type)} />
           </CatalogCard>
         </SessionTimelineItem>
       );
   }
 }
 
-function pickMarker(event: TimelineEvent): TimelineMarker {
-  switch (event.kind) {
-    case "user":
-      return "user";
-    case "assistant":
-    case "thinking":
-      return "claude";
-    case "tool":
-    case "subagent":
-    case "batch":
-      return "tool";
-    case "task":
-      return event.status === "completed" ? "success" : "tool";
-    case "permission-inline":
-      return "warning";
-    case "permission-resolved":
-      return event.decision === "denied" || event.decision === "expired"
+function pickMarker(item: RenderItem): TimelineMarker {
+  if (item.tag === "permission-inline") return "warning";
+  if (item.tag === "permission-resolved") {
+    return item.resolved.decision === "deny" || item.resolved.decision === "expired"
+      ? "error"
+      : item.resolved.decision === "terminal"
         ? "error"
         : "success";
-    case "system":
-    case "compact":
-    case "session-boundary":
-    case "metadata":
-    case "raw":
-      return "idle";
-    case "error":
+  }
+  if (item.tag === "chat") return "user";
+  switch (item.event.type) {
+    case EventType.TEXT_MESSAGE_CHUNK:
+      return (item.event as TextMessageChunkEvent).role === "user" ? "user" : "claude";
+    case EventType.REASONING_MESSAGE_CHUNK:
+      return "claude";
+    case EventType.TOOL_CALL_CHUNK:
+    case EventType.TOOL_CALL_RESULT:
+    case EventType.ACTIVITY_SNAPSHOT:
+    case EventType.ACTIVITY_DELTA:
+      return "tool";
+    case EventType.RUN_ERROR:
       return "error";
+    default:
+      return "idle";
   }
 }
 
-type ToolEvent = Extract<TimelineEvent, { kind: "tool" }>;
-
-/**
- * Card icons are intentionally narrow — only tools whose identity is strong
- * enough that the rail glyph (`tool`) doesn't carry it. Other tool calls fall
- * through to a no-icon header so they don't double up.
- */
 function pickStrongToolIcon(name: string): LucideIcon | undefined {
   if (!name) return undefined;
   if (name === "Bash") return Terminal;
@@ -188,63 +234,58 @@ function pickStrongToolIcon(name: string): LucideIcon | undefined {
   return undefined;
 }
 
-function ToolCardLive({ event }: { event: ToolEvent }) {
+function ToolChunkCard({ event, ts: _ts }: { event: ToolCallChunkEvent; ts: number }) {
+  const name = event.toolCallName ?? "tool";
+  const icon = pickStrongToolIcon(name);
+  const args = event.delta ?? "";
+  return (
+    <CatalogCard>
+      <CatalogHeader
+        icon={icon}
+        title={name}
+        status={
+          <span className="bg-muted text-muted-foreground rounded-md border px-2 py-0.5 text-xs font-medium">
+            Active
+          </span>
+        }
+      />
+      {args && (
+        <pre className="bg-muted mt-2 max-h-32 overflow-auto rounded-md p-2 font-mono text-xs leading-5 whitespace-pre-wrap break-all">
+          <code>{args}</code>
+        </pre>
+      )}
+    </CatalogCard>
+  );
+}
+
+function ToolResultCard({ event }: { event: ToolCallResultEvent }) {
   const [expanded, setExpanded] = useState(false);
-  const icon = pickStrongToolIcon(event.tool);
-  const cardTone: CatalogCardTone = event.result === "failure" ? "danger" : "default";
-  const headerTone =
-    event.result === "failure"
-      ? ("danger" as const)
-      : event.result === "success"
-        ? ("success" as const)
-        : ("default" as const);
-
-  const statusLabel =
-    event.result === "running"
-      ? "Active"
-      : event.result === "success"
-        ? "Success"
-        : "Failed";
-  const statusClass =
-    event.result === "running"
-      ? "bg-muted text-muted-foreground"
-      : event.result === "success"
-        ? "bg-success-subtle text-success border-success/30"
-        : "bg-danger-subtle text-danger border-danger/30";
-
-  const outputLines = event.output ? event.output.split("\n") : [];
-  const lineCount = outputLines.length;
-  const isShort =
-    event.result === "success" &&
-    !!event.output &&
-    lineCount <= 2 &&
-    event.output.length <= 200;
-  const showExpand =
-    !!event.output && (event.result === "failure" || !isShort);
+  const status = toolStatusFromResult(event);
+  const cardTone: CatalogCardTone = status === "failure" ? "danger" : "default";
+  const out = event.content ?? "";
+  const lines = out ? out.split("\n") : [];
+  const isShort = status === "success" && lines.length <= 2 && out.length <= 200;
+  const showExpand = !!out && (status === "failure" || !isShort);
 
   return (
     <CatalogCard tone={cardTone}>
       <CatalogHeader
-        icon={icon}
-        title={event.tool || "tool"}
-        tone={headerTone}
+        title="Result"
+        tone={status === "failure" ? "danger" : "success"}
         status={
           <span
-            className={`shrink-0 rounded-md border px-2 py-0.5 text-xs font-medium ${statusClass}`}
+            className={`shrink-0 rounded-md border px-2 py-0.5 text-xs font-medium ${
+              status === "success"
+                ? "bg-success-subtle text-success border-success/30"
+                : "bg-danger-subtle text-danger border-danger/30"
+            }`}
           >
-            {statusLabel}
+            {status === "success" ? "Success" : "Failed"}
           </span>
         }
       />
-      {event.command && (
-        <pre className="bg-muted mt-2 max-h-32 overflow-auto rounded-md p-2 font-mono text-xs leading-5 whitespace-pre-wrap break-all">
-          <code>{event.command}</code>
-        </pre>
-      )}
       {isShort && (
-        <p className="text-muted-foreground mt-2 font-mono text-xs whitespace-pre-wrap">
-          {event.output}
-        </p>
+        <p className="text-muted-foreground mt-2 font-mono text-xs whitespace-pre-wrap">{out}</p>
       )}
       {showExpand && (
         <>
@@ -254,24 +295,18 @@ function ToolCardLive({ event }: { event: ToolEvent }) {
             variant="ghost"
             onClick={() => setExpanded((v) => !v)}
           >
-            <span>
-              {expanded ? "Hide output" : `View output (${lineCount} lines)`}
-            </span>
+            <span>{expanded ? "Hide output" : `View output (${lines.length} lines)`}</span>
             <ChevronRight
               className={`size-4 transition-transform ${expanded ? "rotate-90" : ""}`}
             />
           </Button>
           {expanded && (
             <pre className="bg-muted mt-2 max-h-60 overflow-auto rounded-md p-2 font-mono text-xs leading-5 whitespace-pre-wrap">
-              {event.output}
+              {out}
             </pre>
           )}
         </>
       )}
     </CatalogCard>
   );
-}
-
-function stripPermPrefix(id: string): string {
-  return id.startsWith("perm:") ? id.slice("perm:".length) : id;
 }
