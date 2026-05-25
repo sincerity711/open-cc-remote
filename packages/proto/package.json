@@ -12,5 +12,8 @@
   "devDependencies": {
     "typescript": "^5.4.0",
     "bun-types": "latest"
+  },
+  "dependencies": {
+    "@ag-ui/core": "^0.0.53"
   }
 }
