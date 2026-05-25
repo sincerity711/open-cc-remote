@@ -59,8 +59,10 @@ test("/demo cards step renders the full catalog", async ({}, testInfo) => {
     await sc.step("catalog-tile-permission-required", async () => {
       await page.getByText("Permission required").first().waitFor();
     });
-    await sc.step("catalog-tile-task-completed", async () => {
-      await page.getByText("feat: add password reset flow").first().waitFor();
+    await sc.step("catalog-tile-assistant-bubble", async () => {
+      // TaskCompletedCard was removed in Phase D.5 (AG-UI migration).
+      // Assert on AssistantBubble which is always present in the catalog.
+      await page.getByText("I'll plan the implementation.").first().waitFor();
     });
     await sc.step("catalog-tile-bash", async () => {
       await page.getByText("pnpm test auth").first().waitFor();
