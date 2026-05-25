@@ -18,6 +18,7 @@ import { openDb } from "./db.ts";
 import { recordRequest, resolveRequest } from "./repos/permissions.ts";
 import { handleHubChatSend, handlePluginChatOut } from "./chat.ts";
 import { SessionFsm } from "./session-fsm.ts";
+import { ClaudeCodeAdapter } from "./adapters/claude-code.ts";
 
 /**
  * Best-effort dismissal of Claude Code's interactive boot dialogs in a freshly-
@@ -90,6 +91,7 @@ const cfg = loadConfig();
 const epoch = Math.floor(Date.now() / 1000);
 const sessions = new LiveSessions();
 const fsm = new SessionFsm();
+const adapter = new ClaudeCodeAdapter();
 const db = openDb(join(cfg.state_dir, "db.sqlite"));
 
 const kp = await getOrCreateKeypair(cfg.state_dir);
@@ -282,8 +284,12 @@ sessions.onAdd((s: SessionSnapshot) => {
       // hub event ring and the PWA `event` reducer dedupe by jsonl_offset.
       startOffset: 0,
       onLine: (line, jsonl_offset) => {
-        let payload: unknown;
-        try { payload = JSON.parse(line); } catch { payload = { raw: line }; }
+        let row: unknown;
+        try { row = JSON.parse(line); } catch { row = { raw: line }; }
+        const payload = adapter.convertRow(row, {
+          sessionId: s.session_id,
+          jsonlOffset: jsonl_offset,
+        });
         hub.send({
           type: "event",
           session_id: s.session_id,
@@ -305,7 +311,7 @@ sessions.onAdd((s: SessionSnapshot) => {
         //     permission-mode, …)      → leave the timer alone. Real Claude
         //     writes these as trailing metadata after end_turn; clearing the
         //     timer on them prevents idle from ever firing.
-        const p = payload as { type?: string; message?: { stop_reason?: string } };
+        const p = row as { type?: string; message?: { stop_reason?: string } };
         const cancelIdle = () => {
           const existing = idleTimers.get(s.session_id);
           if (existing) { clearTimeout(existing); idleTimers.delete(s.session_id); }
