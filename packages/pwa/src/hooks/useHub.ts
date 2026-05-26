@@ -553,14 +553,12 @@ export function useHub(
       // wsRef when it still equals our `ws`.
       wsRef.current = ws;
 
-      let openedThisAttempt = false;
       ws.onopen = () => {
         if (stopped) { try { ws.close(); } catch {} return; }
         if (myEpoch !== epoch) { try { ws.close(); } catch {} return; }
         // If a NEWER ws (from a different closure) has already taken over
         // wsRef, this open is for an orphaned ws — close and bail.
         if (wsRef.current !== ws) { try { ws.close(); } catch {} return; }
-        openedThisAttempt = true;
         backoff = 500;
         setState((s) => ({ ...s, connected: true }));
         const sub: PwaToHub = { type: "subscribe" };
@@ -584,10 +582,13 @@ export function useHub(
         }
         if (stopped) return;
         if (myEpoch !== epoch) return;
-        // Only treat "opened but no frames" as a possible auth failure.
-        // If the ws never opened (offline / network error), don't increment —
-        // that's a connectivity problem, not auth.
-        if (openedThisAttempt && !receivedAnyFrame) {
+        // Distinguish "browser is offline" from "hub is unreachable / auth invalid".
+        // The auth-failure guard should still fire for the latter (scenario 14:
+        // stale bearer → 3 frameless closes → onAuthFailure → SignInScreen),
+        // but NOT during a transient offline window where reconnects are
+        // expected to recover (scenario 12).
+        const browserOnline = typeof navigator === "undefined" || navigator.onLine;
+        if (browserOnline && !receivedAnyFrame) {
           framelessOpens += 1;
           if (framelessOpens >= 3) {
             stopped = true;
