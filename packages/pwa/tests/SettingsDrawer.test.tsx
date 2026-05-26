@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { DaemonItem } from "../src/hooks/useDaemons";
-import type { PushPreferences } from "../src/hooks/usePushPrefs";
+import type { PushTopicsState } from "../src/hooks/usePushTopics";
 import type { PairingState } from "../src/hooks/usePairing";
 import type { Resource } from "../src/hooks/types";
 import { SettingsDrawer } from "../src/screens/SettingsDrawer";
@@ -11,7 +11,9 @@ const baseProps = {
   account: { email: "alice@example.com", onSignOut: () => {} },
   onRenameDaemon: () => {},
   onRevokeDaemon: () => {},
-  onTogglePref: () => {},
+  onSetSub: async () => {},
+  onResetDaemon: async () => {},
+  onSetDnd: async () => {},
   onGenerateCode: () => {},
   onCancelPairing: () => {},
   appearance: "system" as const,
@@ -26,9 +28,21 @@ const readyDaemons: Resource<DaemonItem[]> = {
     { daemon_id: "d2", display_name: null, hostname: null, paired_at: 0, last_seen_at: null, connected: false },
   ],
 };
-const readyPrefs: Resource<PushPreferences> = {
-  status: "ready", data: { permission: true, offline: false, completed: true, idle: false },
+
+const readyPushState: Resource<PushTopicsState> = {
+  status: "ready",
+  data: {
+    topics: [
+      { id: "permission", title: "Permission alerts",  description: "perm",  default_enabled: true,  bypass_dnd: true  },
+      { id: "offline",    title: "Daemon offline",     description: "off",   default_enabled: false, bypass_dnd: false },
+      { id: "completed",  title: "Claude finished a turn", description: "c", default_enabled: false, bypass_dnd: false },
+      { id: "idle",       title: "Claude is idle",     description: "i",     default_enabled: false, bypass_dnd: false },
+    ],
+    subscriptions: [],
+    dnd: { enabled: false, start_hh_mm: null, end_hh_mm: null, timezone: null },
+  },
 };
+
 const idlePairing: PairingState = { status: "idle" };
 
 test("renders all sections with ready data", () => {
@@ -36,7 +50,7 @@ test("renders all sections with ready data", () => {
     <SettingsDrawer
       {...baseProps}
       daemons={readyDaemons}
-      pushPrefs={readyPrefs}
+      pushState={readyPushState}
       pairing={idlePairing}
     />,
   );
@@ -45,6 +59,7 @@ test("renders all sections with ready data", () => {
   expect(markup).toContain("Online");
   expect(markup).toContain("Never connected");
   expect(markup).toContain("Permission alerts");
+  expect(markup).toContain("Do not disturb");
   expect(markup).toContain("Generate code");
   expect(markup).toContain("Run cc-remote pair on your machine");
 });
@@ -54,7 +69,7 @@ test("daemons section shows loading", () => {
     <SettingsDrawer
       {...baseProps}
       daemons={{ status: "loading" }}
-      pushPrefs={readyPrefs}
+      pushState={readyPushState}
       pairing={idlePairing}
     />,
   );
@@ -66,7 +81,7 @@ test("daemons section shows error with retry button", () => {
     <SettingsDrawer
       {...baseProps}
       daemons={{ status: "error", error: "boom", retry: () => {} }}
-      pushPrefs={readyPrefs}
+      pushState={readyPushState}
       pairing={idlePairing}
     />,
   );
@@ -79,7 +94,7 @@ test("pair-code active state shows code and copy command", () => {
     <SettingsDrawer
       {...baseProps}
       daemons={readyDaemons}
-      pushPrefs={readyPrefs}
+      pushState={readyPushState}
       pairing={{ status: "active", code: "ABC-XYZ", expiresAt: Date.now() + 60_000, remainingSec: 60 }}
     />,
   );
@@ -93,7 +108,7 @@ test("does not render top-level error banner anymore", () => {
     <SettingsDrawer
       {...baseProps}
       daemons={{ status: "error", error: "boom", retry: () => {} }}
-      pushPrefs={{ status: "error", error: "boom", retry: () => {} }}
+      pushState={{ status: "error", error: "boom", retry: () => {} }}
       pairing={idlePairing}
     />,
   );

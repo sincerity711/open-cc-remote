@@ -3,10 +3,11 @@ import { useHub, eventKey } from "./hooks/useHub";
 import { clearBearer, useAuth } from "./hooks/useAuth";
 import { SessionView } from "./screens/SessionView";
 import { useSessionTimeline } from "./hooks/useSessionTimeline";
+import { useLastSeen } from "./hooks/useLastSeen";
 import { registerPushSubscription } from "./push.ts";
 import { SettingsDrawer, type Appearance } from "./screens/SettingsDrawer";
 import { useDaemons } from "./hooks/useDaemons";
-import { usePushPrefs } from "./hooks/usePushPrefs";
+import { usePushTopics } from "./hooks/usePushTopics";
 import { usePairing } from "./hooks/usePairing";
 import { computeDaemonViewModels, totalPendingApprovals } from "./lib/daemonViewModel";
 import { AppShell } from "./screens/AppShell";
@@ -15,6 +16,7 @@ import { useDevice } from "./hooks/useMediaQuery";
 import { usePermissionQueue } from "./hooks/usePermissionQueue";
 import { PermissionSurface } from "./screens/PermissionSurface";
 import { SignInScreen } from "./screens/SignInScreen";
+import type { PendingCommand } from "./hooks/pendingCommands";
 
 const HUB_URL = (import.meta.env.VITE_HUB_URL as string) ?? "ws://localhost:17745";
 
@@ -51,8 +53,14 @@ export function RealApp() {
       setAuthNotice("Session expired, please sign in again.");
     },
   });
-  const { connected, daemons, events, pendingPermissions, sendPermissionReply, completedCounts, chatErrors } = hub;
-  const sessionTimeline = useSessionTimeline(hub, selected);
+  const { connected, daemons, events, pendingPermissions, sendPermissionReply, completedCounts, chatErrors, startSessionErrors, clearStartSessionError, pendingChatSendFor, dismissPendingCommand, pendingPermissionReplyFor } = hub;
+  const { lastSeenOffsets, markSeen } = useLastSeen();
+  const selectedKey = selected ? eventKey(selected.daemon_id, selected.session_id) : null;
+  const sessionTimeline = useSessionTimeline(
+    hub,
+    selected,
+    selectedKey ? lastSeenOffsets[selectedKey] : undefined,
+  );
 
   const device = useDevice();
   const daemonModels = useMemo(
@@ -61,14 +69,45 @@ export function RealApp() {
       events,
       pendingPermissions,
       completedCounts,
+      lastSeenOffsets,
     }),
-    [daemons, events, pendingPermissions, completedCounts],
+    [daemons, events, pendingPermissions, completedCounts, lastSeenOffsets],
   );
   const permissionQueue = usePermissionQueue(pendingPermissions);
   const pendingApprovalsCount = totalPendingApprovals(pendingPermissions);
+
+  const pendingReply = permissionQueue.active
+    ? pendingPermissionReplyFor(permissionQueue.active.request_id)
+    : undefined;
+
+  const activeRequestId = permissionQueue.active?.request_id;
+  useEffect(() => {
+    if (!activeRequestId) return;
+    if (!pendingPermissions[activeRequestId]) {
+      permissionQueue.advance();
+    }
+  }, [activeRequestId, pendingPermissions, permissionQueue]);
   const daemonsHook = useDaemons(HUB_URL, bearer, showSettings);
-  const pushHook = usePushPrefs(HUB_URL, bearer);
+  const pushHook = usePushTopics(HUB_URL, bearer);
   const pairingHook = usePairing(HUB_URL, bearer, daemonsHook.refresh);
+
+  const pendingStartSessionByDaemon = useMemo(() => {
+    const out: Record<string, PendingCommand> = {};
+    for (const v of Object.values(hub.pendingCommands)) {
+      if (v.kind === "start_session") out[v.daemon_id] = v;
+    }
+    return out;
+  }, [hub.pendingCommands]);
+
+  const pendingKillByKey = useMemo(() => {
+    const out: Record<string, PendingCommand> = {};
+    for (const v of Object.values(hub.pendingCommands)) {
+      if (v.kind === "kill_session" && v.session_id) {
+        out[`${v.daemon_id}::${v.session_id}`] = v;
+      }
+    }
+    return out;
+  }, [hub.pendingCommands]);
   const [appearance, setAppearance] = useState<Appearance>(() => {
     if (typeof window === "undefined") return "system";
     const stored = window.localStorage.getItem("cc_remote_appearance");
@@ -111,6 +150,7 @@ export function RealApp() {
   }
 
   const selectedChatError = selected ? chatErrors[eventKey(selected.daemon_id, selected.session_id)] : undefined;
+  const pendingChatSend = selected ? pendingChatSendFor(selected.daemon_id, selected.session_id) : undefined;
   const selectedDaemon = selected ? daemons.find((d) => d.daemon_id === selected.daemon_id) : undefined;
   const selectedSession = selected
     ? selectedDaemon?.sessions.find((s) => s.session_id === selected.session_id)
@@ -136,6 +176,10 @@ export function RealApp() {
             onStartSession={(daemon_id, cwd) => hub.startSession(daemon_id, cwd)}
             onKillSession={(daemon_id, session_id) => hub.killSession(daemon_id, session_id)}
             onOpenPermission={permissionQueue.openSurface}
+            startSessionErrors={startSessionErrors}
+            onDismissStartSessionError={clearStartSessionError}
+            pendingStartSessionByDaemon={pendingStartSessionByDaemon}
+            pendingKillByKey={pendingKillByKey}
           />
         }
         session={
@@ -154,10 +198,17 @@ export function RealApp() {
               connected={connected}
               idle={sessionTimeline.idle}
               hasMoreEarlier={sessionTimeline.hasMoreEarlier}
+              historyLoading={sessionTimeline.historyLoading}
+              historyTimedOut={sessionTimeline.historyTimedOut}
+              maxOffset={sessionTimeline.maxOffset}
+              unreadCount={sessionTimeline.unreadCount}
+              pendingChatSend={pendingChatSend}
+              onMarkSeen={(offset) => markSeen(selected.daemon_id, selected.session_id, offset)}
               onLoadEarlier={sessionTimeline.loadEarlier}
               onSendChat={(content) => hub.sendChat(selected.daemon_id, selected.session_id, content)}
               onOpenPermission={() => permissionQueue.openSurface()}
               onBack={() => setSelected(null)}
+              onDismissPendingCommand={dismissPendingCommand}
             />
           ) : undefined
         }
@@ -175,8 +226,10 @@ export function RealApp() {
           daemons={daemonsHook.daemons}
           onRenameDaemon={daemonsHook.rename}
           onRevokeDaemon={daemonsHook.revoke}
-          pushPrefs={pushHook.prefs}
-          onTogglePref={pushHook.toggle}
+          pushState={pushHook.state}
+          onSetSub={pushHook.setSub}
+          onResetDaemon={pushHook.resetDaemon}
+          onSetDnd={pushHook.setDnd}
           pairing={pairingHook.state}
           onGenerateCode={pairingHook.generate}
           onCancelPairing={pairingHook.cancel}
@@ -200,15 +253,10 @@ export function RealApp() {
             queueIndex={permissionQueue.queueIndex}
             queueSize={permissionQueue.queueSize}
             device={device}
-            onAllow={() => {
-              sendPermissionReply(active, "allow");
-              permissionQueue.advance();
-            }}
-            onDeny={() => {
-              sendPermissionReply(active, "deny");
-              permissionQueue.advance();
-            }}
+            onAllow={() => sendPermissionReply(active, "allow")}
+            onDeny={() => sendPermissionReply(active, "deny")}
             onClose={permissionQueue.closeSurface}
+            pendingReply={pendingReply}
           />
         );
       })()}

@@ -5,18 +5,11 @@ import { cn } from "../lib/utils";
 import type { Device } from "../hooks/useMediaQuery";
 import type { Resource } from "../hooks/types";
 import type { DaemonItem } from "../hooks/useDaemons";
-import type { PushPreferences } from "../hooks/usePushPrefs";
-import { isPushPrefEnabled } from "../hooks/usePushPrefs";
+import type { PushTopicsState, DndSettings } from "../hooks/usePushTopics";
+import { resolveSubscription } from "../hooks/usePushTopics";
 import type { PairingState } from "../hooks/usePairing";
 
 export type Appearance = "system" | "light" | "dark";
-
-const PUSH_TOGGLES: ReadonlyArray<{ key: keyof PushPreferences; label: string }> = [
-  { key: "permission", label: "Permission alerts" },
-  { key: "offline", label: "Daemon offline (≥ 30s)" },
-  { key: "completed", label: "Claude finished a turn" },
-  { key: "idle", label: "Claude is idle" },
-];
 
 export interface SettingsDrawerProps {
   device: Device;
@@ -24,8 +17,10 @@ export interface SettingsDrawerProps {
   daemons: Resource<DaemonItem[]>;
   onRenameDaemon: (daemon_id: string, display_name: string) => void;
   onRevokeDaemon: (daemon_id: string) => void;
-  pushPrefs: Resource<PushPreferences>;
-  onTogglePref: (key: keyof PushPreferences) => void;
+  pushState: Resource<PushTopicsState>;
+  onSetSub: (topic_id: string, daemon_id: string | null, enabled: boolean) => Promise<void>;
+  onResetDaemon: (daemon_id: string) => Promise<void>;
+  onSetDnd: (dnd: DndSettings) => Promise<void>;
   pairing: PairingState;
   onGenerateCode: () => void;
   onCancelPairing: () => void;
@@ -40,7 +35,8 @@ export interface SettingsDrawerProps {
 export function SettingsDrawer(props: SettingsDrawerProps) {
   const {
     device, account, daemons, onRenameDaemon, onRevokeDaemon,
-    pushPrefs, onTogglePref, pairing, onGenerateCode, onCancelPairing,
+    pushState, onSetSub, onResetDaemon, onSetDnd,
+    pairing, onGenerateCode, onCancelPairing,
     appearance, onSetAppearance,
     daemonActionError, pushActionError, pairingError,
     onClose,
@@ -98,15 +94,14 @@ export function SettingsDrawer(props: SettingsDrawerProps) {
 
           <Section title="Notifications">
             <ResourceView
-              resource={pushPrefs}
-              render={(prefs) => PUSH_TOGGLES.map(({ key, label }) => (
-                <ToggleRow
-                  key={key}
-                  enabled={isPushPrefEnabled(prefs, key)}
-                  label={label}
-                  onToggle={() => onTogglePref(key)}
-                />
-              ))}
+              resource={pushState}
+              render={(s) => (
+                <>
+                  <DndBlock dnd={s.dnd} onSave={onSetDnd} />
+                  <DefaultsBlock state={s} onSetSub={onSetSub} />
+                  <PerDaemonBlock state={s} daemons={daemons} onSetSub={onSetSub} onResetDaemon={onResetDaemon} />
+                </>
+              )}
             />
             {pushActionError && (
               <p className="text-danger mt-2 text-sm">{pushActionError}</p>
@@ -347,4 +342,156 @@ function copyCommand(cmd: string) {
   if (typeof navigator !== "undefined" && navigator.clipboard) {
     navigator.clipboard.writeText(cmd).catch(() => {});
   }
+}
+
+function DndBlock({ dnd, onSave }: { dnd: DndSettings; onSave: (d: DndSettings) => Promise<void> }) {
+  const [draft, setDraft] = useState<DndSettings>(dnd);
+  const tz = draft.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  return (
+    <div className="rounded-card border-border bg-surface mb-3 border p-3">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium">Do not disturb</span>
+        <button
+          className={cn(
+            "rounded-full px-2 py-1 text-xs font-semibold",
+            draft.enabled ? "bg-success-subtle text-success" : "bg-muted text-muted-foreground",
+          )}
+          onClick={() => {
+            const next = {
+              ...draft,
+              enabled: !draft.enabled,
+              start_hh_mm: draft.start_hh_mm ?? "22:00",
+              end_hh_mm: draft.end_hh_mm ?? "07:00",
+              timezone: draft.timezone ?? tz,
+            };
+            setDraft(next);
+            void onSave(next);
+          }}
+          type="button"
+        >
+          {draft.enabled ? "On" : "Off"}
+        </button>
+      </div>
+      {draft.enabled && (
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          <label className="text-xs">Start
+            <input
+              type="time"
+              className="border-border bg-muted mt-1 w-full rounded-md border px-2 py-1 text-sm"
+              value={draft.start_hh_mm ?? ""}
+              onChange={(e) => setDraft({ ...draft, start_hh_mm: e.target.value })}
+            />
+          </label>
+          <label className="text-xs">End
+            <input
+              type="time"
+              className="border-border bg-muted mt-1 w-full rounded-md border px-2 py-1 text-sm"
+              value={draft.end_hh_mm ?? ""}
+              onChange={(e) => setDraft({ ...draft, end_hh_mm: e.target.value })}
+            />
+          </label>
+          <label className="text-xs">Timezone
+            <input
+              type="text"
+              className="border-border bg-muted mt-1 w-full rounded-md border px-2 py-1 text-xs font-mono"
+              value={draft.timezone ?? tz}
+              onChange={(e) => setDraft({ ...draft, timezone: e.target.value })}
+            />
+          </label>
+          <Button size="sm" className="col-span-3" onClick={() => void onSave(draft)}>Save DND</Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DefaultsBlock({
+  state, onSetSub,
+}: {
+  state: PushTopicsState;
+  onSetSub: (topic_id: string, daemon_id: string | null, enabled: boolean) => Promise<void>;
+}) {
+  return (
+    <div className="mb-3">
+      <p className="text-muted-foreground mb-2 text-xs uppercase">Defaults</p>
+      {state.topics.map((t) => {
+        const enabled = resolveSubscription(state.topics, state.subscriptions, t.id, "");
+        return (
+          <ToggleRow
+            key={t.id}
+            enabled={enabled}
+            label={t.title}
+            onToggle={() => void onSetSub(t.id, null, !enabled)}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function PerDaemonBlock({
+  state, daemons, onSetSub, onResetDaemon,
+}: {
+  state: PushTopicsState;
+  daemons: Resource<DaemonItem[]>;
+  onSetSub: (topic_id: string, daemon_id: string | null, enabled: boolean) => Promise<void>;
+  onResetDaemon: (daemon_id: string) => Promise<void>;
+}) {
+  if (daemons.status !== "ready" || daemons.data.length === 0) return null;
+  return (
+    <div>
+      <p className="text-muted-foreground mb-2 text-xs uppercase">Per-daemon overrides</p>
+      {daemons.data.map((d) => (
+        <DaemonOverrideRow
+          key={d.daemon_id}
+          daemon={d}
+          state={state}
+          onSetSub={onSetSub}
+          onResetDaemon={onResetDaemon}
+        />
+      ))}
+    </div>
+  );
+}
+
+function DaemonOverrideRow({
+  daemon, state, onSetSub, onResetDaemon,
+}: {
+  daemon: DaemonItem;
+  state: PushTopicsState;
+  onSetSub: (topic_id: string, daemon_id: string | null, enabled: boolean) => Promise<void>;
+  onResetDaemon: (daemon_id: string) => Promise<void>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const hasOverrides = state.subscriptions.some((s) => s.daemon_id === daemon.daemon_id);
+
+  return (
+    <div className="rounded-card border-border bg-surface mb-2 border p-3">
+      <div className="flex items-center justify-between">
+        <span className="truncate text-sm font-medium">{daemon.display_name ?? daemon.daemon_id}</span>
+        <Button size="sm" variant="secondary" onClick={() => setExpanded((v) => !v)}>
+          {expanded ? "Collapse" : `Override${hasOverrides ? " ✓" : ""}`}
+        </Button>
+      </div>
+      {expanded && (
+        <div className="mt-3">
+          {state.topics.map((t) => {
+            const enabled = resolveSubscription(state.topics, state.subscriptions, t.id, daemon.daemon_id);
+            return (
+              <ToggleRow
+                key={t.id}
+                enabled={enabled}
+                label={t.title}
+                onToggle={() => void onSetSub(t.id, daemon.daemon_id, !enabled)}
+              />
+            );
+          })}
+          <Button size="sm" variant="secondary" onClick={() => void onResetDaemon(daemon.daemon_id)}>
+            Reset to defaults
+          </Button>
+        </div>
+      )}
+    </div>
+  );
 }

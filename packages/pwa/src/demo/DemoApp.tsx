@@ -29,31 +29,29 @@ import { StatusIcon } from "../screens/primitives/StatusIcon";
 import { CatalogCard } from "../screens/timeline/cards/CatalogCard";
 import { CatalogHeader } from "../screens/timeline/cards/CatalogHeader";
 import {
-  AssistantBubble,
-  BashToolCard,
-  BatchSummaryCard,
-  FileEditCard,
-  PermissionInlineCard,
-  PermissionResolvedCard,
-  RawJsonCard,
-  ReadSearchCard,
-  ReasoningCard,
-  SubagentCard,
-  SystemNoticeCard,
-  ToolFailureCard,
-  ToolResultLongCard,
-  ToolResultShortCard,
+  AssistantBubbleLive,
   UserBubble,
-  UserBubbleSurface,
+  UserBubbleLive,
 } from "../screens/timeline/cards";
-import { AssistantBubbleLive } from "../screens/timeline/cards/AssistantBubble";
-import { SessionTimelineItem } from "../screens/timeline/SessionTimelineItem";
+// The demo catalog mirrors live: it builds synthetic RenderItems and pipes
+// them through renderTimelineItem so the catalog never drifts from what the
+// timeline actually renders. Card variants that live no longer renders
+// (Reasoning legacy, BatchSummary, Subagent, SystemNotice, RawJson) are
+// intentionally absent from the catalog.
+import { renderTimelineItem } from "../screens/timeline/renderTimelineItem";
+import type { RenderItem } from "../screens/timeline/types";
 import { EventType } from "@cc-remote/proto";
-import type { TextMessageChunkEvent } from "@cc-remote/proto";
+import type {
+  PwaPermissionRequest,
+  PwaPermissionResolved,
+  TextMessageChunkEvent,
+  ToolCallChunkEvent,
+  ToolCallResultEvent,
+} from "@cc-remote/proto";
 import { SettingsDrawer, type Appearance } from "../screens/SettingsDrawer";
 import type { Resource } from "../hooks/types";
 import type { DaemonItem } from "../hooks/useDaemons";
-import type { PushPreferences } from "../hooks/usePushPrefs";
+import type { PushTopicsState } from "../hooks/usePushTopics";
 import type { PairingState } from "../hooks/usePairing";
 
 type Device = "mobile" | "tablet" | "desktop";
@@ -342,7 +340,10 @@ function DemoShell({
     <div className="overflow-x-auto pb-2">
       <div
         className={cn(
-          "border-border bg-background shadow-sheet mx-auto overflow-hidden rounded-[28px] border",
+          // `transform-gpu` creates a containing block, scoping any
+          // `position:fixed` descendants (e.g., SettingsDrawer overlay) to
+          // this device frame instead of the full viewport.
+          "border-border bg-background shadow-sheet transform-gpu mx-auto overflow-hidden rounded-[28px] border",
           device === "mobile" && "h-[844px] w-[390px]",
           device === "tablet" && "h-[760px] w-[768px]",
           device === "desktop" && "h-[760px] w-[1180px]",
@@ -419,9 +420,18 @@ function Workbench(props: {
       connected: true,
     }],
   };
-  const stubbedPrefs: Resource<PushPreferences> = {
+  const stubbedTopics: Resource<PushTopicsState> = {
     status: "ready",
-    data: { permission: true, offline: true, completed: true, idle: false },
+    data: {
+      topics: [
+        { id: "permission", title: "Permission alerts",  description: "Claude wants to run a tool.", default_enabled: true,  bypass_dnd: true  },
+        { id: "offline",    title: "Daemon offline",     description: "A daemon went offline.",      default_enabled: false, bypass_dnd: false },
+        { id: "completed",  title: "Claude finished a turn", description: "",                        default_enabled: false, bypass_dnd: false },
+        { id: "idle",       title: "Claude is idle",     description: "",                            default_enabled: false, bypass_dnd: false },
+      ],
+      subscriptions: [],
+      dnd: { enabled: false, start_hh_mm: null, end_hh_mm: null, timezone: null },
+    },
   };
   const idlePairing: PairingState = { status: "idle" };
 
@@ -430,16 +440,16 @@ function Workbench(props: {
       <AppHeader device={device} setStep={setStep} />
       <div
         className={cn(
-          "h-[calc(100%-56px)]",
+          "h-[calc(100%-56px)] min-h-0",
           desktop &&
             (showCards
-              ? "grid grid-cols-[72px_minmax(0,1fr)]"
-              : "grid grid-cols-[72px_370px_minmax(0,1fr)]"),
-          tablet && "grid grid-cols-[320px_minmax(0,1fr)]",
+              ? "block"
+              : "grid grid-cols-[72px_370px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)]"),
+          tablet && "grid grid-cols-[320px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)]",
           mobile && "block overflow-y-auto",
         )}
       >
-        {desktop && <DesktopNav setStep={setStep} />}
+        {desktop && !showCards && <DesktopNav setStep={setStep} />}
         {showCards ? (
           <CardSystemPane device={device} setStep={setStep} />
         ) : (
@@ -461,8 +471,10 @@ function Workbench(props: {
           daemons={stubbedDaemons}
           onRenameDaemon={() => {}}
           onRevokeDaemon={() => {}}
-          pushPrefs={stubbedPrefs}
-          onTogglePref={() => {}}
+          pushState={stubbedTopics}
+          onSetSub={async () => {}}
+          onResetDaemon={async () => {}}
+          onSetDnd={async () => {}}
           pairing={idlePairing}
           onGenerateCode={() => {}}
           onCancelPairing={() => {}}
@@ -766,7 +778,7 @@ function SessionPane({
   return (
     <section
       className={cn(
-        "bg-background flex h-full min-w-0 flex-col",
+        "bg-background flex h-full min-h-0 min-w-0 flex-col",
         device === "desktop" && showPermission && "pr-[390px]",
       )}
     >
@@ -821,44 +833,114 @@ function SessionPane({
 }
 
 function SessionExecutionTimeline() {
+  // Fixed mock timestamps — old demo used Date.now() for display, but live
+  // renders from event.timestamp on the AGUIEvent (frame.ts is gone).
+  // Anchor on a round mock value so the bubble clock reads predictably.
+  const t = (mins: number) => new Date(2026, 4, 21, 10, mins).getTime();
+
+  const items: RenderItem[] = [
+    {
+      tag: "agui",
+      id: "demo-user-1",
+      ts: t(20),
+      event: {
+        type: EventType.TEXT_MESSAGE_CHUNK,
+        messageId: "demo-user-1",
+        role: "user",
+        delta:
+          "Add a **password reset** flow using email tokens.\n\n" +
+          "Make sure to:\n\n" +
+          "- store hashed tokens (never plaintext)\n" +
+          "- expire after `15m`\n" +
+          "- rate-limit `/auth/reset` to 5/min/IP",
+        timestamp: t(20),
+      } as TextMessageChunkEvent,
+    },
+    {
+      tag: "agui",
+      id: "demo-asst-1",
+      ts: t(21),
+      event: {
+        type: EventType.TEXT_MESSAGE_CHUNK,
+        messageId: "demo-asst-1",
+        role: "assistant",
+        delta:
+          "## Plan\n\n" +
+          "I'll add the reset flow in three steps:\n\n" +
+          "1. New route `POST /auth/reset` issues a token\n" +
+          "2. Token stored as `bcrypt`-hashed row in `password_resets`\n" +
+          "3. `POST /auth/reset/confirm` consumes the token\n\n" +
+          "```ts\n" +
+          "const token = randomBytes(32).toString('hex');\n" +
+          "await db.passwordResets.insert({ user_id, token_hash: hash(token), expires_at });\n" +
+          "```\n\n" +
+          "Starting with the schema migration first.",
+        timestamp: t(21),
+      } as TextMessageChunkEvent,
+    },
+    // Tool: success (Bash) — shows merged chunk+result card
+    {
+      tag: "tool",
+      id: "demo-tool-bash",
+      ts: t(22),
+      chunk: {
+        type: EventType.TOOL_CALL_CHUNK,
+        toolCallId: "tc_bash_demo",
+        toolCallName: "Bash",
+        delta: "pnpm test auth",
+        timestamp: t(22),
+      } as ToolCallChunkEvent,
+      result: {
+        type: EventType.TOOL_CALL_RESULT,
+        messageId: "tr_bash_demo",
+        toolCallId: "tc_bash_demo",
+        content: "All 42 tests passed",
+        timestamp: t(22),
+      } as ToolCallResultEvent,
+    },
+    // Tool: success with long output — same shape, longer content
+    {
+      tag: "tool",
+      id: "demo-tool-edit",
+      ts: t(23),
+      chunk: {
+        type: EventType.TOOL_CALL_CHUNK,
+        toolCallId: "tc_edit_demo",
+        toolCallName: "Edit",
+        delta:
+          'file_path: "src/routes/auth/reset.ts"\nold_string: "// TODO"\nnew_string: "router.post(\'/reset\', resetHandler);"',
+        timestamp: t(23),
+      } as ToolCallChunkEvent,
+      result: {
+        type: EventType.TOOL_CALL_RESULT,
+        messageId: "tr_edit_demo",
+        toolCallId: "tc_edit_demo",
+        content:
+          "Applied edit to src/routes/auth/reset.ts\n" +
+          "  Lines: 45-68\n" +
+          "  +24 −6\n" +
+          "Saved.\n",
+        timestamp: t(23),
+      } as ToolCallResultEvent,
+    },
+    {
+      tag: "agui",
+      id: "demo-asst-2",
+      ts: t(24),
+      event: {
+        type: EventType.TEXT_MESSAGE_CHUNK,
+        messageId: "demo-asst-2",
+        role: "assistant",
+        delta: "Added reset flow and tests. Ready for review.",
+        timestamp: t(24),
+      } as TextMessageChunkEvent,
+    },
+  ];
+
   return (
     <div className="relative pb-3 pl-8">
       <div className="bg-border absolute top-2 bottom-2 left-3.5 w-px" />
-      <SessionTimelineItem align="end" marker="user">
-        <UserBubbleSurface />
-      </SessionTimelineItem>
-
-      <SessionTimelineItem marker="claude">
-        <AssistantBubble />
-      </SessionTimelineItem>
-
-      <SessionTimelineItem marker="claude">
-        <ReasoningCard />
-      </SessionTimelineItem>
-
-      <SessionTimelineItem marker="tool">
-        <BashToolCard />
-      </SessionTimelineItem>
-
-      <SessionTimelineItem marker="tool">
-        <FileEditCard />
-      </SessionTimelineItem>
-
-      <SessionTimelineItem marker="tool">
-        <ReadSearchCard />
-      </SessionTimelineItem>
-
-      <SessionTimelineItem marker="claude">
-        <AssistantBubbleLive
-          event={{
-            type: EventType.TEXT_MESSAGE_CHUNK,
-            messageId: "demo-live",
-            role: "assistant",
-            delta: "Added reset flow and tests. Ready for review.",
-          } as TextMessageChunkEvent}
-          ts={Date.now()}
-        />
-      </SessionTimelineItem>
+      {items.map((item) => renderTimelineItem(item))}
     </div>
   );
 }
@@ -926,6 +1008,57 @@ function CardSystemPane({
 }
 
 function MiniTimelinePreview() {
+  const t = (mins: number) => new Date(2026, 4, 21, 10, mins).getTime();
+  const previewItems: RenderItem[] = [
+    {
+      tag: "agui",
+      id: "mp-user",
+      ts: t(20),
+      event: {
+        type: EventType.TEXT_MESSAGE_CHUNK,
+        messageId: "mp-user",
+        role: "user",
+        delta: "Add a `password reset` flow using **email tokens**.",
+        timestamp: t(20),
+      } as TextMessageChunkEvent,
+    },
+    {
+      tag: "agui",
+      id: "mp-asst",
+      ts: t(21),
+      event: {
+        type: EventType.TEXT_MESSAGE_CHUNK,
+        messageId: "mp-asst",
+        role: "assistant",
+        delta:
+          "## Plan\n\n" +
+          "1. Issue a hashed token\n" +
+          "2. Store with `expires_at`\n" +
+          "3. Confirm endpoint consumes it",
+        timestamp: t(21),
+      } as TextMessageChunkEvent,
+    },
+    {
+      tag: "tool",
+      id: "mp-tool",
+      ts: t(22),
+      chunk: {
+        type: EventType.TOOL_CALL_CHUNK,
+        toolCallId: "mp_tc",
+        toolCallName: "Bash",
+        delta: "pnpm test auth",
+        timestamp: t(22),
+      } as ToolCallChunkEvent,
+      result: {
+        type: EventType.TOOL_CALL_RESULT,
+        messageId: "mp_tr",
+        toolCallId: "mp_tc",
+        content: "All 42 tests passed",
+        timestamp: t(22),
+      } as ToolCallResultEvent,
+    },
+  ];
+
   return (
     <aside className="border-border bg-surface shadow-card rounded-[22px] border">
       <div className="border-border flex h-20 items-center justify-between border-b px-4">
@@ -940,12 +1073,9 @@ function MiniTimelinePreview() {
         </div>
         <MoreHorizontal className="text-muted-foreground size-4" />
       </div>
-      <div className="space-y-3 p-4">
-        <UserBubble />
-        <AssistantBubble />
-        <BashToolCard />
-        <FileEditCard />
-        <ReadSearchCard />
+      <div className="relative space-y-3 p-4 pl-10">
+        <div className="bg-border absolute top-6 bottom-6 left-7 w-px" />
+        {previewItems.map((item) => renderTimelineItem(item))}
       </div>
       <div className="border-border border-t p-4">
         <div className="border-border bg-muted flex h-11 items-center justify-between rounded-md border px-3">
@@ -958,72 +1088,288 @@ function MiniTimelinePreview() {
 }
 
 function CardCatalog({ device }: { device: Device }) {
+  const ts = new Date(2026, 4, 21, 10, 25).getTime();
+
+  const userBubbleMd: TextMessageChunkEvent = {
+    type: EventType.TEXT_MESSAGE_CHUNK,
+    messageId: "cat-user",
+    role: "user",
+    delta:
+      "Please add a **password reset** flow using `email tokens`. " +
+      "See `auth/spec.md` for the full requirements.",
+    timestamp: ts,
+  } as TextMessageChunkEvent;
+
+  const assistantBubbleMd: TextMessageChunkEvent = {
+    type: EventType.TEXT_MESSAGE_CHUNK,
+    messageId: "cat-asst",
+    role: "assistant",
+    delta:
+      "## Plan\n\n" +
+      "I'll add the reset flow in three steps:\n\n" +
+      "- New route `POST /auth/reset` issues a hashed token\n" +
+      "- Token rows expire after `15m`\n" +
+      "- Rate-limit `/auth/reset` to **5/min/IP**\n\n" +
+      "```ts\n" +
+      "const token = randomBytes(32).toString('hex');\n" +
+      "```\n\n" +
+      "See [the spec](https://example.com/spec) for context.",
+    timestamp: ts,
+  } as TextMessageChunkEvent;
+
+  // Queued command: when the daemon is busy, the PWA's outgoing command is
+  // stored as an `attachment.type === "queued_command"` and surfaces in the
+  // timeline as a normal user TEXT_MESSAGE_CHUNK whose delta is the prompt
+  // body (the `<channel>` envelope already stripped by the adapter).
+  const queuedCommandBubble: TextMessageChunkEvent = {
+    type: EventType.TEXT_MESSAGE_CHUNK,
+    messageId: "cat-queued",
+    role: "user",
+    delta: "Run `pnpm test` once you finish the migration.",
+    timestamp: ts,
+  } as TextMessageChunkEvent;
+
+  // Tool: Active — chunk only, no result yet.
+  const toolActive: RenderItem = {
+    tag: "tool",
+    id: "cat-tool-active",
+    ts,
+    chunk: {
+      type: EventType.TOOL_CALL_CHUNK,
+      toolCallId: "cat_active",
+      toolCallName: "Bash",
+      delta: "pnpm test auth",
+      timestamp: ts,
+    } as ToolCallChunkEvent,
+  };
+
+  // Tool: Success short — single line that's small enough to inline.
+  const toolSuccessShort: RenderItem = {
+    tag: "tool",
+    id: "cat-tool-short",
+    ts,
+    chunk: {
+      type: EventType.TOOL_CALL_CHUNK,
+      toolCallId: "cat_short",
+      toolCallName: "Bash",
+      delta: "pnpm test auth",
+      timestamp: ts,
+    } as ToolCallChunkEvent,
+    result: {
+      type: EventType.TOOL_CALL_RESULT,
+      messageId: "cat_short_r",
+      toolCallId: "cat_short",
+      content: "All 42 tests passed",
+      timestamp: ts,
+    } as ToolCallResultEvent,
+  };
+
+  // Tool: Success long — multi-line output that gets the View Output toggle.
+  const toolSuccessLong: RenderItem = {
+    tag: "tool",
+    id: "cat-tool-long",
+    ts,
+    chunk: {
+      type: EventType.TOOL_CALL_CHUNK,
+      toolCallId: "cat_long",
+      toolCallName: "Edit",
+      delta:
+        'file_path: "src/routes/auth/reset.ts"\nold_string: "// TODO"\nnew_string: "router.post(\'/reset\', resetHandler);"',
+      timestamp: ts,
+    } as ToolCallChunkEvent,
+    result: {
+      type: EventType.TOOL_CALL_RESULT,
+      messageId: "cat_long_r",
+      toolCallId: "cat_long",
+      content:
+        "Applied edit to src/routes/auth/reset.ts\n" +
+        "  Lines: 45-68\n" +
+        "  +24 −6\n" +
+        "  Saved.\n" +
+        "Linting...\n" +
+        "  prettier: OK\n" +
+        "  eslint: OK\n",
+      timestamp: ts,
+    } as ToolCallResultEvent,
+  };
+
+  // Tool: Failed — danger tone, expandable error output. is_error on rawEvent
+  // is the authoritative signal per spec decision #7.
+  const toolFailed: RenderItem = {
+    tag: "tool",
+    id: "cat-tool-failed",
+    ts,
+    chunk: {
+      type: EventType.TOOL_CALL_CHUNK,
+      toolCallId: "cat_failed",
+      toolCallName: "Bash",
+      delta: "rm -rf node_modules",
+      timestamp: ts,
+    } as ToolCallChunkEvent,
+    result: {
+      type: EventType.TOOL_CALL_RESULT,
+      messageId: "cat_failed_r",
+      toolCallId: "cat_failed",
+      content:
+        "Permission denied: node_modules\nOperation not permitted\nexit code 1",
+      timestamp: ts,
+      rawEvent: { is_error: true },
+    } as ToolCallResultEvent,
+  };
+
+  // Tool icon variants — pickStrongToolIcon dispatches on toolCallName:
+  //   Edit/Write/MultiEdit -> Pencil, Read -> FileText, unknown -> no icon.
+  // Bash already shown above (Terminal icon) and Edit shown via toolSuccessLong.
+  const toolReadIcon: RenderItem = {
+    tag: "tool",
+    id: "cat-tool-read",
+    ts,
+    chunk: {
+      type: EventType.TOOL_CALL_CHUNK,
+      toolCallId: "cat_read",
+      toolCallName: "Read",
+      delta: 'file_path: "src/lib/token.ts"',
+      timestamp: ts,
+    } as ToolCallChunkEvent,
+    result: {
+      type: EventType.TOOL_CALL_RESULT,
+      messageId: "cat_read_r",
+      toolCallId: "cat_read",
+      content: "export const TOKEN_TTL_MS = 15 * 60 * 1000;",
+      timestamp: ts,
+    } as ToolCallResultEvent,
+  };
+
+  const toolUnknownIcon: RenderItem = {
+    tag: "tool",
+    id: "cat-tool-glob",
+    ts,
+    chunk: {
+      type: EventType.TOOL_CALL_CHUNK,
+      toolCallId: "cat_glob",
+      toolCallName: "Glob",
+      delta: 'pattern: "src/**/*.ts"',
+      timestamp: ts,
+    } as ToolCallChunkEvent,
+    result: {
+      type: EventType.TOOL_CALL_RESULT,
+      messageId: "cat_glob_r",
+      toolCallId: "cat_glob",
+      content: "src/lib/token.ts\nsrc/routes/auth/reset.ts",
+      timestamp: ts,
+    } as ToolCallResultEvent,
+  };
+
+  // Permission inline (pending) — feeds renderTimelineItem so the catalog
+  // matches the actual live card.
+  const permPending: RenderItem = {
+    tag: "permission-inline",
+    id: "cat-perm-pending",
+    ts,
+    pending: {
+      type: "permission_request",
+      daemon_id: "demo",
+      session_id: "demo",
+      request_id: "req_demo",
+      tool: "Bash",
+      args_summary: "rm -rf node_modules",
+      expires_at: ts + 60_000,
+    } as PwaPermissionRequest,
+  };
+
+  const permResolved = (
+    decision: PwaPermissionResolved["decision"],
+    suffix: string,
+  ): RenderItem => ({
+    tag: "permission-resolved",
+    id: `cat-perm-${suffix}`,
+    ts,
+    resolved: {
+      type: "permission_resolved",
+      daemon_id: "demo",
+      session_id: "demo",
+      request_id: `req_${suffix}`,
+      decision,
+      decided_via: "demo",
+    } as PwaPermissionResolved,
+  });
+
   return (
     <section>
       <div className="mb-3 flex items-center justify-between gap-3">
         <h3 className="text-sm font-semibold">Session Timeline Card Components</h3>
-        <p className="text-muted-foreground text-xs">17 card types</p>
+        <p className="text-muted-foreground text-xs">live-driven catalog</p>
       </div>
       <div className="space-y-3">
         <CatalogGroup device={device}>
-          <CatalogTile number={1} title="User Bubble (Right)">
+          <CatalogTile number={1} title="User Bubble (markdown)">
+            <UserBubbleLive event={userBubbleMd} ts={ts} />
+          </CatalogTile>
+          <CatalogTile number={2} title="Assistant Bubble (markdown)">
+            <AssistantBubbleLive event={assistantBubbleMd} ts={ts} />
+          </CatalogTile>
+          <CatalogTile
+            number={3}
+            title="Queued Command (busy enqueue → user bubble)"
+          >
+            <UserBubbleLive event={queuedCommandBubble} ts={ts} />
+          </CatalogTile>
+          <CatalogTile number={4} title="Static UserBubble (legacy preview)">
             <UserBubble />
           </CatalogTile>
-          <CatalogTile number={2} title="Assistant Bubble (Left)">
-            <AssistantBubble />
+        </CatalogGroup>
+        <CatalogGroup device={device}>
+          <CatalogTile number={5} title="Tool — Active (Bash, Terminal icon)">
+            {renderTimelineItem(toolActive)}
           </CatalogTile>
-          <CatalogTile number={3} title="Reasoning (Collapsed)">
-            <ReasoningCard />
+          <CatalogTile number={6} title="Tool — Success short (Bash)">
+            {renderTimelineItem(toolSuccessShort)}
           </CatalogTile>
-          <CatalogTile number={4} title="Bash Tool">
-            <BashToolCard />
+          <CatalogTile number={7} title="Tool — Success long (Edit, Pencil icon)">
+            {renderTimelineItem(toolSuccessLong)}
+          </CatalogTile>
+          <CatalogTile number={8} title="Tool — Failed (Bash)">
+            {renderTimelineItem(toolFailed)}
+          </CatalogTile>
+          <CatalogTile number={9} title="Tool — Read (FileText icon)">
+            {renderTimelineItem(toolReadIcon)}
+          </CatalogTile>
+          <CatalogTile number={10} title="Tool — Unknown name (no icon, e.g. Glob)">
+            {renderTimelineItem(toolUnknownIcon)}
           </CatalogTile>
         </CatalogGroup>
         <CatalogGroup device={device}>
-          <CatalogTile number={5} title="File Edit">
-            <FileEditCard />
+          <CatalogTile number={11} title="Permission Request (Inline)">
+            {renderTimelineItem(permPending)}
           </CatalogTile>
-          <CatalogTile number={6} title="Read / Grep / Glob">
-            <ReadSearchCard />
-          </CatalogTile>
-          <CatalogTile number={7} title="Tool Result (Short Success)">
-            <ToolResultShortCard />
-          </CatalogTile>
-          <CatalogTile number={8} title="Tool Result (Long Output)">
-            <ToolResultLongCard />
-          </CatalogTile>
-        </CatalogGroup>
-        <CatalogGroup device={device}>
-          <CatalogTile number={9} title="Tool Failure / Error">
-            <ToolFailureCard />
-          </CatalogTile>
-          <CatalogTile number={10} title="Permission Request (Inline)">
-            <PermissionInlineCard />
-          </CatalogTile>
-          <CatalogTile number={11} title="Permission Review (Card)">
+          <CatalogTile number={12} title="Permission Review (Card)">
             <CatalogPermissionReview />
           </CatalogTile>
-          <CatalogTile number={12} title="Permission Resolved (Inline)">
-            <PermissionResolvedCard />
+          <CatalogTile number={13} title="Permission Resolved — allow (success)">
+            {renderTimelineItem(permResolved("allow", "allow"))}
+          </CatalogTile>
+          <CatalogTile number={14} title="Permission Resolved — deny (danger)">
+            {renderTimelineItem(permResolved("deny", "deny"))}
+          </CatalogTile>
+          <CatalogTile number={15} title="Permission Resolved — expired (danger)">
+            {renderTimelineItem(permResolved("expired", "expired"))}
+          </CatalogTile>
+          <CatalogTile number={16} title="Permission Resolved — terminal (danger)">
+            {renderTimelineItem(permResolved("terminal", "terminal"))}
           </CatalogTile>
         </CatalogGroup>
         <CatalogGroup device={device}>
-          <CatalogTile number={13} title="Batch Summary">
-            <BatchSummaryCard />
-          </CatalogTile>
-          <CatalogTile number={14} title="Subagent Group (Collapsed)">
-            <SubagentCard />
-          </CatalogTile>
-          <CatalogTile number={15} title="Subagent Group (Expanded)">
-            <SubagentCard expanded />
-          </CatalogTile>
-          <CatalogTile number={16} title="System Metadata / Notice">
-            <SystemNoticeCard />
-          </CatalogTile>
-        </CatalogGroup>
-        <CatalogGroup device={device}>
-          <CatalogTile number={17} title="Unknown / Raw JSON">
-            <RawJsonCard />
+          <CatalogTile number={17} title="Run Error">
+            {renderTimelineItem({
+              tag: "agui",
+              id: "cat-runerror",
+              ts,
+              event: {
+                type: EventType.RUN_ERROR,
+                message: "Daemon lost connection to Claude Code (exit 1)",
+                timestamp: ts,
+              } as never,
+            })}
           </CatalogTile>
         </CatalogGroup>
       </div>
@@ -1041,10 +1387,11 @@ function CatalogGroup({
   return (
     <div
       className={cn(
-        "border-border bg-surface rounded-card grid gap-3 border p-3",
-        device === "mobile" && "grid-cols-1",
-        device === "tablet" && "grid-cols-2",
-        device === "desktop" && "grid-cols-4",
+        // Single column at all device sizes — catalog tiles host real
+        // timeline cards (tool args/output, permission detail, etc.) which
+        // need ~600px to render naturally. Multi-column squeezed them past
+        // legibility on tablet/desktop.
+        "border-border bg-surface rounded-card mx-auto grid w-full max-w-[640px] grid-cols-1 gap-3 border p-3",
       )}
     >
       {children}
@@ -1140,14 +1487,14 @@ function PermissionSurface({
 
   if (device === "desktop") {
     return (
-      <aside className="border-border bg-elevated shadow-sheet absolute top-14 right-0 bottom-0 w-[390px] border-l p-4">
+      <aside className="border-border bg-elevated shadow-sheet absolute top-14 right-0 bottom-0 z-40 w-[390px] border-l p-4">
         {card}
       </aside>
     );
   }
 
   return (
-    <div className="bg-overlay absolute inset-0 p-4">
+    <div className="bg-overlay absolute inset-0 z-40 p-4">
       <div
         className={cn(
           "bg-elevated shadow-sheet mx-auto",
