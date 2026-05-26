@@ -15,6 +15,7 @@ import { jsonlPath } from "./jsonl-paths.ts";
 import { bindJsonl } from "./jsonl-bind.ts";
 import { readHistory } from "./jsonl-history.ts";
 import { scanInventory } from "./slash-inventory.ts";
+import { handleCliCommand } from "./cli-command.ts";
 import { startWatcher, type WatcherHandle } from "./jsonl-watcher.ts";
 import { openDb } from "./db.ts";
 import { recordRequest, resolveRequest } from "./repos/permissions.ts";
@@ -294,6 +295,17 @@ const hub = startHubClient({
       handleHubChatSend(frame, {
         sessionToClient,
         replyTo: (client, out) => sockServer.replyTo(client, out),
+      });
+    }
+    else if (frame.type === "cli_command") {
+      handleCliCommand(frame, {
+        lookupPane: (id) => {
+          const sn = sessions.get(id);
+          if (!sn) return null;
+          return { tmux_pane: sn.tmux_pane, tmux_session: sn.tmux_session };
+        },
+        spawn: (cmd, args) => { childSpawn(cmd, args, { stdio: "ignore" }); },
+        log: (m) => { process.stderr.write(`daemon: ${m}\n`); },
       });
     }
   },
