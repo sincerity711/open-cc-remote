@@ -9,6 +9,18 @@ import type {
   PwaChatBroadcast,
   HubChatErrorBroadcast,
   PluginChatOut,
+  DaemonStartSessionRejected,
+  PwaStartSessionRejected,
+  HubToDaemonStartSession,
+  PwaToHubStartSession,
+  SessionSnapshot,
+  DaemonSessionOpenFrame,
+  PwaSessionOpenFrame,
+  DaemonSlashInventory,
+  PwaSlashInventory,
+  PwaToHubCliCommand,
+  HubToDaemonCliCommand,
+  SlashEntry,
 } from "../src/frames.ts";
 
 // ─── PwaToHubChatSend ─────────────────────────────────────────────────
@@ -131,5 +143,204 @@ test("PluginChatOut narrows in DaemonToHub union", () => {
   expect(parsed.type).toBe("chat_out");
   if (parsed.type === "chat_out") {
     expect(parsed.content).toBe("from claude");
+  }
+});
+
+// ─── start_session_rejected ───────────────────────────────────────────
+test("DaemonStartSessionRejected narrows in DaemonToHub", () => {
+  const f: DaemonStartSessionRejected = {
+    type: "start_session_rejected",
+    request_id: "rs-1",
+    cwd: "/missing",
+    reason: "cwd_not_allowed",
+    message: "cwd /missing not in allowed_cwd_prefix",
+  };
+  const parsed = JSON.parse(JSON.stringify(f)) as DaemonToHub;
+  expect(parsed.type).toBe("start_session_rejected");
+  if (parsed.type === "start_session_rejected") {
+    expect(parsed.reason).toBe("cwd_not_allowed");
+    expect(parsed.request_id).toBe("rs-1");
+  }
+});
+
+test("PwaStartSessionRejected narrows in HubToPwa", () => {
+  const f: PwaStartSessionRejected = {
+    type: "start_session_rejected",
+    daemon_id: "d1",
+    request_id: null,
+    cwd: "/x",
+    reason: "spawn_command_unset",
+    message: "spawn_command not configured",
+  };
+  const parsed = JSON.parse(JSON.stringify(f)) as HubToPwa;
+  expect(parsed.type).toBe("start_session_rejected");
+  if (parsed.type === "start_session_rejected") {
+    expect(parsed.daemon_id).toBe("d1");
+    expect(parsed.reason).toBe("spawn_command_unset");
+  }
+});
+
+test("PwaToHubStartSession allows optional request_id; HubToDaemonStartSession echoes", () => {
+  const a: PwaToHubStartSession = {
+    type: "start_session",
+    daemon_id: "d1",
+    cwd: "/work",
+    request_id: "abc",
+  };
+  expect(a.request_id).toBe("abc");
+  const b: HubToDaemonStartSession = {
+    type: "start_session",
+    cwd: "/work",
+    request_id: "abc",
+  };
+  const parsed = JSON.parse(JSON.stringify(b)) as HubToDaemon;
+  if (parsed.type === "start_session") {
+    expect(parsed.request_id).toBe("abc");
+  }
+});
+
+// ─── SessionSnapshot.claude_session_id (item #7) ──────────────────────
+test("SessionSnapshot accepts claude_session_id as string OR null", () => {
+  const fresh: SessionSnapshot = {
+    session_id: "s1", claude_session_id: null, tmux_session: null, tmux_pane: null,
+    cwd: "/x", model: null, pid: 1, started_at: 1, claude_client_version: "v",
+    plugin_version: "v", state: "idle",
+  };
+  const bound: SessionSnapshot = { ...fresh, claude_session_id: "uuid-claude" };
+  expect(fresh.claude_session_id).toBeNull();
+  expect(bound.claude_session_id).toBe("uuid-claude");
+});
+
+// ─── client_message_id correlation (Task 1) ───────────────────────────
+test("PwaToHubChatSend carries optional client_message_id", () => {
+  const f: PwaToHubChatSend = {
+    type: "chat_send",
+    daemon_id: "d", session_id: "s",
+    content: "hi",
+    client_message_id: "cm-1",
+  };
+  expect(f.client_message_id).toBe("cm-1");
+});
+
+test("PwaChatBroadcast preserves client_message_id round-trip", () => {
+  const f: PwaChatBroadcast = {
+    type: "chat",
+    daemon_id: "d", session_id: "s",
+    message_id: "m-1",
+    from: "pwa",
+    user: "alice",
+    content: "hi",
+    reply_to: null,
+    ts: 0,
+    client_message_id: "cm-1",
+  };
+  expect(f.client_message_id).toBe("cm-1");
+});
+
+test("HubChatErrorBroadcast preserves client_message_id round-trip", () => {
+  const f: HubChatErrorBroadcast = {
+    type: "chat_error",
+    daemon_id: "d", session_id: "s",
+    reason: "daemon_offline",
+    client_message_id: "cm-1",
+  };
+  expect(f.client_message_id).toBe("cm-1");
+});
+
+// ─── request_id on session_open (Task 2) ──────────────────────────────
+
+test("DaemonSessionOpenFrame carries optional request_id", () => {
+  const f: DaemonSessionOpenFrame = {
+    type: "session_open",
+    session: {
+      session_id: "s", claude_session_id: null,
+      tmux_session: null, tmux_pane: null,
+      cwd: "/x", model: null, pid: 1,
+      started_at: 0, claude_client_version: "v",
+      plugin_version: "v", state: "idle",
+    },
+    request_id: "req-1",
+  };
+  expect(f.request_id).toBe("req-1");
+});
+
+test("PwaSessionOpenFrame carries optional request_id", () => {
+  const f: PwaSessionOpenFrame = {
+    type: "session_open",
+    daemon_id: "d",
+    session: {
+      session_id: "s", claude_session_id: null,
+      tmux_session: null, tmux_pane: null,
+      cwd: "/x", model: null, pid: 1,
+      started_at: 0, claude_client_version: "v",
+      plugin_version: "v", state: "idle",
+    },
+    request_id: "req-1",
+  };
+  expect(f.request_id).toBe("req-1");
+});
+
+// ─── slash_inventory + cli_command (Task 1 of slash-input-helper) ─────
+
+test("DaemonSlashInventory round-trips through JSON", () => {
+  const entry: SlashEntry = {
+    id: "skill:brainstorming",
+    name: "/brainstorming",
+    description: "Turn an idea into a design",
+    source: "skill",
+  };
+  const f: DaemonSlashInventory = {
+    type: "slash_inventory",
+    session_id: "s1",
+    entries: [entry],
+  };
+  const parsed = JSON.parse(JSON.stringify(f)) as DaemonToHub;
+  expect(parsed.type).toBe("slash_inventory");
+  if (parsed.type === "slash_inventory") {
+    expect(parsed.entries).toHaveLength(1);
+    expect(parsed.entries[0]!.source).toBe("skill");
+    expect(parsed.entries[0]!.id).toBe("skill:brainstorming");
+  }
+});
+
+test("PwaSlashInventory carries daemon_id", () => {
+  const f: PwaSlashInventory = {
+    type: "slash_inventory",
+    daemon_id: "d-1",
+    session_id: "s1",
+    entries: [],
+  };
+  const parsed = JSON.parse(JSON.stringify(f)) as HubToPwa;
+  expect(parsed.type).toBe("slash_inventory");
+  if (parsed.type === "slash_inventory") {
+    expect(parsed.daemon_id).toBe("d-1");
+  }
+});
+
+test("PwaToHubCliCommand round-trips with verbatim text", () => {
+  const f: PwaToHubCliCommand = {
+    type: "cli_command",
+    daemon_id: "d-1",
+    session_id: "s1",
+    text: "/brainstorming todo app",
+  };
+  const parsed = JSON.parse(JSON.stringify(f)) as PwaToHub;
+  expect(parsed.type).toBe("cli_command");
+  if (parsed.type === "cli_command") {
+    expect(parsed.text).toBe("/brainstorming todo app");
+  }
+});
+
+test("HubToDaemonCliCommand includes user for audit", () => {
+  const f: HubToDaemonCliCommand = {
+    type: "cli_command",
+    session_id: "s1",
+    text: "/clear",
+    user: "alice@example.com",
+  };
+  const parsed = JSON.parse(JSON.stringify(f)) as HubToDaemon;
+  expect(parsed.type).toBe("cli_command");
+  if (parsed.type === "cli_command") {
+    expect(parsed.user).toBe("alice@example.com");
   }
 });

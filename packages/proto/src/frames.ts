@@ -53,19 +53,37 @@ export type PluginToDaemon =
 export type DaemonToPlugin =
   | { type: "ack"; ref: "register" | "bye" | "chat_out" }
   | { type: "daemon_going_down"; reason: "shutdown" | "restart" }
+  | DaemonBindResolved
   | PluginPermissionReply
   | DaemonChatIn;
+
+/**
+ * Daemon → plugin notification: we resolved the JSONL filename and now know
+ * `claude_session_id`. Plugin caches this so a re-register after daemon
+ * restart can carry the resolved id and let the daemon skip bindJsonl on
+ * the second register (which historically broke when the file's mtime was
+ * outside the bind pre-scan window).
+ */
+export interface DaemonBindResolved {
+  type: "bind_resolved";
+  session_id: string;
+  claude_session_id: string;
+}
 
 // ─── daemon ↔ hub (WSS) ───────────────────────────────────────────────
 
 // Real-time event from a session's JSONL file. Daemon emits these as new lines
 // appear; hub fans them out to PWAs (with daemon_id added). Payload is opaque
 // (the parsed JSONL line) to keep daemon decoupled from Claude Code's schema.
+//
+// No envelope-level `ts`: the frame represents "daemon read a JSONL line"
+// (which is meaningless on JSONL replay after a daemon restart). The actual
+// event time is on each AG-UI event's `timestamp` field — populated by the
+// adapter from the JSONL row's `timestamp` (claude-code's own write time).
 export interface EventFrame {
   type: "event";
   session_id: string;
   jsonl_offset: number;     // byte offset *after* this line in the JSONL file
-  ts: number;               // ms epoch when daemon read it
   payload: AGUIEvent[];     // post-adapter; one source row → N AG-UI events
 }
 
@@ -73,9 +91,25 @@ export interface EventFrameForPwa extends EventFrame {
   daemon_id: string;        // hub adds this when forwarding to PWA
 }
 
+export interface DaemonSessionOpenFrame {
+  type: "session_open";
+  session: SessionSnapshot;
+  /** Present when this session was spawned in response to a PWA start_session
+   *  command; absent for plugin-driven registrations. */
+  request_id?: string;
+}
+
+export interface PwaSessionOpenFrame {
+  type: "session_open";
+  daemon_id: string;
+  session: SessionSnapshot;
+  /** Forwarded verbatim from the daemon. Present for PWA-originated starts. */
+  request_id?: string;
+}
+
 export type DaemonToHub =
   | { type: "hello"; daemon_id: string; epoch: number; hostname: string; agent_version: string; sessions: SessionSnapshot[] }
-  | { type: "session_open"; session: SessionSnapshot }
+  | DaemonSessionOpenFrame
   | { type: "session_close"; session_id: string; reason: string }
   | { type: "pong"; ts: number }
   | EventFrame
@@ -85,7 +119,9 @@ export type DaemonToHub =
   | TaskCompletedFrame
   | IdleFrame
   | SessionStateFrame
-  | PluginChatOut;
+  | DaemonStartSessionRejected
+  | PluginChatOut
+  | DaemonSlashInventory;
 
 export type HubToDaemon =
   | { type: "ping"; ts: number }
@@ -93,22 +129,25 @@ export type HubToDaemon =
   | HubToDaemonRequestHistory
   | HubToDaemonKillSession
   | HubToDaemonStartSession
-  | HubToDaemonChatSend;
+  | HubToDaemonChatSend
+  | HubToDaemonCliCommand;
 
 // ─── hub ↔ PWA (WSS) ──────────────────────────────────────────────────
 
 export interface DaemonView {
   daemon_id: string;
   hostname: string;
+  display_name: string | null;
   online: boolean;
   sessions: SessionSnapshot[];
 }
 
 export type HubToPwa =
   | { type: "snapshot"; daemons: DaemonView[] }
-  | { type: "daemon_online"; daemon_id: string; hostname: string; sessions: SessionSnapshot[] }
+  | { type: "daemon_online"; daemon_id: string; hostname: string; display_name: string | null; sessions: SessionSnapshot[] }
   | { type: "daemon_offline"; daemon_id: string }
-  | { type: "session_open"; daemon_id: string; session: SessionSnapshot }
+  | { type: "daemon_renamed"; daemon_id: string; display_name: string | null }
+  | PwaSessionOpenFrame
   | { type: "session_close"; daemon_id: string; session_id: string; reason: string }
   | EventFrameForPwa
   | PwaPermissionRequest
@@ -117,8 +156,10 @@ export type HubToPwa =
   | PwaTaskCompletedFrame
   | PwaIdleFrame
   | PwaSessionStateFrame
+  | PwaStartSessionRejected
   | PwaChatBroadcast
-  | HubChatErrorBroadcast;
+  | HubChatErrorBroadcast
+  | PwaSlashInventory;
 
 export type PwaToHub =
   | { type: "subscribe" }  // Plan 1 PWA only subscribes; commands come in Plan 4
@@ -126,7 +167,8 @@ export type PwaToHub =
   | PwaToHubRequestHistory
   | PwaToHubKillSession
   | PwaToHubStartSession
-  | PwaToHubChatSend;
+  | PwaToHubChatSend
+  | PwaToHubCliCommand;
 
 // ─── kill_session (dangerous action) ──────────────────────────────────
 
@@ -148,12 +190,49 @@ export interface PwaToHubStartSession {
   daemon_id: string;
   cwd: string;
   name?: string;
+  /**
+   * Optional client-generated id so the daemon's reject frame can be
+   * correlated back to the originating PWA request. Echoed verbatim by
+   * the hub on forward and by the daemon on rejection.
+   */
+  request_id?: string;
 }
 
 export interface HubToDaemonStartSession {
   type: "start_session";
   cwd: string;
   name?: string;
+  request_id?: string;
+}
+
+/**
+ * Daemon → hub when a start_session request is rejected (allow_start=false,
+ * cwd outside allowed_cwd_prefix, mkdir/spawn failure, spawn_command unset).
+ * Hub forwards to all PWAs as PwaStartSessionRejected so the originating
+ * client can show an inline error / toast.
+ */
+export type StartSessionRejectReason =
+  | "not_allowed"          // allow_start=false
+  | "cwd_not_allowed"      // outside allowed_cwd_prefix
+  | "spawn_command_unset"  // config has no spawn_command
+  | "mkdir_failed"         // could not create cwd
+  | "spawn_failed";        // tmux/exec call threw
+
+export interface DaemonStartSessionRejected {
+  type: "start_session_rejected";
+  request_id: string | null;
+  cwd: string;
+  reason: StartSessionRejectReason;
+  message: string;
+}
+
+export interface PwaStartSessionRejected {
+  type: "start_session_rejected";
+  daemon_id: string;
+  request_id: string | null;
+  cwd: string;
+  reason: StartSessionRejectReason;
+  message: string;
 }
 
 // ─── history (scroll-back) ────────────────────────────────────────────
@@ -238,6 +317,11 @@ export interface PwaToHubChatSend {
   session_id: string;
   content: string;
   reply_to?: string;
+  /**
+   * PWA-generated id used to correlate the resulting `chat` broadcast (or
+   * `chat_error`) back to this send. Echoed verbatim by the hub.
+   */
+  client_message_id?: string;
 }
 
 // Hub → Daemon
@@ -263,6 +347,9 @@ export interface PwaChatBroadcast {
   content: string;
   reply_to: string | null;
   ts: number;
+  /** Echoed when this broadcast originated from a PWA chat_send. Absent for
+   *  Claude-originated messages. */
+  client_message_id?: string;
 }
 
 // Hub → PWA (chat error, e.g. daemon offline)
@@ -271,6 +358,50 @@ export interface HubChatErrorBroadcast {
   daemon_id: string;
   session_id: string;
   reason: string;
+  /** Present when the error is bound to a specific PWA chat_send. */
+  client_message_id?: string;
+}
+
+// ─── slash inventory + cli_command (PWA `/` helper) ───────────────────
+
+export interface SlashEntry {
+  /** Stable id within this session — `<source>:<basename>` (basename has no
+   *  leading "/"). React key + selection target. */
+  id: string;
+  /** Includes the leading "/", e.g. "/clear", "/brainstorming". */
+  name: string;
+  description?: string;
+  argument_hint?: string;
+  source: "builtin" | "user" | "project" | "skill";
+}
+
+export interface DaemonSlashInventory {
+  type: "slash_inventory";
+  session_id: string;
+  entries: SlashEntry[];
+}
+
+export interface PwaSlashInventory {
+  type: "slash_inventory";
+  daemon_id: string;
+  session_id: string;
+  entries: SlashEntry[];
+}
+
+export interface PwaToHubCliCommand {
+  type: "cli_command";
+  daemon_id: string;
+  session_id: string;
+  /** Verbatim string to inject (with leading "/"), e.g. "/brainstorming todo". */
+  text: string;
+}
+
+export interface HubToDaemonCliCommand {
+  type: "cli_command";
+  session_id: string;
+  text: string;
+  /** Bearer subject of the PWA user, for daemon log audit. */
+  user: string;
 }
 
 export interface DaemonPermissionRequest {
