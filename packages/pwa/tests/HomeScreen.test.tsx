@@ -96,3 +96,134 @@ test("HomeScreen shows the empty-state hint when no daemons are connected", () =
   expect(markup).toContain("No daemons connected yet.");
   expect(markup).toContain("cc-remote pair");
 });
+
+test("HomeScreen shows 'Starting session...' while pending", () => {
+  const markup = renderToStaticMarkup(
+    <HomeScreen
+      daemons={[{
+        daemon_id: "d", hostname: "host-1", online: true, sessions: [],
+      }]}
+      pendingApprovalsCount={0}
+      onSelectSession={() => {}}
+      onStartSession={() => {}}
+      onKillSession={() => {}}
+      onOpenPermission={() => {}}
+      pendingStartSessionByDaemon={{
+        d: { id: "rs-1", kind: "start_session", daemon_id: "d",
+             started_at: 0, status: "pending" },
+      }}
+      pendingKillByKey={{}}
+    />,
+  );
+  expect(markup).toContain("Starting session");
+  expect(markup).toMatch(/aria-label="Working directory[^"]*"[^>]*disabled/);
+  expect(markup).toContain('data-testid="start-spinner"');
+});
+
+test("HomeScreen shows timeout copy when start_session timed_out", () => {
+  const markup = renderToStaticMarkup(
+    <HomeScreen
+      daemons={[{
+        daemon_id: "d", hostname: "host-1", online: true, sessions: [],
+      }]}
+      pendingApprovalsCount={0}
+      onSelectSession={() => {}}
+      onStartSession={() => {}}
+      onKillSession={() => {}}
+      onOpenPermission={() => {}}
+      pendingStartSessionByDaemon={{
+        d: { id: "rs-1", kind: "start_session", daemon_id: "d",
+             started_at: 0, status: "timed_out" },
+      }}
+      pendingKillByKey={{}}
+    />,
+  );
+  expect(markup).toContain("Start not confirmed");
+});
+
+test("HomeScreen shows 'Killing session...' while a kill is pending", () => {
+  const sessionVm = {
+    daemon_id: "d", session_id: "s1",
+    name: "demo", model: "sonnet", cwd: "/x",
+    state: "idle" as const, unread: 0, tasks: 0,
+    activity: "now",
+  };
+  const markup = renderToStaticMarkup(
+    <HomeScreen
+      daemons={[{
+        daemon_id: "d", hostname: "host-1", online: true,
+        sessions: [sessionVm],
+      }]}
+      pendingApprovalsCount={0}
+      onSelectSession={() => {}}
+      onStartSession={() => {}}
+      onKillSession={() => {}}
+      onOpenPermission={() => {}}
+      pendingStartSessionByDaemon={{}}
+      pendingKillByKey={{
+        "d::s1": { id: "kill-d-s1", kind: "kill_session",
+                   daemon_id: "d", session_id: "s1",
+                   started_at: 0, status: "pending" },
+      }}
+    />,
+  );
+  expect(markup).toContain("Killing session");
+  expect(markup).toContain('data-testid="kill-pending-s1"');
+});
+
+test("HomeScreen renders inline start-session error for the affected daemon", () => {
+  const markup = renderToStaticMarkup(
+    <HomeScreen
+      daemons={[onlineDaemon]}
+      pendingApprovalsCount={0}
+      onSelectSession={() => {}}
+      onStartSession={() => {}}
+      onKillSession={() => {}}
+      onOpenPermission={() => {}}
+      startSessionErrors={{
+        d1: {
+          type: "start_session_rejected",
+          daemon_id: "d1",
+          request_id: null,
+          cwd: "/etc",
+          reason: "cwd_not_allowed",
+          message: "cwd /etc not in allowed_cwd_prefix",
+        },
+      }}
+      onDismissStartSessionError={() => {}}
+    />,
+  );
+  expect(markup).toContain('data-testid="start-session-error-d1"');
+  expect(markup).toContain("cwd not allowed");
+  expect(markup).toContain("/etc not in allowed_cwd_prefix");
+});
+
+test("HomeScreen shows 'Kill not confirmed. Try again.' on kill timeout", () => {
+  const sessionVm = {
+    daemon_id: "d", session_id: "s1",
+    name: "demo", model: "sonnet", cwd: "/x",
+    state: "idle" as const, unread: 0, tasks: 0,
+    activity: "now",
+  };
+  const markup = renderToStaticMarkup(
+    <HomeScreen
+      daemons={[{
+        daemon_id: "d", hostname: "host-1", online: true,
+        sessions: [sessionVm],
+      }]}
+      pendingApprovalsCount={0}
+      onSelectSession={() => {}}
+      onStartSession={() => {}}
+      onKillSession={() => {}}
+      onOpenPermission={() => {}}
+      pendingStartSessionByDaemon={{}}
+      pendingKillByKey={{
+        "d::s1": { id: "kill-d-s1", kind: "kill_session",
+                   daemon_id: "d", session_id: "s1",
+                   started_at: 0, status: "timed_out" },
+      }}
+    />,
+  );
+  expect(markup).toContain("Kill not confirmed");
+  expect(markup).toContain('data-testid="kill-timeout-s1"');
+});

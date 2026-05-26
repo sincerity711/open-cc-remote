@@ -81,8 +81,8 @@ test("history-replayed events do NOT flip an idle session to working — daemon 
   // Simulates the bug: PWA enters a session, requests history, gets ts=0 events back.
   // Pre-FSM the heuristic was events.length > 0 → working. Now state stays whatever the daemon says.
   const historicEvents: EventFrameForPwa[] = [
-    { type: "event", daemon_id: "d1", session_id: "s1", jsonl_offset: 1, ts: 0, payload: {} },
-    { type: "event", daemon_id: "d1", session_id: "s1", jsonl_offset: 2, ts: 0, payload: {} },
+    { type: "event", daemon_id: "d1", session_id: "s1", jsonl_offset: 1, payload: {} },
+    { type: "event", daemon_id: "d1", session_id: "s1", jsonl_offset: 2, payload: {} },
   ];
   const models = computeDaemonViewModels({
     daemons: [onlineDaemon], // baseSession.state === "idle"
@@ -91,7 +91,48 @@ test("history-replayed events do NOT flip an idle session to working — daemon 
     completedCounts: {},
   });
   expect(models[0].sessions[0].state).toBe("idle");
+  // No lastSeenOffsets passed → every buffered event is treated as unread.
   expect(models[0].sessions[0].unread).toBe(2);
+});
+
+test("unread filters by jsonl_offset > lastSeenOffsets[k] (events at or below the anchor are read)", () => {
+  const events: EventFrameForPwa[] = [
+    { type: "event", daemon_id: "d1", session_id: "s1", jsonl_offset: 10, payload: {} },
+    { type: "event", daemon_id: "d1", session_id: "s1", jsonl_offset: 20, payload: {} },
+    { type: "event", daemon_id: "d1", session_id: "s1", jsonl_offset: 30, payload: {} },
+  ];
+  const at20 = computeDaemonViewModels({
+    daemons: [onlineDaemon],
+    events: { "d1::s1": events },
+    pendingPermissions: {},
+    completedCounts: {},
+    lastSeenOffsets: { "d1::s1": 20 },
+  });
+  expect(at20[0].sessions[0].unread).toBe(1);
+
+  const at30 = computeDaemonViewModels({
+    daemons: [onlineDaemon],
+    events: { "d1::s1": events },
+    pendingPermissions: {},
+    completedCounts: {},
+    lastSeenOffsets: { "d1::s1": 30 },
+  });
+  expect(at30[0].sessions[0].unread).toBe(0);
+
+  // Older history backfilled (offsets < anchor) does not bump unread.
+  const olderHistory: EventFrameForPwa[] = [
+    { type: "event", daemon_id: "d1", session_id: "s1", jsonl_offset: 1, payload: {} },
+    { type: "event", daemon_id: "d1", session_id: "s1", jsonl_offset: 2, payload: {} },
+    ...events,
+  ];
+  const withHistory = computeDaemonViewModels({
+    daemons: [onlineDaemon],
+    events: { "d1::s1": olderHistory },
+    pendingPermissions: {},
+    completedCounts: {},
+    lastSeenOffsets: { "d1::s1": 30 },
+  });
+  expect(withHistory[0].sessions[0].unread).toBe(0);
 });
 
 test("waiting state surfaces 'permission needed' activity when a pending request exists", () => {

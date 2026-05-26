@@ -12,12 +12,14 @@ export interface DaemonItem {
 
 const POLL_MS = 60_000;
 
-export function daemonsUrl(hubUrl: string): string {
-  return hubUrl.replace(/^ws(s?):\/\//, "http$1://") + "/daemons";
+// Returns a same-origin path; the Vite dev server proxies /daemons → hub,
+// and the prod build is served from the hub itself (same origin).
+export function daemonsUrl(_hubUrl: string): string {
+  return "/daemons";
 }
 
-function daemonItemUrl(hubUrl: string, daemon_id: string): string {
-  return hubUrl.replace(/^ws(s?):\/\//, "http$1://") + `/daemons/${encodeURIComponent(daemon_id)}`;
+function daemonItemUrl(_hubUrl: string, daemon_id: string): string {
+  return `/daemons/${encodeURIComponent(daemon_id)}`;
 }
 
 export function sortDaemons(list: DaemonItem[]): DaemonItem[] {

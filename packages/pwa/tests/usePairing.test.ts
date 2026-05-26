@@ -1,9 +1,9 @@
 import { test, expect } from "bun:test";
 import { pairIssueUrl, pairingTick, type PairingState } from "../src/hooks/usePairing";
 
-test("pairIssueUrl converts ws→http", () => {
-  expect(pairIssueUrl("ws://hub:7745")).toBe("http://hub:7745/pair/issue");
-  expect(pairIssueUrl("wss://hub")).toBe("https://hub/pair/issue");
+test("pairIssueUrl is a same-origin path", () => {
+  expect(pairIssueUrl("ws://hub:7745")).toBe("/pair/issue");
+  expect(pairIssueUrl("wss://hub")).toBe("/pair/issue");
 });
 
 test("pairingTick decrements remainingSec while time remains", () => {

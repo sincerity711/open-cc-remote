@@ -5,8 +5,8 @@ export type PairingState =
   | { status: "issuing" }
   | { status: "active"; code: string; expiresAt: number; remainingSec: number };
 
-export function pairIssueUrl(hubUrl: string): string {
-  return hubUrl.replace(/^ws(s?):\/\//, "http$1://") + "/pair/issue";
+export function pairIssueUrl(_hubUrl: string): string {
+  return "/pair/issue";
 }
 
 export interface PairingTickResult {

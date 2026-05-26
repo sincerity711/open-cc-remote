@@ -24,9 +24,8 @@ export function clearBearer(): void {
   localStorage.removeItem(BEARER_KEY);
 }
 
-export function loginUrl(hubBaseUrl: string): string {
-  const httpHub = hubBaseUrl.replace(/^ws(s?):\/\//, "http$1://");
-  return `${httpHub}/auth/login`;
+export function loginUrl(_hubBaseUrl: string): string {
+  return "/auth/login";
 }
 
 export interface UseAuthResult {

@@ -4,6 +4,7 @@ import { Button } from "../components/ui/button";
 import { cn } from "../lib/utils";
 import type { Device } from "../hooks/useMediaQuery";
 import { Field } from "./primitives/Field";
+import type { PendingCommand } from "../hooks/pendingCommands";
 
 export interface PermissionSurfaceProps {
   request: PwaPermissionRequest;
@@ -16,6 +17,7 @@ export interface PermissionSurfaceProps {
   onAllow: () => void;
   onDeny: () => void;
   onClose: () => void;
+  pendingReply?: PendingCommand;
 }
 
 export function PermissionSurface(props: PermissionSurfaceProps) {
@@ -64,7 +66,10 @@ function PermissionCard({
   onAllow,
   onDeny,
   onClose,
+  pendingReply,
 }: PermissionSurfaceProps) {
+  const submitting = pendingReply?.status === "pending";
+  const replyTimedOut = pendingReply?.status === "timed_out";
   return (
     <article className="flex h-full flex-col">
       <div className="flex items-start justify-between gap-3">
@@ -102,11 +107,28 @@ function PermissionCard({
       </div>
 
       <div className="mt-auto pt-5">
+        {submitting && (
+          <p
+            className="text-muted-foreground mb-3 text-sm"
+            data-testid="permission-submitting"
+          >
+            Submitting decision…
+          </p>
+        )}
+        {replyTimedOut && (
+          <p
+            className="text-danger mb-3 text-sm"
+            role="alert"
+            data-testid="permission-timeout"
+          >
+            Decision not confirmed. Try again.
+          </p>
+        )}
         <div className="grid grid-cols-2 gap-3">
-          <Button onClick={onDeny} size="lg" variant="secondary">
+          <Button onClick={onDeny} size="lg" variant="secondary" disabled={submitting}>
             Deny
           </Button>
-          <Button onClick={onAllow} size="lg">
+          <Button onClick={onAllow} size="lg" disabled={submitting}>
             Allow once
           </Button>
         </div>

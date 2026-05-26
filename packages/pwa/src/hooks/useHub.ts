@@ -494,6 +494,7 @@ export interface UseHubResult extends HubState {
   killSession: (daemon_id: string, session_id: string) => void;
   startSession: (daemon_id: string, cwd: string, name?: string) => void;
   sendChat: (daemon_id: string, session_id: string, content: string, reply_to?: string) => void;
+  sendCliCommand: (daemon_id: string, session_id: string, text: string) => void;
   clearStartSessionError: (daemon_id: string) => void;
   pendingChatSendFor: (daemon_id: string, session_id: string) => PendingCommand | undefined;
   pendingStartSessionFor: (daemon_id: string) => PendingCommand | undefined;
@@ -751,6 +752,20 @@ export function useHub(
     [armTimeout],
   );
 
+  const sendCliCommand = useCallback(
+    (daemon_id: string, session_id: string, text: string) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const msg: PwaToHub = {
+        type: "cli_command",
+        daemon_id, session_id, text,
+      };
+      ws.send(JSON.stringify(msg));
+      // No pending state — there is no ack frame; success surfaces via JSONL.
+    },
+    [],
+  );
+
   const pendingChatSendFor = useCallback(
     (daemon_id: string, session_id: string): PendingCommand | undefined => {
       return findPending(state.pendingCommands, (cmd) =>
@@ -806,7 +821,7 @@ export function useHub(
 
   return {
     ...state,
-    sendPermissionReply, requestHistory, killSession, startSession, sendChat,
+    sendPermissionReply, requestHistory, killSession, startSession, sendChat, sendCliCommand,
     clearStartSessionError, pendingChatSendFor, pendingStartSessionFor, pendingHistoryFor,
     pendingPermissionReplyFor, pendingKillFor, dismissPendingCommand,
   };

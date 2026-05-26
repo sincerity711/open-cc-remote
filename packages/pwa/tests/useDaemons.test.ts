@@ -1,10 +1,10 @@
 import { test, expect } from "bun:test";
 import { daemonsUrl, sortDaemons, type DaemonItem } from "../src/hooks/useDaemons";
 
-test("daemonsUrl converts ws→http", () => {
-  expect(daemonsUrl("ws://hub:7745")).toBe("http://hub:7745/daemons");
-  expect(daemonsUrl("wss://hub")).toBe("https://hub/daemons");
-  expect(daemonsUrl("http://hub")).toBe("http://hub/daemons");
+test("daemonsUrl is a same-origin path (vite dev proxies, prod is same-origin)", () => {
+  expect(daemonsUrl("ws://hub:7745")).toBe("/daemons");
+  expect(daemonsUrl("wss://hub")).toBe("/daemons");
+  expect(daemonsUrl("http://hub")).toBe("/daemons");
 });
 
 test("sortDaemons puts connected=true first then paired_at desc", () => {

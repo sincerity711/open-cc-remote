@@ -20,6 +20,7 @@ export interface SessionRowViewModel {
 export interface DaemonViewModel {
   daemon_id: string;
   hostname: string;
+  display_name: string | null;
   online: boolean;
   sessions: SessionRowViewModel[];
 }
@@ -29,6 +30,13 @@ export interface ComputeDaemonViewModelsArgs {
   events: Record<string, BufferedEvent[]>;
   pendingPermissions: Record<string, PwaPermissionRequest>;
   completedCounts: Record<string, number>;
+  /**
+   * Per-session "last seen" anchor on jsonl_offset. Events with
+   * `jsonl_offset > lastSeenOffsets[k]` count as unread. Missing key
+   * means the user has never seen this session — every buffered event
+   * is unread.
+   */
+  lastSeenOffsets?: Record<string, number>;
 }
 
 /**
@@ -44,17 +52,22 @@ export function computeDaemonViewModels(
   args: ComputeDaemonViewModelsArgs,
 ): DaemonViewModel[] {
   const pendingByKey = groupPendingByKey(args.pendingPermissions);
+  const lastSeen = args.lastSeenOffsets ?? {};
 
   return args.daemons.map((d) => ({
     daemon_id: d.daemon_id,
     hostname: d.hostname,
+    display_name: d.display_name,
     online: d.online,
     sessions: d.sessions.map((s) => {
       const k = eventKey(d.daemon_id, s.session_id);
       const pending = pendingByKey[k] ?? [];
       const evts = args.events[k] ?? [];
       const tasks = args.completedCounts[k] ?? 0;
-      const unread = evts.length;
+      const seen = lastSeen[k];
+      const unread = seen === undefined
+        ? evts.length
+        : evts.reduce((n, e) => (e.jsonl_offset > seen ? n + 1 : n), 0);
 
       const state: SessionState = !d.online ? "offline" : s.state;
 

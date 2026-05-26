@@ -6,19 +6,14 @@ import { EventType } from "@cc-remote/proto";
 
 const items: RenderItem[] = [
   {
-    tag: "chat",
-    id: "chat:m1",
+    tag: "agui",
+    id: "agui:m1",
     ts: 1_700_000_000_000,
-    chat: {
-      type: "chat",
-      daemon_id: "d",
-      session_id: "s",
-      message_id: "m1",
-      from: "pwa",
-      user: "alice@example.com",
-      content: "hello claude",
-      reply_to: null,
-      ts: 1_700_000_000_000,
+    event: {
+      type: EventType.TEXT_MESSAGE_CHUNK,
+      messageId: "m1",
+      role: "user",
+      delta: "hello claude",
     },
   },
   {
@@ -127,6 +122,68 @@ test("SessionView shows the connection-lost banner when not connected", () => {
 
   expect(markup).toContain("Connection lost");
   expect(markup).toContain('data-testid="connection-banner"');
+  expect(markup).toContain("Reconnect before sending");
+});
+
+test("SessionView shows 'Sending message...' row while a chat send is pending", () => {
+  const markup = renderToStaticMarkup(
+    <SessionView
+      header={{ name: "s", model: null, cwd: "/x", online: true }}
+      items={[]}
+      composerBlocked={false}
+      pendingChatSend={{
+        id: "cm-1", kind: "chat_send",
+        daemon_id: "d", session_id: "s",
+        started_at: 0, status: "pending",
+      }}
+      onLoadEarlier={() => {}}
+      onSendChat={() => {}}
+      onOpenPermission={() => {}}
+      onBack={() => {}}
+      onDismissPendingCommand={() => {}}
+    />,
+  );
+  expect(markup).toContain("Sending message");
+  expect(markup).toMatch(/data-testid="chat-input"[^>]*disabled/);
+});
+
+test("SessionView shows timeout message when chat send timed out", () => {
+  const markup = renderToStaticMarkup(
+    <SessionView
+      header={{ name: "s", model: null, cwd: "/x", online: true }}
+      items={[]}
+      composerBlocked={false}
+      pendingChatSend={{
+        id: "cm-1", kind: "chat_send",
+        daemon_id: "d", session_id: "s",
+        started_at: 0, status: "timed_out",
+      }}
+      onLoadEarlier={() => {}}
+      onSendChat={() => {}}
+      onOpenPermission={() => {}}
+      onBack={() => {}}
+      onDismissPendingCommand={() => {}}
+    />,
+  );
+  expect(markup).toContain("Message not confirmed");
+});
+
+test("SessionView no longer renders queued-count banner", () => {
+  const markup = renderToStaticMarkup(
+    <SessionView
+      header={{ name: "s", model: null, cwd: "/x", online: true }}
+      items={[]}
+      composerBlocked={false}
+      connected={false}
+      onLoadEarlier={() => {}}
+      onSendChat={() => {}}
+      onOpenPermission={() => {}}
+      onBack={() => {}}
+      onDismissPendingCommand={() => {}}
+    />,
+  );
+  expect(markup).not.toContain("queued-count");
+  expect(markup).toContain("Reconnect before sending");
 });
 
 test("SessionView omits the connection-lost banner when connected", () => {
@@ -162,4 +219,45 @@ test("SessionView no longer renders the IdleWaitingCard — status chip in the h
 
   expect(markup).not.toContain("How would you like to proceed");
   expect(markup).not.toContain("Waiting for input");
+});
+
+test("SessionView shows failed-with-error message", () => {
+  const markup = renderToStaticMarkup(
+    <SessionView
+      header={{ name: "s", model: null, cwd: "/x", online: true }}
+      items={[]}
+      composerBlocked={false}
+      pendingChatSend={{
+        id: "cm-1", kind: "chat_send",
+        daemon_id: "d", session_id: "s",
+        started_at: 0, status: "failed",
+        error: "daemon_offline",
+      }}
+      onLoadEarlier={() => {}}
+      onSendChat={() => {}}
+      onOpenPermission={() => {}}
+      onBack={() => {}}
+      onDismissPendingCommand={() => {}}
+    />,
+  );
+  expect(markup).toContain("Message not confirmed");
+  expect(markup).toContain("daemon_offline");
+  expect(markup).toContain('data-testid="chat-send-failure"');
+});
+
+test("SessionView disables composer when disconnected", () => {
+  const markup = renderToStaticMarkup(
+    <SessionView
+      header={{ name: "s", model: null, cwd: "/x", online: true }}
+      items={[]}
+      composerBlocked={false}
+      connected={false}
+      onLoadEarlier={() => {}}
+      onSendChat={() => {}}
+      onOpenPermission={() => {}}
+      onBack={() => {}}
+      onDismissPendingCommand={() => {}}
+    />,
+  );
+  expect(markup).toMatch(/data-testid="chat-input"[^>]*disabled/);
 });

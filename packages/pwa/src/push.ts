@@ -42,8 +42,7 @@ export async function registerPushSubscription(
     return { registered: false, reason: "subscription missing endpoint/keys" };
   }
 
-  const httpHub = hubBaseUrl.replace(/^ws(s?):\/\//, "http$1://");
-  const res = await fetch(`${httpHub}/push/subscribe`, {
+  const res = await fetch(`/push/subscribe`, {
     method: "POST",
     headers: {
       "content-type": "application/json",

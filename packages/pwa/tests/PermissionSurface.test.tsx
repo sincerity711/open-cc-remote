@@ -52,3 +52,53 @@ test("PermissionSurface omits queue line when only one request", () => {
   expect(markup).not.toContain("of 1 pending");
   expect(markup).not.toContain('data-testid="permission-queue"');
 });
+
+test("PermissionSurface shows 'Submitting decision...' while reply pending", () => {
+  const markup = renderToStaticMarkup(
+    <PermissionSurface
+      request={{
+        type: "permission_request",
+        daemon_id: "d", session_id: "s", request_id: "p-1",
+        tool: "Bash", args_summary: "ls",
+        expires_at: 1_700_000_000,
+      }}
+      daemonHostname="host-1"
+      queueIndex={1} queueSize={1}
+      device="desktop"
+      onAllow={() => {}}
+      onDeny={() => {}}
+      onClose={() => {}}
+      pendingReply={{
+        id: "p-1", kind: "permission_reply",
+        daemon_id: "d", session_id: "s",
+        started_at: 0, status: "pending", label: "allow",
+      }}
+    />,
+  );
+  expect(markup).toContain("Submitting decision");
+  expect(markup).toMatch(/<button[^>]*disabled[^>]*>\s*Allow once/);
+  expect(markup).toMatch(/<button[^>]*disabled[^>]*>\s*Deny/);
+});
+
+test("PermissionSurface shows timeout copy when reply timed_out", () => {
+  const markup = renderToStaticMarkup(
+    <PermissionSurface
+      request={{ type: "permission_request",
+        daemon_id: "d", session_id: "s", request_id: "p-1",
+        tool: "Bash", args_summary: "ls", expires_at: 0,
+      }}
+      daemonHostname="h"
+      queueIndex={1} queueSize={1}
+      device="desktop"
+      onAllow={() => {}}
+      onDeny={() => {}}
+      onClose={() => {}}
+      pendingReply={{
+        id: "p-1", kind: "permission_reply",
+        daemon_id: "d", session_id: "s",
+        started_at: 0, status: "timed_out", label: "allow",
+      }}
+    />,
+  );
+  expect(markup).toContain("Decision not confirmed");
+});

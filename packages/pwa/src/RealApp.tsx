@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useHub, eventKey } from "./hooks/useHub";
+import { selectSlashInventory } from "./hooks/useSlashInventory";
 import { clearBearer, useAuth } from "./hooks/useAuth";
 import { SessionView } from "./screens/SessionView";
 import { useSessionTimeline } from "./hooks/useSessionTimeline";
@@ -18,7 +19,12 @@ import { PermissionSurface } from "./screens/PermissionSurface";
 import { SignInScreen } from "./screens/SignInScreen";
 import type { PendingCommand } from "./hooks/pendingCommands";
 
-const HUB_URL = (import.meta.env.VITE_HUB_URL as string) ?? "ws://localhost:17745";
+function defaultHubUrl(): string {
+  if (typeof window === "undefined") return "ws://localhost:17745";
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${window.location.host}`;
+}
+const HUB_URL = (import.meta.env.VITE_HUB_URL as string) || defaultHubUrl();
 
 interface Selected { daemon_id: string; session_id: string }
 
@@ -203,9 +209,11 @@ export function RealApp() {
               maxOffset={sessionTimeline.maxOffset}
               unreadCount={sessionTimeline.unreadCount}
               pendingChatSend={pendingChatSend}
+              slashEntries={selected ? selectSlashInventory(hub, selected.daemon_id, selected.session_id) : []}
               onMarkSeen={(offset) => markSeen(selected.daemon_id, selected.session_id, offset)}
               onLoadEarlier={sessionTimeline.loadEarlier}
               onSendChat={(content) => hub.sendChat(selected.daemon_id, selected.session_id, content)}
+              onSendCliCommand={(text) => hub.sendCliCommand(selected.daemon_id, selected.session_id, text)}
               onOpenPermission={() => permissionQueue.openSurface()}
               onBack={() => setSelected(null)}
               onDismissPendingCommand={dismissPendingCommand}

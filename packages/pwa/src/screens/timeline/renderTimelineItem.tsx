@@ -25,7 +25,7 @@ import { AssistantBubbleLive } from "./cards/AssistantBubble";
 import { UserBubbleLive } from "./cards/UserBubble";
 import { SessionTimelineItem, type TimelineMarker } from "./SessionTimelineItem";
 import type { RenderItem } from "./types";
-import { toolStatusFromResult } from "../../lib/view-helpers";
+import { toolStatusFromResult, type ToolStatus } from "../../lib/view-helpers";
 
 export interface RenderTimelineItemContext {
   onOpenPermission?: (request_id: string) => void;
@@ -81,18 +81,10 @@ export function renderTimelineItem(
         </SessionTimelineItem>
       );
 
-    case "chat":
+    case "tool":
       return (
-        <SessionTimelineItem key={item.id} align="end" marker={marker}>
-          <UserBubbleLive
-            event={{
-              type: EventType.TEXT_MESSAGE_CHUNK,
-              messageId: item.id,
-              role: "user",
-              delta: item.chat.content,
-            } as TextMessageChunkEvent}
-            ts={item.ts}
-          />
+        <SessionTimelineItem key={item.id} marker={marker}>
+          <ToolCard chunk={item.chunk} result={item.result} />
         </SessionTimelineItem>
       );
 
@@ -138,23 +130,9 @@ function renderAgUi(
       );
     }
 
-    case EventType.TOOL_CALL_CHUNK: {
-      const ev = event as ToolCallChunkEvent;
-      return (
-        <SessionTimelineItem key={id} marker={marker}>
-          <ToolChunkCard event={ev} ts={ts} />
-        </SessionTimelineItem>
-      );
-    }
-
-    case EventType.TOOL_CALL_RESULT: {
-      const ev = event as ToolCallResultEvent;
-      return (
-        <SessionTimelineItem key={id} marker={marker}>
-          <ToolResultCard event={ev} />
-        </SessionTimelineItem>
-      );
-    }
+    // TOOL_CALL_CHUNK and TOOL_CALL_RESULT are merged into a single
+    // synthetic "tool" RenderItem upstream in mergeTimeline; the renderer
+    // never sees them as standalone agui items.
 
     case EventType.RUN_STARTED:
     case EventType.RUN_FINISHED:
@@ -208,14 +186,15 @@ function pickMarker(item: RenderItem): TimelineMarker {
         ? "error"
         : "success";
   }
-  if (item.tag === "chat") return "user";
+  if (item.tag === "tool") {
+    if (item.result && toolStatusFromResult(item.result) === "failure") return "error";
+    return "tool";
+  }
   switch (item.event.type) {
     case EventType.TEXT_MESSAGE_CHUNK:
       return (item.event as TextMessageChunkEvent).role === "user" ? "user" : "claude";
     case EventType.REASONING_MESSAGE_CHUNK:
       return "claude";
-    case EventType.TOOL_CALL_CHUNK:
-    case EventType.TOOL_CALL_RESULT:
     case EventType.ACTIVITY_SNAPSHOT:
     case EventType.ACTIVITY_DELTA:
       return "tool";
@@ -234,18 +213,53 @@ function pickStrongToolIcon(name: string): LucideIcon | undefined {
   return undefined;
 }
 
-function ToolChunkCard({ event, ts: _ts }: { event: ToolCallChunkEvent; ts: number }) {
-  const name = event.toolCallName ?? "tool";
+/**
+ * Merged tool card: header + args (always from the chunk) + status badge +
+ * output (when the matching TOOL_CALL_RESULT has arrived).
+ *
+ * Status flow: chunk-only -> "Active"; result.is_error -> "Failed";
+ * otherwise -> "Success". The merge happens in mergeTimeline so that
+ * later out-of-order delivery of the result still updates the same card
+ * instead of producing a second one.
+ */
+function ToolCard({
+  chunk,
+  result,
+}: {
+  chunk: ToolCallChunkEvent;
+  result?: ToolCallResultEvent;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const name = chunk.toolCallName ?? "tool";
   const icon = pickStrongToolIcon(name);
-  const args = event.delta ?? "";
+  const args = chunk.delta ?? "";
+
+  const status: ToolStatus | "active" = result ? toolStatusFromResult(result) : "active";
+  const cardTone: CatalogCardTone =
+    status === "failure" ? "danger" : "default";
+
+  const out = result?.content ?? "";
+  const lines = out ? out.split("\n") : [];
+  const isShort = status === "success" && lines.length <= 2 && out.length <= 200;
+  const showExpand = !!out && (status === "failure" || !isShort);
+
   return (
-    <CatalogCard>
+    <CatalogCard tone={cardTone}>
       <CatalogHeader
         icon={icon}
         title={name}
+        tone={status === "failure" ? "danger" : status === "success" ? "success" : undefined}
         status={
-          <span className="bg-muted text-muted-foreground rounded-md border px-2 py-0.5 text-xs font-medium">
-            Active
+          <span
+            className={`shrink-0 rounded-md border px-2 py-0.5 text-xs font-medium ${
+              status === "success"
+                ? "bg-success-subtle text-success border-success/30"
+                : status === "failure"
+                  ? "bg-danger-subtle text-danger border-danger/30"
+                  : "bg-muted text-muted-foreground"
+            }`}
+          >
+            {status === "success" ? "Success" : status === "failure" ? "Failed" : "Active"}
           </span>
         }
       />
@@ -254,40 +268,10 @@ function ToolChunkCard({ event, ts: _ts }: { event: ToolCallChunkEvent; ts: numb
           <code>{args}</code>
         </pre>
       )}
-    </CatalogCard>
-  );
-}
-
-function ToolResultCard({ event }: { event: ToolCallResultEvent }) {
-  const [expanded, setExpanded] = useState(false);
-  const status = toolStatusFromResult(event);
-  const cardTone: CatalogCardTone = status === "failure" ? "danger" : "default";
-  const out = event.content ?? "";
-  const lines = out ? out.split("\n") : [];
-  const isShort = status === "success" && lines.length <= 2 && out.length <= 200;
-  const showExpand = !!out && (status === "failure" || !isShort);
-
-  return (
-    <CatalogCard tone={cardTone}>
-      <CatalogHeader
-        title="Result"
-        tone={status === "failure" ? "danger" : "success"}
-        status={
-          <span
-            className={`shrink-0 rounded-md border px-2 py-0.5 text-xs font-medium ${
-              status === "success"
-                ? "bg-success-subtle text-success border-success/30"
-                : "bg-danger-subtle text-danger border-danger/30"
-            }`}
-          >
-            {status === "success" ? "Success" : "Failed"}
-          </span>
-        }
-      />
-      {isShort && (
+      {result && isShort && (
         <p className="text-muted-foreground mt-2 font-mono text-xs whitespace-pre-wrap">{out}</p>
       )}
-      {showExpand && (
+      {result && showExpand && (
         <>
           <Button
             className="mt-2 w-full justify-between"

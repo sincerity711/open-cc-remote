@@ -7,49 +7,61 @@ export interface SessionTimelineProps {
   items: RenderItem[];
   idle?: boolean;
   hasMoreEarlier?: boolean;
+  historyLoading?: boolean;
+  historyTimedOut?: boolean;
   onLoadEarlier: () => void;
   onOpenPermission?: (request_id: string) => void;
+  /** Highest jsonl_offset among buffered events (-1 if none). Used to advance
+   *  the lastSeen anchor when the user is at the bottom of the timeline. */
+  maxOffset?: number;
+  /** Count of buffered events newer than the lastSeen anchor — drives the
+   *  "New events N" pill. Independent of items.length so mergeTimeline jitter
+   *  (pending permission entering/leaving) and load-earlier history insertion
+   *  don't pollute the count. */
+  unreadCount?: number;
+  onMarkSeen?: (offset: number) => void;
 }
 
-export function SessionTimeline({ items, hasMoreEarlier = true, onLoadEarlier, onOpenPermission }: SessionTimelineProps) {
+export function SessionTimeline({
+  items,
+  hasMoreEarlier = true,
+  historyLoading = false,
+  historyTimedOut = false,
+  onLoadEarlier,
+  onOpenPermission,
+  maxOffset = -1,
+  unreadCount = 0,
+  onMarkSeen,
+}: SessionTimelineProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
-  const lastLoadAt = useRef(0);
-  // Number of items the user has "seen" — i.e. the items.length value at the
-  // last time the timeline was either auto-scrolling at bottom or the user
-  // explicitly clicked the "New events" pill. While the user is scrolled up,
-  // any items beyond this count are unseen and trigger the pill.
-  const lastSeenLength = useRef(items.length);
 
   useEffect(() => {
     if (!autoScroll || !scrollRef.current) return;
     scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [items, autoScroll]);
 
-  // Reset the unseen counter while the user is at the bottom.
+  // While the user is at the bottom, continuously advance the lastSeen anchor
+  // to the buffer's max offset. markSeen is monotonic in useLastSeen so a
+  // smaller maxOffset (e.g. session switch) won't regress the counter.
   useEffect(() => {
-    if (autoScroll) lastSeenLength.current = items.length;
-  }, [items, autoScroll]);
+    if (!autoScroll) return;
+    if (maxOffset < 0) return;
+    onMarkSeen?.(maxOffset);
+  }, [autoScroll, maxOffset, onMarkSeen]);
 
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
     setAutoScroll(atBottom);
-    const now = Date.now();
-    if (
-      hasMoreEarlier &&
-      el.scrollTop < 80 &&
-      items.length > 0 &&
-      now - lastLoadAt.current > 500
-    ) {
-      lastLoadAt.current = now;
+    if (hasMoreEarlier && el.scrollTop < 80 && items.length > 0) {
       onLoadEarlier();
     }
   };
 
   const ctx: RenderTimelineItemContext = { onOpenPermission };
-  const showJumpPill = !autoScroll && items.length > lastSeenLength.current;
+  const showJumpPill = !autoScroll && unreadCount > 0;
 
   return (
     <div
@@ -62,14 +74,30 @@ export function SessionTimeline({ items, hasMoreEarlier = true, onLoadEarlier, o
         <div className="bg-border absolute top-2 bottom-2 left-7 w-px" />
         {hasMoreEarlier && items.length > 0 && (
           <div className="mb-3 flex justify-center">
-            <Button onClick={onLoadEarlier} size="sm" variant="ghost">
-              Load earlier events
+            <Button
+              onClick={onLoadEarlier}
+              size="sm"
+              variant="ghost"
+              disabled={historyLoading}
+            >
+              {historyLoading ? "Loading earlier events…" : "Load earlier events"}
             </Button>
+          </div>
+        )}
+        {historyTimedOut && (
+          <div
+            className="text-danger mb-3 text-center text-xs"
+            role="alert"
+            data-testid="history-timeout"
+          >
+            History load not confirmed.
           </div>
         )}
         {items.map((it) => renderTimelineItem(it, ctx))}
         {items.length === 0 && (
-          <p className="text-muted-foreground py-12 text-center text-sm">Send a message to start.</p>
+          <p className="text-muted-foreground py-12 text-center text-sm">
+            {historyLoading ? "Loading history…" : "Send a message to start."}
+          </p>
         )}
       </div>
       {showJumpPill && (
@@ -80,11 +108,11 @@ export function SessionTimeline({ items, hasMoreEarlier = true, onLoadEarlier, o
             const el = scrollRef.current;
             if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
             setAutoScroll(true);
-            lastSeenLength.current = items.length;
+            // The autoScroll effect will fire markSeen(maxOffset) on the next render.
           }}
           type="button"
         >
-          New events {items.length - lastSeenLength.current} ↓
+          New events {unreadCount} ↓
         </button>
       )}
     </div>

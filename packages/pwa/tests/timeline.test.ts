@@ -1,13 +1,14 @@
 /**
- * Legacy timeline integration tests — updated for Phase D.3.
+ * Legacy timeline integration tests — updated for Phase D.3 / chat-merge.
  *
- * The old mergeTimeline consumed EventFrameForPwa[] and emitted TimelineEvent[].
- * It has been rewritten to consume BufferedEvent[] and emit RenderItem[].
- * These tests now verify the new contract.
+ * mergeTimeline consumes BufferedEvent[] + permission lists and emits
+ * RenderItem[]. Chat broadcasts no longer enter the timeline (the daemon's
+ * JSONL playback emits an authoritative TEXT_MESSAGE_CHUNK for every user
+ * message), so there is no `chat:` arg or `tag:"chat"` variant. Tool chunks
+ * + results are merged upstream into a single `tag:"tool"` item.
  */
 import { expect, test, describe } from "bun:test";
 import type {
-  PwaChatBroadcast,
   PwaPermissionRequest,
   PwaPermissionResolved,
 } from "@cc-remote/proto";
@@ -25,25 +26,6 @@ function be(
   ts = 1_700_000_000_000,
 ): BufferedEvent {
   return { daemon_id: D, session_id: S, jsonl_offset, event_index, ts, event };
-}
-
-function chat(
-  message_id: string,
-  from: "pwa" | "claude",
-  content: string,
-  ts: number,
-): PwaChatBroadcast {
-  return {
-    type: "chat",
-    daemon_id: D,
-    session_id: S,
-    message_id,
-    from,
-    user: from === "pwa" ? "alice@example.com" : null,
-    content,
-    reply_to: null,
-    ts,
-  };
 }
 
 function pending(request_id: string, expires_at: number): PwaPermissionRequest {
@@ -73,16 +55,15 @@ function resolved(
 }
 
 test("empty inputs produce empty timeline", () => {
-  expect(mergeTimeline({ events: [], chat: [], pending: [], resolved: [] })).toEqual([]);
+  expect(mergeTimeline({ events: [], pending: [], resolved: [] })).toEqual([]);
 });
 
 test("BufferedEvents emit 'agui' RenderItems", () => {
   const items = mergeTimeline({
     events: [
       be(10, 0, { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "m1", role: "assistant", delta: "hello" }),
-      be(20, 0, { type: EventType.TOOL_CALL_CHUNK, toolCallId: "t1", toolCallName: "Bash", delta: '{"command":"ls"}' }),
+      be(20, 0, { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "m2", role: "assistant", delta: "world" }),
     ],
-    chat: [],
     pending: [],
     resolved: [],
   });
@@ -91,19 +72,17 @@ test("BufferedEvents emit 'agui' RenderItems", () => {
   expect(items[1]?.tag).toBe("agui");
 });
 
-test("chat broadcasts emit 'chat' RenderItems", () => {
+test("TOOL_CALL_CHUNK + TOOL_CALL_RESULT collapse into a single 'tool' RenderItem", () => {
   const items = mergeTimeline({
-    events: [],
-    chat: [
-      chat("m1", "pwa", "hello", 1_700_000_000_000),
-      chat("m2", "claude", "hi", 1_700_000_001_000),
+    events: [
+      be(10, 0, { type: EventType.TOOL_CALL_CHUNK, toolCallId: "t1", toolCallName: "Bash", delta: '{"command":"ls"}' }),
+      be(20, 0, { type: EventType.TOOL_CALL_RESULT, messageId: "m1", toolCallId: "t1", content: "ok" } as any),
     ],
     pending: [],
     resolved: [],
   });
-  expect(items).toHaveLength(2);
-  expect(items[0]?.tag).toBe("chat");
-  expect(items[1]?.tag).toBe("chat");
+  expect(items).toHaveLength(1);
+  expect(items[0]?.tag).toBe("tool");
 });
 
 describe("RAW event filtering", () => {
@@ -123,7 +102,6 @@ describe("RAW event filtering", () => {
         events: [
           be(10, 0, { type: EventType.RAW, source: "claude-code-jsonl", event: { type } } as any),
         ],
-        chat: [],
         pending: [],
         resolved: [],
       });
@@ -136,7 +114,6 @@ describe("RAW event filtering", () => {
       events: [
         be(10, 0, { type: EventType.RAW, source: "claude-code-jsonl", event: { type: "session_start" } } as any),
       ],
-      chat: [],
       pending: [],
       resolved: [],
     });
@@ -148,7 +125,6 @@ describe("RAW event filtering", () => {
 test("pending permissions emit 'permission-inline' items", () => {
   const items = mergeTimeline({
     events: [],
-    chat: [],
     pending: [pending("req-1", 1_700_000_010)],
     resolved: [],
   });
@@ -162,7 +138,6 @@ test("pending permissions emit 'permission-inline' items", () => {
 test("resolved permissions emit 'permission-resolved' items", () => {
   const items = mergeTimeline({
     events: [],
-    chat: [],
     pending: [],
     resolved: [
       resolved("req-1", "allow"),
@@ -178,18 +153,16 @@ test("items are sorted by timestamp", () => {
   const items = mergeTimeline({
     events: [
       be(10, 0, { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "m1", role: "assistant", delta: "a" }, 1_700_000_001_000),
-      be(20, 0, { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "m2", role: "assistant", delta: "c" }, 1_700_000_003_000),
-    ],
-    chat: [
-      chat("m3", "pwa", "b", 1_700_000_002_000),
+      be(20, 0, { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "m2", role: "user", delta: "b" }, 1_700_000_002_000),
+      be(30, 0, { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "m3", role: "assistant", delta: "c" }, 1_700_000_003_000),
     ],
     pending: [],
     resolved: [],
   });
   expect(items).toHaveLength(3);
-  expect(items[0]?.tag).toBe("agui");   // ts 1_700_000_001_000
-  expect(items[1]?.tag).toBe("chat");   // ts 1_700_000_002_000
-  expect(items[2]?.tag).toBe("agui");   // ts 1_700_000_003_000
+  expect(items[0]?.ts).toBe(1_700_000_001_000);
+  expect(items[1]?.ts).toBe(1_700_000_002_000);
+  expect(items[2]?.ts).toBe(1_700_000_003_000);
 });
 
 test("ids are stable and deterministic — same input twice produces same ids", () => {
@@ -197,7 +170,6 @@ test("ids are stable and deterministic — same input twice produces same ids", 
     events: [
       be(10, 0, { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "m1", role: "assistant", delta: "x" }),
     ],
-    chat: [chat("m1", "pwa", "hi", 1_700_000_000)],
     pending: [pending("req-1", 1_700_000_010)],
     resolved: [resolved("req-2", "allow")],
   };
@@ -209,7 +181,6 @@ test("ids are stable and deterministic — same input twice produces same ids", 
 test("agui item id encodes daemon_id, session_id, jsonl_offset, event_index", () => {
   const items = mergeTimeline({
     events: [be(42, 3, { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "m1", role: "assistant", delta: "x" })],
-    chat: [],
     pending: [],
     resolved: [],
   });

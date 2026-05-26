@@ -12,6 +12,12 @@ export interface UseSessionTimelineResult {
   online: boolean;
   idle: boolean;
   pendingInThisSession?: PwaPermissionRequest;
+  /** Highest jsonl_offset present in this session's event buffer (or -1 if empty). */
+  maxOffset: number;
+  /** Count of buffered events with jsonl_offset > lastSeenOffset. */
+  unreadCount: number;
+  historyLoading: boolean;
+  historyTimedOut: boolean;
 }
 
 export interface SelectedSession {
@@ -42,6 +48,7 @@ const HISTORY_PAGE_SIZE = 50;
 export function useSessionTimeline(
   hub: UseHubResult,
   selected: SelectedSession | null,
+  lastSeenOffset?: number,
 ): UseSessionTimelineResult {
   const initialFetchedRef = useRef<Set<string>>(new Set());
 
@@ -55,22 +62,32 @@ export function useSessionTimeline(
         online: false,
         idle: false,
         pendingInThisSession: undefined as PwaPermissionRequest | undefined,
+        maxOffset: -1,
+        unreadCount: 0,
+        historyLoading: false,
+        historyTimedOut: false,
       };
     }
     const k = eventKey(selected.daemon_id, selected.session_id);
     const events = hub.events[k] ?? [];
-    const chat = hub.chatMessages[k] ?? [];
     const pending = Object.values(hub.pendingPermissions).filter(
       (p) => p.daemon_id === selected.daemon_id && p.session_id === selected.session_id,
     );
     const resolved: PwaPermissionResolved[] = [];
 
-    const items = mergeTimeline({ events, chat, pending, resolved });
+    const items = mergeTimeline({ events, pending, resolved });
 
     const daemon = hub.daemons.find((d) => d.daemon_id === selected.daemon_id);
     const session = daemon?.sessions.find((s) => s.session_id === selected.session_id);
     const online = !!daemon?.online && !!session;
     const idle = session?.state === "idle";
+
+    // Events buffer is sorted by jsonl_offset (see useHub merging) — last is max.
+    const last = events[events.length - 1];
+    const maxOffset = last ? last.jsonl_offset : -1;
+    const unreadCount = lastSeenOffset === undefined
+      ? events.length
+      : events.reduce((n, e) => (e.jsonl_offset > lastSeenOffset ? n + 1 : n), 0);
 
     // before_offset = oldest known event's offset, or MAX_SAFE_INTEGER if the
     // buffer is empty (daemon then returns the tail of the JSONL file).
@@ -91,8 +108,12 @@ export function useSessionTimeline(
       online,
       idle,
       pendingInThisSession: pending[0],
+      maxOffset,
+      unreadCount,
+      historyLoading: hub.pendingHistoryFor(selected.daemon_id, selected.session_id)?.status === "pending",
+      historyTimedOut: hub.pendingHistoryFor(selected.daemon_id, selected.session_id)?.status === "timed_out",
     };
-  }, [hub, selected]);
+  }, [hub, selected, lastSeenOffset]);
 
   // Auto-load history on first entry into a session whose live buffer is empty.
   // The set of already-fetched-on-entry session keys lives in a ref so a remount

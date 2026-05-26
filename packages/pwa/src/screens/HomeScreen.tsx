@@ -1,10 +1,16 @@
 import { useState } from "react";
-import { Plus, ShieldAlert, Trash2 } from "lucide-react";
+import { Plus, ShieldAlert, Trash2, X } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { cn } from "../lib/utils";
 import type { DaemonViewModel, SessionRowViewModel } from "../lib/daemonViewModel";
 import { StatusChip } from "./primitives/StatusChip";
 import { StatusIcon } from "./primitives/StatusIcon";
+import type { PwaStartSessionRejected } from "@cc-remote/proto";
+import type { PendingCommand } from "../hooks/pendingCommands";
+
+function daemonLabel(d: { display_name: string | null; hostname: string }): string {
+  return d.display_name ?? d.hostname;
+}
 
 export interface TopPendingPreview {
   daemonHostname: string;
@@ -22,6 +28,11 @@ export interface HomeScreenProps {
   onStartSession: (daemon_id: string, cwd: string) => void;
   onKillSession: (daemon_id: string, session_id: string) => void;
   onOpenPermission: () => void;
+  /** Per-daemon last start_session_rejected, surfaced inline. */
+  startSessionErrors?: Record<string, PwaStartSessionRejected>;
+  onDismissStartSessionError?: (daemon_id: string) => void;
+  pendingStartSessionByDaemon?: Record<string, PendingCommand>;
+  pendingKillByKey?: Record<string, PendingCommand>;  // key: `${daemon_id}::${session_id}`
 }
 
 export function HomeScreen({
@@ -33,6 +44,10 @@ export function HomeScreen({
   onStartSession,
   onKillSession,
   onOpenPermission,
+  startSessionErrors,
+  onDismissStartSessionError,
+  pendingStartSessionByDaemon,
+  pendingKillByKey,
 }: HomeScreenProps) {
   const [killConfirm, setKillConfirm] = useState<string | null>(null);
 
@@ -76,6 +91,10 @@ export function HomeScreen({
               onStartSession={onStartSession}
               onKillSession={onKillSession}
               selectedSessionId={selectedSessionId}
+              startSessionError={startSessionErrors?.[d.daemon_id]}
+              onDismissStartSessionError={onDismissStartSessionError}
+              pendingStart={pendingStartSessionByDaemon?.[d.daemon_id]}
+              pendingKillByKey={pendingKillByKey}
             />
           ) : (
             <OfflineDaemonCard key={d.daemon_id} daemon={d} />
@@ -130,6 +149,10 @@ function DaemonCard({
   onSelectSession,
   onStartSession,
   onKillSession,
+  startSessionError,
+  onDismissStartSessionError,
+  pendingStart,
+  pendingKillByKey,
 }: {
   daemon: DaemonViewModel;
   killConfirm: string | null;
@@ -138,8 +161,15 @@ function DaemonCard({
   onSelectSession: (daemon_id: string, session_id: string) => void;
   onStartSession: (daemon_id: string, cwd: string) => void;
   onKillSession: (daemon_id: string, session_id: string) => void;
+  startSessionError?: PwaStartSessionRejected;
+  onDismissStartSessionError?: (daemon_id: string) => void;
+  pendingStart?: PendingCommand;
+  pendingKillByKey?: Record<string, PendingCommand>;
 }) {
   const [cwd, setCwd] = useState("");
+
+  const starting = pendingStart?.status === "pending";
+  const startTimedOut = pendingStart?.status === "timed_out";
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -156,7 +186,7 @@ function DaemonCard({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="truncate font-semibold">{daemon.hostname}</h3>
+          <h3 className="truncate font-semibold">{daemonLabel(daemon)}</h3>
           <p className="text-muted-foreground text-sm">Online</p>
         </div>
         <span className="bg-muted text-muted-foreground rounded-full px-2 py-1 text-xs">
@@ -166,16 +196,64 @@ function DaemonCard({
 
       <form className="mt-3 flex gap-2" onSubmit={submit}>
         <input
-          aria-label={`Working directory for ${daemon.hostname}`}
+          aria-label={`Working directory for ${daemonLabel(daemon)}`}
           className="border-border bg-muted text-foreground focus:border-ring focus:ring-ring/30 h-11 min-w-0 flex-1 rounded-md border px-3 font-mono text-sm outline-none focus:ring-2"
+          disabled={starting}
           onChange={(e) => setCwd(e.target.value)}
           placeholder="/path/to/project"
           value={cwd}
         />
-        <Button aria-label="Start session" disabled={!cwd.trim()} size="icon" type="submit">
-          <Plus className="size-4" />
+        <Button aria-label="Start session" disabled={!cwd.trim() || starting} size="icon" type="submit">
+          {starting ? (
+            <span className="animate-spin" data-testid="start-spinner">…</span>
+          ) : (
+            <Plus className="size-4" />
+          )}
         </Button>
       </form>
+
+      {starting && (
+        <p
+          className="text-muted-foreground mt-2 text-sm"
+          data-testid={`start-session-pending-${daemon.daemon_id}`}
+        >
+          Starting session…
+        </p>
+      )}
+      {startTimedOut && (
+        <div
+          className="bg-danger-subtle text-danger mt-2 rounded-md px-3 py-2 text-sm"
+          data-testid={`start-session-timeout-${daemon.daemon_id}`}
+          role="alert"
+        >
+          Start not confirmed. Try again.
+        </div>
+      )}
+
+      {startSessionError && (
+        <div
+          className="bg-danger-subtle border-danger/35 mt-2 flex items-start justify-between gap-2 rounded-md border p-2 text-sm"
+          data-testid={`start-session-error-${daemon.daemon_id}`}
+          role="alert"
+        >
+          <div className="min-w-0">
+            <p className="text-danger font-semibold">
+              Couldn't start session ({startSessionError.reason.replace(/_/g, " ")})
+            </p>
+            <p className="text-muted-foreground truncate">{startSessionError.message}</p>
+          </div>
+          {onDismissStartSessionError && (
+            <Button
+              aria-label="Dismiss start-session error"
+              onClick={() => onDismissStartSessionError(daemon.daemon_id)}
+              size="icon"
+              variant="ghost"
+            >
+              <X className="size-4" />
+            </Button>
+          )}
+        </div>
+      )}
 
       <ul
         className="mt-3 grid gap-2"
@@ -194,6 +272,7 @@ function DaemonCard({
                 setKillConfirm={setKillConfirm}
                 onSelect={() => onSelectSession(s.daemon_id, s.session_id)}
                 onKill={() => onKillSession(s.daemon_id, s.session_id)}
+                pendingKill={pendingKillByKey?.[`${s.daemon_id}::${s.session_id}`]}
               />
             </li>
           ))
@@ -211,7 +290,7 @@ function OfflineDaemonCard({ daemon }: { daemon: DaemonViewModel }) {
     >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h3 className="font-semibold">{daemon.hostname}</h3>
+          <h3 className="font-semibold">{daemonLabel(daemon)}</h3>
           <p className="text-muted-foreground text-sm">Offline</p>
         </div>
         <StatusChip label="Offline" tone="offline" />
@@ -243,6 +322,7 @@ function SessionRow({
   setKillConfirm,
   onSelect,
   onKill,
+  pendingKill,
 }: {
   session: SessionRowViewModel;
   selected: boolean;
@@ -250,8 +330,11 @@ function SessionRow({
   setKillConfirm: (id: string | null) => void;
   onSelect: () => void;
   onKill: () => void;
+  pendingKill?: PendingCommand;
 }) {
   const confirming = killConfirm === session.session_id;
+  const killing = pendingKill?.status === "pending";
+  const killTimedOut = pendingKill?.status === "timed_out";
   return (
     <div
       className={cn(
@@ -278,7 +361,23 @@ function SessionRow({
           </span>
         </span>
       </button>
-      {confirming ? (
+      {killing ? (
+        <div
+          className="bg-warning-subtle text-warning mt-2 flex items-center gap-2 rounded-md p-2 text-sm"
+          data-testid={`kill-pending-${session.session_id}`}
+        >
+          <span className="animate-pulse">●</span>
+          <span>Killing session…</span>
+        </div>
+      ) : killTimedOut ? (
+        <div
+          className="bg-danger-subtle text-danger mt-2 rounded-md p-2 text-sm"
+          data-testid={`kill-timeout-${session.session_id}`}
+          role="alert"
+        >
+          Kill not confirmed. Try again.
+        </div>
+      ) : confirming ? (
         <div className="bg-danger-subtle mt-2 flex items-center justify-between gap-2 rounded-md p-2 text-sm">
           <span className="text-danger font-semibold">Kill session?</span>
           <span className="flex gap-2">

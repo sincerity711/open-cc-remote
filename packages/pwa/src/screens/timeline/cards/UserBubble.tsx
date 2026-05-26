@@ -1,6 +1,8 @@
 import { Check } from "lucide-react";
 import type { TextMessageChunkEvent } from "@cc-remote/proto";
 import { EventType } from "@cc-remote/proto";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { ChatBubble } from "../../primitives/ChatBubble";
 
 export type UserBubbleStatus = "sending" | "sent" | "failed";
@@ -29,6 +31,10 @@ export function UserBubbleSurface() {
  * workflow split: no header, no rail glyph (the row hides the marker — the
  * timeline rail line still passes behind). Card chrome belongs to workflow
  * events (`tool` / `permission` / `failure` / `task`), not chat.
+ *
+ * Body is rendered as GitHub-flavored markdown — most user prompts are plain
+ * text, but power users send pasted snippets that benefit from code-fence
+ * rendering, and we want symmetry with assistant bubbles.
  */
 export function UserBubbleLive({
   event,
@@ -42,7 +48,11 @@ export function UserBubbleLive({
   const time = new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   return (
     <ChatBubble align="end" tone="primary">
-      <p className="whitespace-pre-wrap">{event.delta ?? ""}</p>
+      <div className="prose prose-sm dark:prose-invert max-w-none break-words [&_pre]:bg-code [&_pre]:text-code-foreground [&_code]:font-mono">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          {event.delta ?? ""}
+        </ReactMarkdown>
+      </div>
       <div className="text-muted-foreground mt-1 flex items-center justify-end gap-1 text-[11px]">
         <span>{time}</span>
         {status === "sent" && <Check className="size-3" />}
