@@ -507,3 +507,91 @@ export interface PwaSessionStateFrame {
   prev: SessionState;
   ts: number;
 }
+
+// ─── ask_user_question relay ──────────────────────────────────────────
+//
+// Workaround for the missing channel notification (anthropics/claude-code
+// #59245). Trigger path is a local PreToolUse hook on AskUserQuestion that
+// connects to the daemon socket; protocol shape mirrors permission_request
+// so the PWA can reuse the same surface idiom.
+//
+// When upstream ships `notifications/claude/channel/ask_question_request`,
+// only the `HookToDaemon*` entry path needs to move from socket → plugin;
+// daemon/hub/PWA frames can stay as-is.
+
+export interface AskUserQuestionItem {
+  question: string;
+  header: string;
+  multiSelect: boolean;
+  options: { label: string; description?: string }[];
+}
+
+// Hook (over Unix socket) → daemon
+export interface HookAskUserQuestionRequest {
+  type: "ask_user_question_request";
+  /** CC session_id from hook stdin == claude_session_id (daemon resolves to plugin_session_id) */
+  claude_session_id: string;
+  request_id: string;
+  questions: AskUserQuestionItem[];
+  expires_at: number;
+}
+
+// Hook ← daemon (over the same Unix socket connection)
+export interface HookAskUserQuestionAnswer {
+  type: "ask_user_question_answer";
+  request_id: string;
+  /** answers[i] corresponds to questions[i]; null = "Other"/timeout fallback. */
+  answers: (string | null)[];
+  resolution: "answered" | "expired" | "session_unknown" | "no_pwa";
+}
+
+// Daemon → hub
+export interface DaemonAskUserQuestionRequest {
+  type: "ask_user_question_request";
+  session_id: string;
+  request_id: string;
+  questions: AskUserQuestionItem[];
+  expires_at: number;
+}
+
+export interface DaemonAskUserQuestionResolved {
+  type: "ask_user_question_resolved";
+  session_id: string;
+  request_id: string;
+  resolution: "answered" | "expired" | "session_unknown" | "no_pwa";
+}
+
+// Hub → PWA
+export interface PwaAskUserQuestionRequest {
+  type: "ask_user_question_request";
+  daemon_id: string;
+  session_id: string;
+  request_id: string;
+  questions: AskUserQuestionItem[];
+  expires_at: number;
+}
+
+export interface PwaAskUserQuestionResolved {
+  type: "ask_user_question_resolved";
+  daemon_id: string;
+  session_id: string;
+  request_id: string;
+  resolution: "answered" | "expired" | "session_unknown" | "no_pwa";
+}
+
+// PWA → Hub
+export interface PwaToHubAskUserQuestionAnswer {
+  type: "ask_user_question_answer";
+  daemon_id: string;
+  session_id: string;
+  request_id: string;
+  answers: (string | null)[];
+}
+
+// Hub → daemon
+export interface HubAskUserQuestionAnswer {
+  type: "ask_user_question_answer";
+  session_id: string;
+  request_id: string;
+  answers: (string | null)[];
+}
