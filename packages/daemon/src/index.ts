@@ -1,5 +1,6 @@
-import { hostname, homedir } from "node:os";
-import { existsSync, readFileSync, mkdirSync } from "node:fs";
+import { hostname } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import type { Socket } from "node:net";
 import { spawn as childSpawn } from "node:child_process";
@@ -13,12 +14,16 @@ import { getOrCreateKeypair } from "./keystore.ts";
 import { jsonlPath } from "./jsonl-paths.ts";
 import { bindJsonl } from "./jsonl-bind.ts";
 import { readHistory } from "./jsonl-history.ts";
+import { scanInventory } from "./slash-inventory.ts";
 import { startWatcher, type WatcherHandle } from "./jsonl-watcher.ts";
 import { openDb } from "./db.ts";
 import { recordRequest, resolveRequest } from "./repos/permissions.ts";
 import { handleHubChatSend, handlePluginChatOut } from "./chat.ts";
 import { SessionFsm } from "./session-fsm.ts";
 import { ClaudeCodeAdapter } from "./adapters/claude-code.ts";
+import { precheckStartSession } from "./start-session.ts";
+import { ensureMcpConfig } from "./mcp-config.ts";
+import { createPendingStarts } from "./pending-starts.ts";
 
 /**
  * Best-effort dismissal of Claude Code's interactive boot dialogs in a freshly-
@@ -94,6 +99,26 @@ const fsm = new SessionFsm();
 const adapter = new ClaudeCodeAdapter();
 const db = openDb(join(cfg.state_dir, "db.sqlite"));
 
+// Idempotently write <state_dir>/mcp-config.json so this daemon can spawn
+// claude-with-plugin without any sibling tooling. Pre-rework the demo script
+// wrote it; non-demo users got nothing. We resolve the plugin entry relative
+// to this index.ts file at runtime so it works whether the daemon is run
+// from source or installed via the `cc-remote install` unit.
+try {
+  const pluginEntry = join(import.meta.dir, "..", "..", "plugin", "src", "index.ts");
+  const mcpResult = ensureMcpConfig({
+    state_dir: cfg.state_dir,
+    plugin_entry: pluginEntry,
+    socket_path: cfg.socket_path,
+    bun_path: process.execPath || "bun",
+  });
+  if (mcpResult.created) {
+    process.stderr.write(`daemon: wrote default mcp-config.json at ${mcpResult.path}\n`);
+  }
+} catch (e) {
+  process.stderr.write(`daemon: warning — could not ensure mcp-config.json: ${(e as Error).message}\n`);
+}
+
 const kp = await getOrCreateKeypair(cfg.state_dir);
 
 let jwt: string | undefined;
@@ -118,6 +143,7 @@ const idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const clientToSession = new Map<Socket, string>();
 const sessionToClient = new Map<string, Socket>();
 const requestToClient = new Map<string, Socket>();
+const pendingStarts = createPendingStarts({ ttlMs: 60_000 });
 
 const hub = startHubClient({
   hub_url: cfg.hub_url,
@@ -204,39 +230,48 @@ const hub = startHubClient({
       try { client.destroy(); } catch {}
     }
     else if (frame.type === "start_session") {
-      if (!cfg.allow_start) {
-        process.stderr.write(`daemon: start_session ignored (allow_start=false)\n`);
+      const requestId = frame.request_id ?? null;
+      const pre = precheckStartSession(
+        { cwd: frame.cwd },
+        {
+          allow_start: cfg.allow_start,
+          allowed_cwd_prefix: cfg.allowed_cwd_prefix,
+          spawn_command: cfg.spawn_command,
+        },
+      );
+      if (!pre.ok) {
+        process.stderr.write(`daemon: start_session rejected (${pre.reason}): ${pre.message}\n`);
+        hub.send({
+          type: "start_session_rejected",
+          request_id: requestId,
+          cwd: pre.cwd,
+          reason: pre.reason,
+          message: pre.message,
+        });
         return;
       }
-      // Expand a leading "~" to $HOME before the prefix check. PWA composer
-      // currently passes the literal user input.
-      let cwd = frame.cwd;
-      if (cwd === "~") cwd = homedir();
-      else if (cwd.startsWith("~/")) cwd = join(homedir(), cwd.slice(2));
-      const allowed = cfg.allowed_cwd_prefix.some((p) => cwd.startsWith(p));
-      if (!allowed) {
-        process.stderr.write(`daemon: start_session rejected — cwd ${cwd} not in allowed_cwd_prefix\n`);
-        return;
-      }
-      // Create the cwd if it doesn't exist; otherwise tmux silently falls back
-      // to $HOME and the spawn lands in the wrong place.
-      try { mkdirSync(cwd, { recursive: true }); } catch (e) {
-        process.stderr.write(`daemon: start_session mkdir failed for ${cwd}: ${(e as Error).message}\n`);
-        return;
-      }
+      const cwd = pre.cwd;
       const tmuxName = frame.name ?? `cc-${Date.now()}`;
       try {
         const r = childSpawn("tmux", [
           "new-session", "-d",
           "-s", tmuxName,
           "-c", cwd,
-          cfg.spawn_command,
+          cfg.spawn_command!,
         ], { stdio: "ignore", detached: true });
         r.on("error", (e) => {
           process.stderr.write(`daemon: start_session spawn error: ${e.message}\n`);
+          hub.send({
+            type: "start_session_rejected",
+            request_id: requestId,
+            cwd,
+            reason: "spawn_failed",
+            message: `tmux spawn error: ${e.message}`,
+          });
         });
         r.unref();
         process.stderr.write(`daemon: spawned tmux session ${tmuxName} in ${cwd}\n`);
+        pendingStarts.add(requestId ?? undefined, cwd);
         // Best-effort dismissal of Claude Code's interactive dialogs
         // (dev-channels confirmation, workspace-trust). Without this, a
         // PWA-driven new-session sits at the dialog forever — there's nobody
@@ -244,6 +279,13 @@ const hub = startHubClient({
         dismissClaudeDialogs(tmuxName);
       } catch (e) {
         process.stderr.write(`daemon: start_session spawn threw: ${(e as Error).message}\n`);
+        hub.send({
+          type: "start_session_rejected",
+          request_id: requestId,
+          cwd,
+          reason: "spawn_failed",
+          message: `tmux spawn threw: ${(e as Error).message}`,
+        });
       }
     }
     else if (frame.type === "chat_send") {
@@ -259,9 +301,104 @@ const hub = startHubClient({
   privateJwk,
 });
 
+function startSessionWatcher(s: SessionSnapshot, claudeId: string): void {
+  const path = jsonlPath(s.cwd, claudeId);
+  process.stderr.write(`daemon: watcher start session=${s.session_id} claude=${claudeId} path=${path}\n`);
+  const watcher = startWatcher({
+    path,
+    // startOffset: 0 — drain the entire JSONL on bind. The fs event that
+    // resolves bindJsonl is *the same write* that prompted the bind (e.g.
+    // the user-injected <channel> line); reading from current EOF would
+    // skip past it. Re-emitting historic lines is safe because both the
+    // hub event ring and the PWA `event` reducer dedupe by jsonl_offset.
+    startOffset: 0,
+    onLine: (line, jsonl_offset) => {
+      let row: unknown;
+      try { row = JSON.parse(line); } catch { row = { raw: line }; }
+      const payload = adapter.convertRow(row, {
+        sessionId: s.session_id,
+        jsonlOffset: jsonl_offset,
+      });
+      hub.send({
+        type: "event",
+        session_id: s.session_id,
+        jsonl_offset,
+        payload,
+      });
+
+      // Drive the session FSM. Every line is activity → working (unless
+      // currently in `waiting` for a permission, in which case the FSM
+      // remembers we'd be working and will pop back on resolve).
+      fsm.onJsonlLine(s.session_id);
+
+      // Idle timer:
+      //   - `user` line               → new turn started, cancel any pending idle.
+      //   - `assistant` w/o end_turn  → mid-turn streaming, cancel any pending idle.
+      //   - `assistant` w/ end_turn   → fire task_completed + (re)arm idle timer.
+      //   - everything else (system, summary, ai-title, last-prompt,
+      //     permission-mode, …)      → leave the timer alone. Real Claude
+      //     writes these as trailing metadata after end_turn; clearing the
+      //     timer on them prevents idle from ever firing.
+      const p = row as { type?: string; message?: { stop_reason?: string } };
+      const cancelIdle = () => {
+        const existing = idleTimers.get(s.session_id);
+        if (existing) { clearTimeout(existing); idleTimers.delete(s.session_id); }
+      };
+      if (p.type === "user") {
+        cancelIdle();
+      } else if (p.type === "assistant") {
+        if (p.message?.stop_reason === "end_turn") {
+          cancelIdle();
+          hub.send({ type: "task_completed", session_id: s.session_id, ts: Date.now() });
+          const t = setTimeout(() => {
+            idleTimers.delete(s.session_id);
+            hub.send({ type: "idle", session_id: s.session_id, ts: Date.now() });
+            fsm.onIdleTimer(s.session_id);
+          }, cfg.idle_window_ms);
+          t.unref();
+          idleTimers.set(s.session_id, t);
+        } else {
+          cancelIdle();
+        }
+      }
+    },
+    onError: (e: Error) => process.stderr.write(`daemon: watcher error for ${s.session_id}: ${e.message}\n`),
+  });
+  watchers.set(s.session_id, watcher);
+}
+
 sessions.onAdd((s: SessionSnapshot) => {
   fsm.register(s.session_id);
-  hub.send({ type: "session_open", session: s });
+  const matchedReqId = pendingStarts.consume(s.cwd);
+  hub.send({
+    type: "session_open",
+    session: s,
+    ...(matchedReqId ? { request_id: matchedReqId } : {}),
+  });
+
+  // Push the slash command inventory once per session register.
+  scanInventory({ cwd: s.cwd, homeDir: homedir() })
+    .then((entries) => {
+      hub.send({ type: "slash_inventory", session_id: s.session_id, entries });
+    })
+    .catch((e) => {
+      process.stderr.write(`daemon: slash inventory scan failed for ${s.session_id}: ${(e as Error).message}\n`);
+    });
+
+  // Plugin re-register after daemon restart: claude_session_id was already
+  // resolved in a prior daemon process and the plugin is replaying it.
+  // Skip bindJsonl (which would race against an idle JSONL whose mtime is
+  // outside the pre-scan window) and start the watcher directly.
+  if (s.claude_session_id) {
+    const path = jsonlPath(s.cwd, s.claude_session_id);
+    if (existsSync(path)) {
+      process.stderr.write(`daemon: skipping bind for re-register session=${s.session_id} claude=${s.claude_session_id}\n`);
+      startSessionWatcher(s, s.claude_session_id);
+      return;
+    }
+    // File doesn't exist yet — fall through to bindJsonl as a safety net.
+    process.stderr.write(`daemon: claude_session_id present on register but JSONL absent (${path}); falling back to bindJsonl\n`);
+  }
 
   // Asynchronously bind the JSONL: discover the real claude_session_id
   // by watching the cwd's projects dir for a new .jsonl file.
@@ -273,70 +410,22 @@ sessions.onAdd((s: SessionSnapshot) => {
     }
     sessions.update(s.session_id, { claude_session_id: claudeId });
 
-    const path = jsonlPath(s.cwd, claudeId);
-    process.stderr.write(`daemon: jsonl bind resolved session=${s.session_id} claude=${claudeId} path=${path}\n`);
-    const watcher = startWatcher({
-      path,
-      // startOffset: 0 — drain the entire JSONL on bind. The fs event that
-      // resolves bindJsonl is *the same write* that prompted the bind (e.g.
-      // the user-injected <channel> line); reading from current EOF would
-      // skip past it. Re-emitting historic lines is safe because both the
-      // hub event ring and the PWA `event` reducer dedupe by jsonl_offset.
-      startOffset: 0,
-      onLine: (line, jsonl_offset) => {
-        let row: unknown;
-        try { row = JSON.parse(line); } catch { row = { raw: line }; }
-        const payload = adapter.convertRow(row, {
-          sessionId: s.session_id,
-          jsonlOffset: jsonl_offset,
-        });
-        hub.send({
-          type: "event",
+    // Notify the plugin owning this session so it can cache the resolved
+    // claude_session_id and replay it on a future re-register (item #7).
+    const client = sessionToClient.get(s.session_id);
+    if (client) {
+      try {
+        sockServer.replyTo(client, {
+          type: "bind_resolved",
           session_id: s.session_id,
-          jsonl_offset,
-          ts: Date.now(),
-          payload,
+          claude_session_id: claudeId,
         });
+      } catch (e) {
+        process.stderr.write(`daemon: bind_resolved send failed for ${s.session_id}: ${(e as Error).message}\n`);
+      }
+    }
 
-        // Drive the session FSM. Every line is activity → working (unless
-        // currently in `waiting` for a permission, in which case the FSM
-        // remembers we'd be working and will pop back on resolve).
-        fsm.onJsonlLine(s.session_id);
-
-        // Idle timer:
-        //   - `user` line               → new turn started, cancel any pending idle.
-        //   - `assistant` w/o end_turn  → mid-turn streaming, cancel any pending idle.
-        //   - `assistant` w/ end_turn   → fire task_completed + (re)arm idle timer.
-        //   - everything else (system, summary, ai-title, last-prompt,
-        //     permission-mode, …)      → leave the timer alone. Real Claude
-        //     writes these as trailing metadata after end_turn; clearing the
-        //     timer on them prevents idle from ever firing.
-        const p = row as { type?: string; message?: { stop_reason?: string } };
-        const cancelIdle = () => {
-          const existing = idleTimers.get(s.session_id);
-          if (existing) { clearTimeout(existing); idleTimers.delete(s.session_id); }
-        };
-        if (p.type === "user") {
-          cancelIdle();
-        } else if (p.type === "assistant") {
-          if (p.message?.stop_reason === "end_turn") {
-            cancelIdle();
-            hub.send({ type: "task_completed", session_id: s.session_id, ts: Date.now() });
-            const t = setTimeout(() => {
-              idleTimers.delete(s.session_id);
-              hub.send({ type: "idle", session_id: s.session_id, ts: Date.now() });
-              fsm.onIdleTimer(s.session_id);
-            }, cfg.idle_window_ms);
-            t.unref();
-            idleTimers.set(s.session_id, t);
-          } else {
-            cancelIdle();
-          }
-        }
-      },
-      onError: (e: Error) => process.stderr.write(`daemon: watcher error for ${s.session_id}: ${e.message}\n`),
-    });
-    watchers.set(s.session_id, watcher);
+    startSessionWatcher(s, claudeId);
   });
 });
 
@@ -367,13 +456,14 @@ fsm.onTransition((session_id, state, prev) => {
 
 // FSM RUN_* lifecycle events → forward to hub as synthetic EventFrames.
 // Negative jsonl_offset ensures these never collide with real positive JSONL
-// offsets in the PWA reducer's dedup map.
+// offsets in the PWA reducer's dedup map. These events have no JSONL-native
+// timestamp; the PWA's mergeTimeline treats `ts === 0` as a sticky-after-prev
+// secondary-sort case so they don't get crushed to epoch-zero.
 fsm.onRunEvent((session_id, ev) => {
   hub.send({
     type: "event",
     session_id,
     jsonl_offset: -Date.now(),
-    ts: Date.now(),
     payload: [ev],
   });
 });
