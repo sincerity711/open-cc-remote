@@ -86,7 +86,7 @@ test("pair a daemon end-to-end via the PWA Settings UI", async ({ page }, testIn
       await expect(drawer).toHaveCount(0);
       await session.page.getByRole("button", { name: "Open settings" }).click();
       await drawer.waitFor();
-      await expect(drawer.getByText(daemon_id, { exact: false })).toBeVisible({ timeout: 30_000 });
+      await expect(drawer.getByText(daemon_id, { exact: false }).first()).toBeVisible({ timeout: 30_000 });
       await expect(drawer.locator('[aria-label="online"]').first()).toBeVisible({ timeout: 30_000 });
     });
 

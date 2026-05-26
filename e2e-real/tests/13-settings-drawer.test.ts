@@ -115,7 +115,7 @@ test("settings drawer: rename / push-pref toggle / appearance / close", async ({
       await input.fill(newName);
       await drawer.getByRole("button", { name: "Save" }).click();
 
-      await expect(drawer.getByText(newName, { exact: false })).toBeVisible({ timeout: 10_000 });
+      await expect(drawer.getByText(newName, { exact: false }).first()).toBeVisible({ timeout: 10_000 });
     });
 
     await sc.step("push-pref-toggled", async () => {

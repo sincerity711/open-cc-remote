@@ -53,8 +53,13 @@ export async function startPreview(): Promise<PreviewHandle> {
     await waitPortFree(PREVIEW_PORT, 10_000);
   }
 
-  // 3. Start preview.
-  const child: ChildProcess = spawn("bun", ["run", "preview"], { cwd: pwaDir, stdio: ["ignore", "pipe", "pipe"] });
+  // 3. Start preview. Pass VITE_HUB_URL so vite.config.ts derives the right
+  //    proxy target (HUB_HTTP) for /auth /push /daemons etc.
+  const child: ChildProcess = spawn("bun", ["run", "preview"], {
+    cwd: pwaDir,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, VITE_HUB_URL: "ws://localhost:7745" },
+  });
   const baseURL = `http://localhost:${PREVIEW_PORT}`;
 
   // 4. Wait for ready (HTTP 200).
