@@ -17,6 +17,7 @@ export interface MakeServerOpts {
   pwa_url?: string;
   push?: PushHelper;
   offline_push_delay_ms?: number;
+  static_dir?: string;
 }
 
 export function makeServer(opts: MakeServerOpts = {}) {
@@ -371,6 +372,12 @@ export function makeServer(opts: MakeServerOpts = {}) {
       const ok = server.upgrade(req, { data: { kind: "pwa", key: "", user: wsUser, user_id: wsUserId } satisfies WsData });
       return ok ? undefined : new Response("upgrade failed", { status: 500 });
     }
+
+    if (opts.static_dir && req.method === "GET") {
+      const staticResp = await tryStaticFile(opts.static_dir, url.pathname);
+      if (staticResp) return staticResp;
+    }
+
     return new Response("not found", { status: 404 });
   };
 
@@ -402,6 +409,11 @@ export function makeServer(opts: MakeServerOpts = {}) {
             { user: ws.data.user ?? "anonymous", user_id: ws.data.user_id ?? "anonymous" },
             (f) => ws.send(JSON.stringify(f)),
           );
+        } else if (pf.type === "cli_command") {
+          router.onPwaCliCommand(
+            pf,
+            { user: ws.data.user ?? "anonymous", user_id: ws.data.user_id ?? "anonymous" },
+          );
         }
       }
     },
@@ -416,6 +428,21 @@ export function makeServer(opts: MakeServerOpts = {}) {
   };
 
   return { fetch, websocket };
+}
+
+async function tryStaticFile(static_dir: string, pathname: string): Promise<Response | null> {
+  const decoded = decodeURIComponent(pathname);
+  // Reject path traversal — any segment that would escape static_dir.
+  if (decoded.split("/").some((seg) => seg === "..")) return null;
+  const rel = decoded === "/" ? "/index.html" : decoded;
+  const direct = Bun.file(`${static_dir}${rel}`);
+  if (await direct.exists()) return new Response(direct);
+  // SPA fallback: any path without a file extension serves index.html.
+  if (!decoded.includes(".")) {
+    const index = Bun.file(`${static_dir}/index.html`);
+    if (await index.exists()) return new Response(index);
+  }
+  return null;
 }
 
 // Legacy export kept for the routes.test.ts unit test that pre-dates makeServer.

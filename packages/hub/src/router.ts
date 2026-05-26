@@ -1,6 +1,7 @@
 import type {
   DaemonToHub, HubToPwa, HubToDaemonStartSession, SessionSnapshot, DaemonView, EventFrameForPwa, PwaToHub,
   PwaToHubChatSend, HubToDaemonChatSend, HubChatErrorBroadcast,
+  PwaToHubCliCommand, HubToDaemonCliCommand,
 } from "@cc-remote/proto";
 import type { DaemonRegistry, PwaRegistry } from "./connections.ts";
 import type { Db } from "./db.ts";
@@ -223,6 +224,17 @@ export class Router {
         });
         return;
       }
+      case "slash_inventory": {
+        const state = this.daemons.get(daemon_id);
+        if (!state) return;
+        this.pwaReg.broadcast({
+          type: "slash_inventory",
+          daemon_id,
+          session_id: frame.session_id,
+          entries: frame.entries,
+        });
+        return;
+      }
     }
   }
 
@@ -338,6 +350,23 @@ export class Router {
       ts,
       ...(frame.client_message_id !== undefined ? { client_message_id: frame.client_message_id } : {}),
     });
+  }
+
+  onPwaCliCommand(
+    frame: PwaToHubCliCommand,
+    auth: { user: string; user_id: string },
+  ): void {
+    if (!this.daemonReg.has(frame.daemon_id)) {
+      // No live daemon connection — silently drop. PWA can re-emit later.
+      return;
+    }
+    const out: HubToDaemonCliCommand = {
+      type: "cli_command",
+      session_id: frame.session_id,
+      text: frame.text,
+      user: auth.user,
+    };
+    this.daemonReg.send(frame.daemon_id, out);
   }
 
   snapshot(): DaemonView[] {

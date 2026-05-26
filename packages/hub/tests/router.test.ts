@@ -882,3 +882,66 @@ test("session_open forwards request_id from daemon to PWA", () => {
   expect(frame.daemon_id).toBe("d");
   expect(frame.request_id).toBe("req-7");
 });
+
+// ─── slash_inventory + cli_command ────────────────────────────────────
+
+test("daemon slash_inventory is broadcast to PWAs with daemon_id added", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const broadcasts: unknown[] = [];
+  preg.add({}, (f) => broadcasts.push(f));
+  const router = new Router(dreg, preg);
+
+  router.onDaemonFrame("d-1", {
+    type: "hello", daemon_id: "d-1", epoch: 1,
+    hostname: "h", agent_version: "0", sessions: [],
+  });
+  router.onDaemonFrame("d-1", {
+    type: "slash_inventory",
+    session_id: "s1",
+    entries: [
+      { id: "builtin:clear", name: "/clear", source: "builtin" },
+      { id: "skill:brainstorming", name: "/brainstorming", source: "skill" },
+    ],
+  });
+
+  const inv = broadcasts.find((b: any) => b.type === "slash_inventory") as any;
+  expect(inv).toBeDefined();
+  expect(inv.daemon_id).toBe("d-1");
+  expect(inv.session_id).toBe("s1");
+  expect(inv.entries).toHaveLength(2);
+});
+
+test("onPwaCliCommand forwards to the addressed daemon with user attached", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+
+  const sentToDaemon: unknown[] = [];
+  dreg.add("d-1", {}, (f) => sentToDaemon.push(f));
+
+  router.onPwaCliCommand(
+    { type: "cli_command", daemon_id: "d-1", session_id: "s1", text: "/clear" },
+    { user: "alice@x", user_id: "alice" },
+  );
+
+  expect(sentToDaemon).toEqual([{
+    type: "cli_command",
+    session_id: "s1",
+    text: "/clear",
+    user: "alice@x",
+  }]);
+});
+
+test("onPwaCliCommand for unknown daemon is silently dropped", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+
+  expect(() =>
+    router.onPwaCliCommand(
+      { type: "cli_command", daemon_id: "missing", session_id: "s1", text: "/clear" },
+      { user: "alice@x", user_id: "alice" },
+    ),
+  ).not.toThrow();
+});
