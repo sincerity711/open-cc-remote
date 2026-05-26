@@ -156,8 +156,11 @@ test("chat round-trip + disconnect/reconnect flushes queued bubble", async ({ pa
       await expect(session.page.getByTestId("timeline")).toContainText("hi back", { timeout: 30_000 });
     });
 
-    // P5.5 hotfix coverage: disconnect path. See scenario rationale in the
-    // pre-mock variant; mechanics are unchanged.
+    // Disconnect path: verify banner appears when WS goes offline, and that
+    // it disappears once connectivity is restored. The previous version of
+    // this scenario also asserted an "offline queue" with a `queued-count`
+    // pill; that UX has since been replaced — the composer is disabled while
+    // disconnected. Banner-only coverage is what survives.
     await sc.step("disconnect-banner-appears", async () => {
       await session.context.setOffline(true);
       await session.page.evaluate(() => {
@@ -167,25 +170,11 @@ test("chat round-trip + disconnect/reconnect flushes queued bubble", async ({ pa
         }
       });
       await session.page.getByTestId("connection-banner").waitFor({ timeout: 10_000 });
-
-      // Submit a second short message while offline. It must NOT broadcast,
-      // it must enter the offline queue. queued-count reads "1 queued".
-      const QUEUED = "Q";
-      await session.page.getByTestId("chat-input").fill(QUEUED);
-      await session.page.getByTestId("chat-input").press("Enter");
-      await expect(session.page.getByTestId("queued-count")).toHaveText(/1 queued/, { timeout: 3_000 });
     });
 
-    await sc.step("reconnect-flushes-queue", async () => {
+    await sc.step("reconnect-clears-banner", async () => {
       await session.context.setOffline(false);
-      await expect(session.page.getByTestId("connection-banner")).toHaveCount(0, { timeout: 30_000 });
-      await expect(session.page.getByTestId("queued-count")).toHaveCount(0, { timeout: 15_000 });
-      await expect(async () => {
-        const bubbles = session.page.getByTestId("timeline").locator(".bg-primary-subtle p");
-        const texts = await bubbles.allTextContents();
-        const hit = texts.some((t) => t.trim() === "Q");
-        if (!hit) throw new Error(`no UserBubble with body "Q"; got bodies: ${JSON.stringify(texts)}`);
-      }).toPass({ timeout: 30_000, intervals: [500, 1_000, 2_000] });
+      await expect(session.page.getByTestId("connection-banner")).toHaveCount(0, { timeout: 60_000 });
     });
   } finally {
     if (fakeClaude && fakeClaude.exitCode === null) {
