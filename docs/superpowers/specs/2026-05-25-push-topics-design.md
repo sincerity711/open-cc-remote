@@ -320,8 +320,8 @@ PNG icons are generated from a single SVG source (committed) via a one-shot scri
 ## Production VAPID deployment
 
 - Generate a key pair with `npx web-push generate-vapid-keys`.
-- Hub env: `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT=mailto:...`.
-- The existing `GET /push/vapid-public-key` route serves the public key to the PWA.
+- Hub env: `HUB_VAPID_PUBLIC_KEY`, `HUB_VAPID_PRIVATE_KEY`, `HUB_VAPID_SUBJECT=mailto:...` (matches existing `packages/hub/src/config.ts`).
+- PWA reads the public key at build time from `VITE_VAPID_PUBLIC_KEY` (matches existing `packages/pwa/src/RealApp.tsx`). Build pipeline must inject it; the deployment doc covers this.
 - Deployment requires HTTPS (Web Push hard requirement).
 - New doc `docs/operations/push-deployment.md` covers: key generation, env wiring, HTTPS requirement, the iOS 16.4+ "Add to Home Screen" prerequisite, and a manual verification checklist (register → trigger permission → confirm OS notification on a real Android Chrome and iOS installed PWA).
 
