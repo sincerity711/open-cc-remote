@@ -1,31 +1,22 @@
-// Service worker for cc-remote.
+// packages/pwa/public/sw.js
 // Receives Web Push events, shows OS notification, opens PWA on click.
+// Notification copy is built server-side (see hub push-topics.ts build_payload).
 
 self.addEventListener("push", (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch (e) {}
 
-  const title = "cc-remote";
-  let body = "";
-  if (data.kind === "permission") {
-    body = `${data.daemon_id || "daemon"} wants to run ${data.tool || "?"}\n${data.args_summary || ""}`;
-  } else if (data.kind === "idle") {
-    body = `${data.daemon_id || "daemon"} / ${data.session_id || "?"} is idle (waiting for input)`;
-  } else if (data.kind === "completed") {
-    body = `${data.daemon_id || "daemon"} / ${data.session_id || "?"} finished a turn`;
-  } else if (data.kind === "offline") {
-    const seconds = Math.round((data.since_ms || 0) / 1000);
-    body = `${data.hostname || data.daemon_id} has been offline for ${seconds}s`;
-  } else {
-    body = JSON.stringify(data);
-  }
+  const title = data.title || "cc-remote";
+  const body = data.body || "";
+  const tag = data.tag || "cc-remote";
+  const requireInteraction = data.require_interaction === true;
 
   event.waitUntil(
     self.registration.showNotification(title, {
       body,
-      tag: data.request_id || "cc-remote",
+      tag,
       data,
-      requireInteraction: data.kind === "permission",
+      requireInteraction,
     }),
   );
 });
