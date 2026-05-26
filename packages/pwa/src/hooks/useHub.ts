@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import type {
   HubToPwa, PwaToHub, DaemonView, EventFrameForPwa, PwaPermissionRequest,
-  PwaChatBroadcast, PwaStartSessionRejected, SessionState, AGUIEvent,
+  PwaChatBroadcast, PwaStartSessionRejected, SessionState, AGUIEvent, SlashEntry,
 } from "@cc-remote/proto";
 import {
   createPending, confirmPending, failPending, timeoutPending, dismissPending, findPending,
@@ -104,6 +104,11 @@ export interface HubState {
    * Keyed by client-generated id (e.g. client_message_id for chat_send).
    */
   pendingCommands: PendingCommands;
+  /**
+   * Slash command inventory pushed by the daemon after each session register,
+   * keyed by `${daemon_id}::${session_id}`. Used by the composer's `/` menu.
+   */
+  slashInventory: Record<string, SlashEntry[]>;
 }
 
 export function eventKey(daemon_id: string, session_id: string): string {
@@ -118,6 +123,7 @@ export function initialHubState(): HubState {
     startSessionErrors: {},
     noMoreHistory: {},
     pendingCommands: {},
+    slashInventory: {},
   };
 }
 
@@ -467,6 +473,13 @@ export function reducer(state: HubState, action: HubAction): HubState {
               [frame.daemon_id]: frame,
             },
             pendingCommands: nextPending,
+          };
+        }
+        case "slash_inventory": {
+          const k = eventKey(frame.daemon_id, frame.session_id);
+          return {
+            ...prev,
+            slashInventory: { ...prev.slashInventory, [k]: frame.entries },
           };
         }
       }
