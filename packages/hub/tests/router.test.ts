@@ -8,6 +8,7 @@ import { openDb } from "../src/db.ts";
 import { createDevice } from "../src/repos/devices.ts";
 import { addPushSub } from "../src/repos/push-subs.ts";
 import { pairDaemon } from "../src/repos/daemons.ts";
+import { setSubscription } from "../src/repos/topic-subscriptions.ts";
 import { fixtureSession } from "../../proto/src/test-fixtures.ts";
 
 test("hello frame populates state and broadcasts daemon_online", () => {
@@ -30,12 +31,12 @@ test("hello frame populates state and broadcasts daemon_online", () => {
   });
 
   expect(router.snapshot()).toEqual([
-    { daemon_id: "d-1", hostname: "macbook", online: true,
+    { daemon_id: "d-1", hostname: "macbook", display_name: null, online: true,
       sessions: [fixtureSession({ session_id: "s1", tmux_session: "work", tmux_pane: "%0", model: "opus-4.7", pid: 1234 })]
     }
   ]);
   expect(broadcasts).toEqual([{
-    type: "daemon_online", daemon_id: "d-1", hostname: "macbook",
+    type: "daemon_online", daemon_id: "d-1", hostname: "macbook", display_name: null,
     sessions: [fixtureSession({ session_id: "s1", tmux_session: "work", tmux_pane: "%0", model: "opus-4.7", pid: 1234 })]
   }]);
 });
@@ -90,7 +91,7 @@ test("PWA subscribe receives current snapshot", () => {
   router.onPwaSubscribe((f) => sent.push(f));
   expect(sent).toEqual([{
     type: "snapshot",
-    daemons: [{ daemon_id: "d-1", hostname: "h", online: true, sessions: [] }]
+    daemons: [{ daemon_id: "d-1", hostname: "h", display_name: null, online: true, sessions: [] }]
   }]);
 });
 
@@ -109,7 +110,6 @@ test("event frame is broadcast to PWAs with daemon_id added", () => {
     type: "event",
     session_id: "s1",
     jsonl_offset: 42,
-    ts: 1000,
     payload: [],
   });
 
@@ -118,7 +118,6 @@ test("event frame is broadcast to PWAs with daemon_id added", () => {
     daemon_id: "d-1",
     session_id: "s1",
     jsonl_offset: 42,
-    ts: 1000,
     payload: [],
   }]);
 });
@@ -131,7 +130,7 @@ test("ring buffer caps at 200", () => {
     hostname: "h", agent_version: "0", sessions: [] });
   for (let i = 0; i < 250; i++) {
     router.onDaemonFrame("d-1", {
-      type: "event", session_id: "s1", jsonl_offset: i, ts: i, payload: [],
+      type: "event", session_id: "s1", jsonl_offset: i, payload: [],
     });
   }
   const buf = router.bufferOf("d-1");
@@ -231,7 +230,7 @@ test("permission_request triggers Web Push fanout to subscriptions of daemon's o
     const dev = createDevice(db, "u1", "iPhone", null, 60_000);
     addPushSub(db, dev.device_id, "https://fcm/x", "p", "a");
 
-    const sentTo: Array<{ subs: unknown[]; payload: unknown }> = [];
+    const sentTo: Array<{ subs: any; payload: any }> = [];
     const push = {
       async sendTo(subs: unknown[], payload: unknown) {
         sentTo.push({ subs, payload });
@@ -255,12 +254,12 @@ test("permission_request triggers Web Push fanout to subscriptions of daemon's o
     await new Promise((r) => setTimeout(r, 10)); // let the void-promise dispatchPush complete
 
     expect(sentTo).toHaveLength(1);
-    expect(sentTo[0]!.subs).toEqual([{ device_id: dev.device_id, endpoint: "https://fcm/x", p256dh: "p", auth: "a", preferences: { permission: true } }]);
-    expect(sentTo[0]!.payload).toEqual({
-      kind: "permission",
-      daemon_id: "d-1", session_id: "s1", request_id: "r1",
-      tool: "Bash", args_summary: "ls -la",
-    });
+    expect(sentTo[0]!.subs.map((s: any) => s.device_id)).toEqual([dev.device_id]);
+    expect(sentTo[0]!.payload.kind).toBe("permission");
+    expect(sentTo[0]!.payload.daemon_id).toBe("d-1");
+    expect(sentTo[0]!.payload.session_id).toBe("s1");
+    expect(sentTo[0]!.payload.request_id).toBe("r1");
+    expect(sentTo[0]!.payload.tag).toBe("permission:r1");
     db.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -346,11 +345,7 @@ test("daemon offline push fires after delay", async () => {
     pairDaemon(db, "d-1", "u1", "{}", null);
     const dev = createDevice(db, "u1", "iPhone", null, 60_000);
     addPushSub(db, dev.device_id, "https://x", "p", "a");
-    // Opt-in to offline push.
-    db.prepare("UPDATE push_subs SET preferences = ? WHERE device_id = ?").run(
-      JSON.stringify({ permission: true, offline: true }),
-      dev.device_id,
-    );
+    setSubscription(db, dev.device_id, "offline", "", true);
 
     const sentTo: Array<{ subs: unknown[]; payload: any }> = [];
     const push = {
@@ -368,7 +363,7 @@ test("daemon offline push fires after delay", async () => {
     expect(sentTo).toHaveLength(1);
     expect(sentTo[0]!.payload.kind).toBe("offline");
     expect(sentTo[0]!.payload.daemon_id).toBe("d-1");
-    expect(sentTo[0]!.payload.hostname).toBe("Carls-Mac");
+    expect(sentTo[0]!.payload.body).toContain("Carls-Mac");
     db.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -381,10 +376,7 @@ test("daemon offline push is cancelled on reconnect", async () => {
     pairDaemon(db, "d-2", "u1", "{}", null);
     const dev = createDevice(db, "u1", "iPhone", null, 60_000);
     addPushSub(db, dev.device_id, "https://x", "p", "a");
-    db.prepare("UPDATE push_subs SET preferences = ? WHERE device_id = ?").run(
-      JSON.stringify({ offline: true }),
-      dev.device_id,
-    );
+    setSubscription(db, dev.device_id, "offline", "", true);
 
     const sentTo: unknown[] = [];
     const push = { async sendTo(subs: unknown[], payload: unknown) { sentTo.push({ subs, payload }); } };
@@ -486,6 +478,53 @@ test("onPwaCommand omits name when not provided in start_session", () => {
   }]);
 });
 
+test("onPwaCommand forwards request_id when provided in start_session", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+  const sentToDaemon: unknown[] = [];
+  dreg.add("d-1", {}, (f) => sentToDaemon.push(f));
+  router.onPwaCommand({
+    type: "start_session",
+    daemon_id: "d-1",
+    cwd: "/Users/me/work",
+    request_id: "rs-7",
+  });
+  expect(sentToDaemon).toEqual([{
+    type: "start_session",
+    cwd: "/Users/me/work",
+    request_id: "rs-7",
+  }]);
+});
+
+test("start_session_rejected from daemon broadcasts to PWAs with daemon_id", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const broadcasts: unknown[] = [];
+  preg.add({}, (f) => broadcasts.push(f));
+  const router = new Router(dreg, preg);
+  router.onDaemonFrame("d-1", {
+    type: "hello", daemon_id: "d-1", epoch: 1, hostname: "h",
+    agent_version: "0", sessions: [],
+  });
+  broadcasts.length = 0;
+  router.onDaemonFrame("d-1", {
+    type: "start_session_rejected",
+    request_id: "rs-7",
+    cwd: "/etc",
+    reason: "cwd_not_allowed",
+    message: "cwd /etc not in allowed_cwd_prefix",
+  });
+  expect(broadcasts).toEqual([{
+    type: "start_session_rejected",
+    daemon_id: "d-1",
+    request_id: "rs-7",
+    cwd: "/etc",
+    reason: "cwd_not_allowed",
+    message: "cwd /etc not in allowed_cwd_prefix",
+  }]);
+});
+
 test("task_completed frame fans out to PWAs with daemon_id", () => {
   const dreg = new DaemonRegistry<unknown>();
   const preg = new PwaRegistry<unknown>();
@@ -511,10 +550,7 @@ test("task_completed pushes to subs with prefs.completed === true", async () => 
     pairDaemon(db, "d-1", "u1", "{}", null);
     const dev = createDevice(db, "u1", "iPhone", null, 60_000);
     addPushSub(db, dev.device_id, "https://x", "p", "a");
-    db.prepare("UPDATE push_subs SET preferences = ? WHERE device_id = ?").run(
-      JSON.stringify({ completed: true }),
-      dev.device_id,
-    );
+    setSubscription(db, dev.device_id, "completed", "", true);
     const sentTo: Array<{ payload: any }> = [];
     const push = { async sendTo(subs: unknown[], payload: any) { sentTo.push({ payload }); } };
     const dreg = new DaemonRegistry<unknown>();
@@ -579,10 +615,7 @@ test("idle pushes to subs with prefs.idle === true", async () => {
     pairDaemon(db, "d-1", "u1", "{}", null);
     const dev = createDevice(db, "u1", "iPhone", null, 60_000);
     addPushSub(db, dev.device_id, "https://x", "p", "a");
-    db.prepare("UPDATE push_subs SET preferences = ? WHERE device_id = ?").run(
-      JSON.stringify({ idle: true }),
-      dev.device_id,
-    );
+    setSubscription(db, dev.device_id, "idle", "", true);
     const sentTo: Array<{ payload: any }> = [];
     const push = { async sendTo(subs: unknown[], payload: any) { sentTo.push({ payload }); } };
     const dreg = new DaemonRegistry<unknown>();
@@ -738,6 +771,43 @@ test("onPwaChatSend to offline daemon returns chat_error to sender only, no broa
   expect(otherTab.find((f) => f.type === "chat")).toBeUndefined();
 });
 
+test("onPwaChatSend echoes client_message_id on the chat broadcast", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+  dreg.add("d", {}, () => {});
+
+  const broadcasts: any[] = [];
+  preg.add({}, (f) => broadcasts.push(f));
+
+  router.onPwaChatSend(
+    { type: "chat_send", daemon_id: "d", session_id: "s", content: "hi", client_message_id: "cm-1" },
+    { user: "alice@example", user_id: "u1" },
+    () => {},
+  );
+
+  const chatFrame = broadcasts.find((f) => f.type === "chat");
+  expect(chatFrame).toBeDefined();
+  expect(chatFrame.client_message_id).toBe("cm-1");
+});
+
+test("onPwaChatSend echoes client_message_id on chat_error when daemon offline", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+
+  let capturedErr: any = undefined;
+  router.onPwaChatSend(
+    { type: "chat_send", daemon_id: "missing", session_id: "s", content: "hi", client_message_id: "cm-2" },
+    { user: "alice", user_id: "u1" },
+    (f) => { capturedErr = f; },
+  );
+
+  expect(capturedErr).toBeDefined();
+  expect(capturedErr.type).toBe("chat_error");
+  expect(capturedErr.client_message_id).toBe("cm-2");
+});
+
 test("onPwaChatSend preserves reply_to when provided", () => {
   const dreg = new DaemonRegistry<unknown>();
   const preg = new PwaRegistry<unknown>();
@@ -788,4 +858,27 @@ test("closeDaemonConnection of unknown daemon is a no-op", () => {
   const preg = new PwaRegistry<unknown>();
   const router = new Router(dreg, preg);
   expect(() => router.closeDaemonConnection("nope")).not.toThrow();
+});
+
+test("session_open forwards request_id from daemon to PWA", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const broadcasts: unknown[] = [];
+  preg.add({}, (f) => broadcasts.push(f));
+  const router = new Router(dreg, preg);
+
+  router.onDaemonFrame("d", { type: "hello", daemon_id: "d", epoch: 1, hostname: "h", agent_version: "v", sessions: [] });
+  broadcasts.length = 0;
+
+  router.onDaemonFrame("d", {
+    type: "session_open",
+    session: fixtureSession({ session_id: "s-req", cwd: "/z", model: "sonnet", pid: 42, started_at: 3 }),
+    request_id: "req-7",
+  });
+
+  expect(broadcasts).toHaveLength(1);
+  const frame = broadcasts[0] as any;
+  expect(frame.type).toBe("session_open");
+  expect(frame.daemon_id).toBe("d");
+  expect(frame.request_id).toBe("req-7");
 });

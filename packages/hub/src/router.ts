@@ -1,10 +1,13 @@
 import type {
   DaemonToHub, HubToPwa, HubToDaemonStartSession, SessionSnapshot, DaemonView, EventFrameForPwa, PwaToHub,
-  PwaToHubChatSend, HubToDaemonChatSend,
+  PwaToHubChatSend, HubToDaemonChatSend, HubChatErrorBroadcast,
 } from "@cc-remote/proto";
 import type { DaemonRegistry, PwaRegistry } from "./connections.ts";
 import type { Db } from "./db.ts";
 import type { PushHelper } from "./push.ts";
+import { findDaemon } from "./repos/daemons.ts";
+import { dispatchTopic } from "./push-dispatch.ts";
+import { getTopic } from "./push-topics.ts";
 import { ulid } from "./ulid.ts";
 
 const RING_BUFFER_SIZE = 200;
@@ -13,6 +16,7 @@ const DEFAULT_OFFLINE_PUSH_DELAY_MS = 30_000;
 interface DaemonState {
   daemon_id: string;
   hostname: string;
+  display_name: string | null;
   epoch: number;
   sessions: Map<string, SessionSnapshot>;
   events: EventFrameForPwa[];
@@ -58,16 +62,22 @@ export class Router {
         if (t) { clearTimeout(t); this.offlineTimers.delete(daemon_id); }
         this.offlineMeta.delete(daemon_id);
 
+        let display_name: string | null = null;
+        if (this.db) {
+          display_name = findDaemon(this.db, daemon_id)?.display_name ?? null;
+        }
+
         const state: DaemonState = {
           daemon_id,
           hostname: frame.hostname,
+          display_name,
           epoch: frame.epoch,
           sessions: new Map(frame.sessions.map((s) => [s.session_id, s])),
           events: [],
         };
         this.daemons.set(daemon_id, state);
         this.pwaReg.broadcast({
-          type: "daemon_online", daemon_id, hostname: frame.hostname, sessions: frame.sessions,
+          type: "daemon_online", daemon_id, hostname: frame.hostname, display_name, sessions: frame.sessions,
         });
         return;
       }
@@ -75,7 +85,12 @@ export class Router {
         const state = this.daemons.get(daemon_id);
         if (!state) return;
         state.sessions.set(frame.session.session_id, frame.session);
-        this.pwaReg.broadcast({ type: "session_open", daemon_id, session: frame.session });
+        this.pwaReg.broadcast({
+          type: "session_open",
+          daemon_id,
+          session: frame.session,
+          ...(frame.request_id !== undefined ? { request_id: frame.request_id } : {}),
+        });
         return;
       }
       case "session_close": {
@@ -91,7 +106,7 @@ export class Router {
         const out: EventFrameForPwa = {
           type: "event", daemon_id,
           session_id: frame.session_id, jsonl_offset: frame.jsonl_offset,
-          ts: frame.ts, payload: frame.payload,
+          payload: frame.payload,
         };
         state.events.push(out);
         if (state.events.length > RING_BUFFER_SIZE) state.events.shift();
@@ -106,7 +121,13 @@ export class Router {
           session_id: frame.session_id, request_id: frame.request_id,
           tool: frame.tool, args_summary: frame.args_summary, expires_at: frame.expires_at,
         });
-        if (this.db && this.push) void this.dispatchPush(daemon_id, frame);
+        if (this.db && this.push) void dispatchTopic(this.db, this.push, getTopic("permission"), daemon_id, {
+          daemon_id,
+          session_id: frame.session_id,
+          request_id: frame.request_id,
+          tool: frame.tool,
+          args_summary: frame.args_summary,
+        });
         return;
       }
       case "permission_resolved": {
@@ -139,7 +160,9 @@ export class Router {
           session_id: frame.session_id,
           ts: frame.ts,
         });
-        if (this.db && this.push) void this.dispatchCompletedPush(daemon_id, frame);
+        if (this.db && this.push) void dispatchTopic(this.db, this.push, getTopic("completed"), daemon_id, {
+          daemon_id, session_id: frame.session_id,
+        });
         return;
       }
       case "idle": {
@@ -151,7 +174,9 @@ export class Router {
           session_id: frame.session_id,
           ts: frame.ts,
         });
-        if (this.db && this.push) void this.dispatchIdlePush(daemon_id, frame);
+        if (this.db && this.push) void dispatchTopic(this.db, this.push, getTopic("idle"), daemon_id, {
+          daemon_id, session_id: frame.session_id,
+        });
         return;
       }
       case "session_state": {
@@ -185,77 +210,20 @@ export class Router {
         });
         return;
       }
+      case "start_session_rejected": {
+        const state = this.daemons.get(daemon_id);
+        if (!state) return;
+        this.pwaReg.broadcast({
+          type: "start_session_rejected",
+          daemon_id,
+          request_id: frame.request_id,
+          cwd: frame.cwd,
+          reason: frame.reason,
+          message: frame.message,
+        });
+        return;
+      }
     }
-  }
-
-  private async dispatchPush(
-    daemon_id: string,
-    frame: { session_id: string; request_id: string; tool: string; args_summary: string },
-  ): Promise<void> {
-    if (!this.db || !this.push) return;
-    const { findDaemon } = await import("./repos/daemons.ts");
-    const { findSubsByOwner } = await import("./repos/push-subs.ts");
-    const daemon = findDaemon(this.db, daemon_id);
-    if (!daemon) return;
-    const allSubs = findSubsByOwner(this.db, daemon.owner_sub);
-    const subs = allSubs.filter((s) => s.preferences.permission !== false);
-    if (subs.length === 0) return;
-    await this.push.sendTo(subs, {
-      kind: "permission",
-      daemon_id, session_id: frame.session_id, request_id: frame.request_id,
-      tool: frame.tool, args_summary: frame.args_summary,
-    });
-  }
-
-  private async dispatchOfflinePush(daemon_id: string, hostname: string, sinceMs: number): Promise<void> {
-    if (!this.db || !this.push) return;
-    const { findDaemon } = await import("./repos/daemons.ts");
-    const { findSubsByOwner } = await import("./repos/push-subs.ts");
-    const daemon = findDaemon(this.db, daemon_id);
-    if (!daemon) return;
-    const allSubs = findSubsByOwner(this.db, daemon.owner_sub);
-    const subs = allSubs.filter((s) => s.preferences.offline === true);
-    if (subs.length === 0) return;
-    await this.push.sendTo(subs, {
-      kind: "offline",
-      daemon_id, hostname, since_ms: sinceMs,
-    });
-  }
-
-  private async dispatchCompletedPush(
-    daemon_id: string,
-    frame: { session_id: string },
-  ): Promise<void> {
-    if (!this.db || !this.push) return;
-    const { findDaemon } = await import("./repos/daemons.ts");
-    const { findSubsByOwner } = await import("./repos/push-subs.ts");
-    const daemon = findDaemon(this.db, daemon_id);
-    if (!daemon) return;
-    const allSubs = findSubsByOwner(this.db, daemon.owner_sub);
-    const subs = allSubs.filter((s) => s.preferences.completed === true);
-    if (subs.length === 0) return;
-    await this.push.sendTo(subs, {
-      kind: "completed",
-      daemon_id, session_id: frame.session_id,
-    });
-  }
-
-  private async dispatchIdlePush(
-    daemon_id: string,
-    frame: { session_id: string },
-  ): Promise<void> {
-    if (!this.db || !this.push) return;
-    const { findDaemon } = await import("./repos/daemons.ts");
-    const { findSubsByOwner } = await import("./repos/push-subs.ts");
-    const daemon = findDaemon(this.db, daemon_id);
-    if (!daemon) return;
-    const allSubs = findSubsByOwner(this.db, daemon.owner_sub);
-    const subs = allSubs.filter((s) => s.preferences.idle === true);
-    if (subs.length === 0) return;
-    await this.push.sendTo(subs, {
-      kind: "idle",
-      daemon_id, session_id: frame.session_id,
-    });
   }
 
   onDaemonDisconnect(daemon_id: string): void {
@@ -275,7 +243,12 @@ export class Router {
       const meta = this.offlineMeta.get(daemon_id);
       this.offlineMeta.delete(daemon_id);
       if (!meta) return;
-      void this.dispatchOfflinePush(daemon_id, meta.hostname, Date.now() - meta.disconnected_at);
+      const since_ms = Date.now() - meta.disconnected_at;
+      if (this.db && this.push) {
+        void dispatchTopic(this.db, this.push, getTopic("offline"), daemon_id, {
+          daemon_id, hostname: meta.hostname, since_ms,
+        });
+      }
     }, this.offlinePushDelayMs);
     // Don't keep the event loop alive just for this timer.
     if (typeof (timer as { unref?: () => void }).unref === "function") {
@@ -310,6 +283,7 @@ export class Router {
         cwd: frame.cwd,
       };
       if (frame.name !== undefined) out.name = frame.name;
+      if (frame.request_id !== undefined) out.request_id = frame.request_id;
       this.daemonReg.send(frame.daemon_id, out);
     }
   }
@@ -329,12 +303,14 @@ export class Router {
     const reply_to = frame.reply_to ?? null;
 
     if (!this.daemonReg.has(frame.daemon_id)) {
-      senderSend({
+      const errOut: HubChatErrorBroadcast = {
         type: "chat_error",
         daemon_id: frame.daemon_id,
         session_id: frame.session_id,
         reason: "daemon_offline",
-      });
+        ...(frame.client_message_id !== undefined ? { client_message_id: frame.client_message_id } : {}),
+      };
+      senderSend(errOut);
       return;
     }
 
@@ -360,14 +336,27 @@ export class Router {
       content: frame.content,
       reply_to,
       ts,
+      ...(frame.client_message_id !== undefined ? { client_message_id: frame.client_message_id } : {}),
     });
   }
 
   snapshot(): DaemonView[] {
     return [...this.daemons.values()].map((d) => ({
-      daemon_id: d.daemon_id, hostname: d.hostname, online: true,
+      daemon_id: d.daemon_id, hostname: d.hostname, display_name: d.display_name, online: true,
       sessions: [...d.sessions.values()],
     }));
+  }
+
+  /**
+   * Update in-memory display_name (if daemon is connected) and broadcast
+   * a daemon_renamed frame to all PWAs. Called from the rename HTTP route
+   * after a successful DB write so connected PWAs reflect the new name
+   * without polling.
+   */
+  onDaemonRenamed(daemon_id: string, display_name: string | null): void {
+    const state = this.daemons.get(daemon_id);
+    if (state) state.display_name = display_name;
+    this.pwaReg.broadcast({ type: "daemon_renamed", daemon_id, display_name });
   }
 
   bufferOf(daemon_id: string): EventFrameForPwa[] {
