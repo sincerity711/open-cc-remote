@@ -4,6 +4,7 @@ export interface DaemonRow {
   daemon_id: string;
   owner_sub: string;
   hostname: string | null;
+  display_name: string | null;
   public_key_jwk: string;
   jwt_jti: string | null;
   jwt_exp: number | null;
@@ -16,15 +17,16 @@ export function pairDaemon(
   owner_sub: string,
   public_key_jwk: string,
   hostname: string | null,
+  paired_at?: number,
 ): void {
   db.prepare(
     "INSERT INTO daemons (daemon_id, owner_sub, hostname, public_key_jwk, paired_at) VALUES (?, ?, ?, ?, ?)",
-  ).run(daemon_id, owner_sub, hostname, public_key_jwk, Date.now());
+  ).run(daemon_id, owner_sub, hostname, public_key_jwk, paired_at ?? Date.now());
 }
 
 export function findDaemon(db: Db, daemon_id: string): DaemonRow | null {
   return (db.query(
-    "SELECT daemon_id, owner_sub, hostname, public_key_jwk, jwt_jti, jwt_exp, revoked_at FROM daemons WHERE daemon_id = ?",
+    "SELECT daemon_id, owner_sub, hostname, display_name, public_key_jwk, jwt_jti, jwt_exp, revoked_at FROM daemons WHERE daemon_id = ?",
   ).get(daemon_id) as DaemonRow | null);
 }
 

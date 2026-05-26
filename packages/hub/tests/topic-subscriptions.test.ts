@@ -26,7 +26,7 @@ test("findActiveSubsForTopic returns sub when topic.default_enabled=true and no 
   try {
     const subs = findActiveSubsForTopic(s.db, "u1", "permission", "d-1", true);
     expect(subs).toHaveLength(1);
-    expect(subs[0].device_id).toBe(s.device_id);
+    expect(subs[0]!.device_id).toBe(s.device_id);
   } finally { s.cleanup(); }
 });
 
