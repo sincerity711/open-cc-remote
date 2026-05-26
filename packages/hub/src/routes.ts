@@ -73,13 +73,101 @@ export function makeServer(opts: MakeServerOpts = {}) {
       }
     }
 
+    if (url.pathname === "/push/topics" && req.method === "GET") {
+      if (!opts.db) return new Response("not configured", { status: 503 });
+      const { authenticatePwa } = await import("./auth/pwa-auth.ts");
+      const auth = authenticatePwa(opts.db, req);
+      if ("error" in auth) return new Response(auth.error, { status: 401 });
+      const { PUSH_TOPICS } = await import("./push-topics.ts");
+      const { listSubscriptions } = await import("./repos/topic-subscriptions.ts");
+      const { getDndSettings } = await import("./repos/dnd.ts");
+      return Response.json({
+        topics: PUSH_TOPICS.map((t) => ({
+          id: t.id,
+          title: t.title,
+          description: t.description,
+          default_enabled: t.default_enabled,
+          bypass_dnd: t.bypass_dnd,
+        })),
+        subscriptions: listSubscriptions(opts.db, auth.device_id),
+        dnd: getDndSettings(opts.db, auth.device_id) ?? {
+          enabled: false, start_hh_mm: null, end_hh_mm: null, timezone: null,
+        },
+      });
+    }
+
+    if (url.pathname === "/push/topics/subscriptions" && (req.method === "PUT" || req.method === "DELETE")) {
+      if (!opts.db) return new Response("not configured", { status: 503 });
+      const { authenticatePwa } = await import("./auth/pwa-auth.ts");
+      const auth = authenticatePwa(opts.db, req);
+      if ("error" in auth) return new Response(auth.error, { status: 401 });
+      try {
+        const body = await req.json() as { topic_id?: string; daemon_id?: string | null; enabled?: boolean };
+        if (typeof body.topic_id !== "string") return new Response("topic_id required", { status: 400 });
+        const { getTopic } = await import("./push-topics.ts");
+        try { getTopic(body.topic_id); } catch { return new Response("unknown topic", { status: 400 }); }
+        const daemon_id = body.daemon_id == null ? "" : String(body.daemon_id);
+        const { setSubscription, deleteSubscription } = await import("./repos/topic-subscriptions.ts");
+        if (req.method === "PUT") {
+          if (typeof body.enabled !== "boolean") return new Response("enabled required", { status: 400 });
+          setSubscription(opts.db, auth.device_id, body.topic_id, daemon_id, body.enabled);
+        } else {
+          deleteSubscription(opts.db, auth.device_id, body.topic_id, daemon_id);
+        }
+        return new Response(null, { status: 204 });
+      } catch (e) {
+        return new Response((e as Error).message, { status: 400 });
+      }
+    }
+
+    if (url.pathname === "/push/dnd" && req.method === "PUT") {
+      if (!opts.db) return new Response("not configured", { status: 503 });
+      const { authenticatePwa } = await import("./auth/pwa-auth.ts");
+      const auth = authenticatePwa(opts.db, req);
+      if ("error" in auth) return new Response(auth.error, { status: 401 });
+      try {
+        const body = await req.json() as {
+          enabled?: boolean; start_hh_mm?: string | null; end_hh_mm?: string | null; timezone?: string | null;
+        };
+        if (typeof body.enabled !== "boolean") return new Response("enabled required", { status: 400 });
+        const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+        if (body.enabled) {
+          if (!body.start_hh_mm || !HHMM.test(body.start_hh_mm)) return new Response("bad start_hh_mm", { status: 400 });
+          if (!body.end_hh_mm   || !HHMM.test(body.end_hh_mm))   return new Response("bad end_hh_mm",   { status: 400 });
+          if (!body.timezone) return new Response("timezone required", { status: 400 });
+          // Intl.DateTimeFormat constructor probe — works in Bun's V8 without version dependency.
+          try { new Intl.DateTimeFormat("en-GB", { timeZone: body.timezone }); }
+          catch { return new Response("bad timezone", { status: 400 }); }
+        }
+        const { setDndSettings } = await import("./repos/dnd.ts");
+        setDndSettings(opts.db, auth.device_id, {
+          enabled: body.enabled,
+          start_hh_mm: body.start_hh_mm ?? null,
+          end_hh_mm:   body.end_hh_mm   ?? null,
+          timezone:    body.timezone    ?? null,
+        });
+        return new Response(null, { status: 204 });
+      } catch (e) {
+        return new Response((e as Error).message, { status: 400 });
+      }
+    }
+
     if (url.pathname === "/push/preferences" && req.method === "GET") {
       if (!opts.db) return new Response("not configured", { status: 503 });
       const { authenticatePwa } = await import("./auth/pwa-auth.ts");
       const auth = authenticatePwa(opts.db, req);
       if ("error" in auth) return new Response(auth.error, { status: 401 });
-      const { getPreferences } = await import("./repos/push-subs.ts");
-      return Response.json(getPreferences(opts.db, auth.device_id));
+      const { listSubscriptions } = await import("./repos/topic-subscriptions.ts");
+      const { PUSH_TOPICS } = await import("./push-topics.ts");
+      const out: Record<string, boolean> = {};
+      // Defaults from registry first
+      for (const t of PUSH_TOPICS) out[t.id] = t.default_enabled;
+      // Device-default rows override
+      for (const r of listSubscriptions(opts.db, auth.device_id)) {
+        if (r.daemon_id === null) out[r.topic_id] = r.enabled;
+      }
+      // Legacy contract returned only the 4 baseline keys; the registry currently has those 4.
+      return Response.json(out);
     }
 
     if (url.pathname === "/push/preferences" && req.method === "PUT") {
@@ -88,9 +176,14 @@ export function makeServer(opts: MakeServerOpts = {}) {
       const auth = authenticatePwa(opts.db, req);
       if ("error" in auth) return new Response(auth.error, { status: 401 });
       try {
-        const body = await req.json() as { permission?: boolean };
-        const { setPreferences } = await import("./repos/push-subs.ts");
-        setPreferences(opts.db, auth.device_id, body);
+        const body = await req.json() as Record<string, boolean>;
+        const { setSubscription } = await import("./repos/topic-subscriptions.ts");
+        const { getTopic } = await import("./push-topics.ts");
+        for (const [k, v] of Object.entries(body)) {
+          if (typeof v !== "boolean") continue;
+          try { getTopic(k); } catch { continue; }   // ignore unknown legacy keys silently
+          setSubscription(opts.db, auth.device_id, k, "", v);
+        }
         return new Response(null, { status: 204 });
       } catch (e) {
         return new Response((e as Error).message, { status: 400 });
@@ -245,6 +338,7 @@ export function makeServer(opts: MakeServerOpts = {}) {
             }
             const { renameDaemon } = await import("./repos/daemons.ts");
             const ok = renameDaemon(opts.db, auth.owner_sub, daemon_id, body.display_name);
+            if (ok) router.onDaemonRenamed(daemon_id, body.display_name);
             return new Response(null, { status: ok ? 204 : 404 });
           } catch (e) {
             return new Response((e as Error).message, { status: 400 });
