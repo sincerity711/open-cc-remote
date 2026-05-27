@@ -9,6 +9,11 @@ services:
   fake-ias:
     ports: !override
       - "17770:7770"
+    environment:
+      # Demo-side issuer + redirects must match what the demo hub sends and
+      # what the host browser can reach. Base compose uses the e2e ports.
+      FAKE_IAS_ISSUER: "http://${ISSUER_HOST}:17770"
+      FAKE_IAS_REDIRECT_URIS: "http://localhost:17745/auth/callback"
   hub:
     ports: !override
       - "17745:7745"

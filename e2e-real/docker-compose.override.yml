@@ -1,0 +1,17 @@
+services:
+  hub:
+    image: e2e-real-hub:latest
+    # Don't try to pull from a registry — this image only exists locally
+    # (built once via `docker compose build hub`, then overlaid with source
+    # mounts here). Pulling fails with "repository does not exist" on first
+    # `up` after a tear-down.
+    pull_policy: never
+    build: !reset null
+    # Bind-mount the SOURCE dirs only (not the whole packages/hub or
+    # packages/proto, which would shadow the symlinked node_modules baked
+    # into the image). The image already has bun deps installed at
+    # /app/node_modules; we just need to overlay our latest source so the
+    # container picks up frame additions without a full rebuild.
+    volumes:
+      - ../packages/proto/src:/app/packages/proto/src
+      - ../packages/hub/src:/app/packages/hub/src

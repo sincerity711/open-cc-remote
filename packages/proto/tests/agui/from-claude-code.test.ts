@@ -128,4 +128,51 @@ describe("fromClaudeCode contract", () => {
     expect(text).toBeDefined();
     expect(text?.delta).toBe("Done — see you tomorrow.");
   });
+
+  test("attachment.queued_command emits a user TEXT_MESSAGE_CHUNK with envelope stripped", () => {
+    // Claude Code spools mid-tool-call channel injections into JSONL as
+    // `attachment` rows with subtype `queued_command`. The prompt body is
+    // wrapped in our <channel> envelope and the row also carries isMeta:true,
+    // which we deliberately ignore for this subtype.
+    const row = {
+      type: "attachment",
+      attachment: {
+        type: "queued_command",
+        prompt:
+          '<channel source="cc-remote" chat_id="pwa" message_id="01KSE" user="alice" ts="2026-05-25T07:09:42.531Z">\n这三篇 doc 是关于sap ai metering的帮我入库\n</channel>',
+        commandMode: "prompt",
+        origin: { kind: "channel", server: "cc-remote" },
+        isMeta: true,
+      },
+      timestamp: "2026-05-25T07:09:42.531Z",
+    };
+    const events = fromClaudeCode(row, { ...ctx, offset: 42 });
+    expect(events).toHaveLength(1);
+    const ev = events[0] as {
+      type: EventType;
+      role?: string;
+      delta?: string;
+      messageId?: string;
+    };
+    expect(ev.type).toBe(EventType.TEXT_MESSAGE_CHUNK);
+    expect(ev.role).toBe("user");
+    expect(ev.delta).toBe("这三篇 doc 是关于sap ai metering的帮我入库");
+    expect(ev.delta).not.toMatch(/<channel|<\/channel>/);
+    expect(ev.messageId).toBe("event:42:queued_user");
+  });
+
+  test("attachment with non-queued_command subtype emits zero events", () => {
+    for (const subtype of ["image", "file", "something_else"]) {
+      const row = {
+        type: "attachment",
+        attachment: {
+          type: subtype,
+          path: "/tmp/foo.png",
+        },
+        timestamp: "2026-05-25T07:09:42.531Z",
+      };
+      const events = fromClaudeCode(row, ctx);
+      expect(events).toHaveLength(0);
+    }
+  });
 });

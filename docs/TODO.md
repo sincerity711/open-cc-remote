@@ -27,6 +27,39 @@ Spec at `docs/superpowers/specs/2026-05-23-settings-page-design.md`. Plan at `do
 
 `loginAndConnect` (`e2e-real/helpers/pwa-client.ts`) was broken since commit `228d3de` (oidc-provider subprocess replaces hand-rolled mock). The new chain inserts `/interaction/{uid}` and `/authorize/{uid}` consent hops between `/authorize` and `/auth/callback`. Most scenarios silently passed because oidc-provider's middleware auto-completes interactions on first hit, but `15-multi-pending.test.ts` second loginAndConnect failed when the test client only followed 3 fixed hops. Fixed by replacing the 3-hop helper with a generic `followChain` that follows up to 10 redirects and stops at the bearer fragment.
 
+## Pair-flow hardening (surfaced 2026-05-27)
+
+Public hub deploy review of `/pair`, `/pair/refresh`, `/ws/daemon`. DPoP-bound JWT chain is sound (token leak ≠ identity hijack), but the pair-code on-ramp and rate-limiting story are weaker than the rest of the design.
+
+1. ~~**Pair code uses `Math.random()`**~~ — DONE: `generateCode` now draws from `crypto.getRandomValues` with rejection sampling for unbiased modulo on the 31-char alphabet.
+2. ~~**Pair code entropy is ~30 bit**~~ — DONE: code length 6 → 8 (~40 bit). `XXXX-XXXX` format. PWA settings UI + e2e-real test regex + demo placeholder updated; daemon CLI passes the code through verbatim so no parser change needed.
+3. ~~**No rate limit on `/pair` or `/ws/daemon`**~~ — DONE: in-memory sliding-window limiter keyed on resolved client IP, applied to `/pair`, `/pair/refresh`, `/ws/daemon`. Defaults 10/30/30 req/min/IP, configurable via `HUB_RATELIMIT_PAIR_PER_MIN` / `HUB_RATELIMIT_PAIR_REFRESH_PER_MIN` / `HUB_RATELIMIT_WS_DAEMON_PER_MIN`.
+4. ~~**Pair code TTL not audited**~~ — DONE: `/pair/issue` route hard-codes 300_000 ms; `issueCode` itself clamps any caller-supplied ttlMs to `MAX_PAIR_TTL_MS = 5 * 60_000`. Test asserts the clamp.
+5. ~~**Reverse-proxy bypass paths must be documented**~~ — DONE: `docs/operations/reverse-proxy.md` covers which paths must not be wrapped, nginx + oauth2-proxy and Caddy `forward_auth` examples, and the `HUB_TRUSTED_PROXIES` knob. Linked from `CLAUDE.md`.
+6. ~~**DPoP htu standards-compliant scheme handling (Plan B)**~~ — DONE: when the request peer is in `HUB_TRUSTED_PROXIES`, hub reconstructs the public URL from `X-Forwarded-Proto` + `X-Forwarded-Host` and uses that for DPoP htu matching. Empty `HUB_TRUSTED_PROXIES` (default) preserves the scheme-collapsing fallback so behavior is unchanged unless explicitly opted in.
+
+Out of scope here (covered by Backlog #5 "Security audit"): full threat model of WS auth + channel-permission protocol.
+
+## AskUserQuestion remote relay (surfaced 2026-05-27, workaround shipped, tracking upstream)
+
+`AskUserQuestion` (CC built-in clarification tool) does not surface to the PWA via the channel protocol. Workaround shipped 2026-05-27 via PreToolUse hook → daemon socket → hub → PWA → daemon → hook stdout. Tracking upstream:
+
+- **Upstream** [anthropics/claude-code#59245](https://github.com/anthropics/claude-code/issues/59245) (Open) — RFC for `notifications/claude/channel/ask_question_request` / `ask_question_answer`. When this lands, replace the `.claude/hooks/ask-user-relay.ts` entry point with a plugin-side channel notification handler — daemon/hub/PWA frames stay (they were designed mirroring the proposed shape so the cutover is mechanical).
+- **Related** [#58463](https://github.com/anthropics/claude-code/issues/58463) (Open) — JSONL flush regression (CC 2.1.139+ holds `tool_use` until answered) ruled out the JSONL-tail path. Re-confirmed locally on 2.1.150 — grep returned 0 matches while a question was pending in tmux.
+- **Related** [#59908](https://github.com/anthropics/claude-code/issues/59908) — Notification hook fires for AskUserQuestion in 2.1.146+; we don't currently use it (the PreToolUse hook already grabs control of the flow), but it's available for "ring a bell" UX if a future user wants it.
+
+### Implementation
+
+Architecturally symmetric to permission relay; only the entry point differs (local PreToolUse hook instead of channel notification). The trade-off is binary: hook intercepts → local tmux UI is hidden, only PWA renders (documented in #59245 by hinescreative).
+
+- **proto** — `HookAskUserQuestion{Request,Answer}` (hook ↔ daemon socket); `DaemonAskUserQuestion{Request,Resolved}` (daemon ↔ hub); `PwaAskUserQuestion{Request,Resolved}` + `PwaToHubAskUserQuestionAnswer` + `HubAskUserQuestionAnswer` (hub ↔ PWA). All wired into the four union types in `packages/proto/src/frames.ts`.
+- **daemon** — `LiveSessions.getByClaudeSessionId` resolves the hook's `claude_session_id` (== CC's `session_id` from hook stdin) to the plugin-issued daemon `session_id`. Socket server accepts `ask_user_question_request` from any connected client (hook scripts use the same Unix socket as the plugin); per-request entry in `askToClient` map carries the originating socket + an expiry timer keyed on the request's `expires_at`. Answer from hub → reply written back to the same socket → hub `ask_user_question_resolved` echo.
+- **hub** — router fans `ask_user_question_request` / `ask_user_question_resolved` daemon→PWA and `ask_user_question_answer` PWA→daemon, mirroring the permission relay handlers in `packages/hub/src/router.ts`.
+- **PWA** — `pendingQuestions` keyed by `request_id` in `HubState`; `AskQuestionSurface` component renders the question card (reused styling idiom from `PermissionSurface`); `sendAskAnswer` action dispatches `ask_user_question_answer`. Single visible request at a time; cancel is local-only (daemon side keeps the request open until expiry).
+- **hook** — `.claude/hooks/ask-user-relay.ts` is a Bun-runnable PreToolUse hook. Reads CC stdin, connects to `$CC_REMOTE_SOCKET` (or `~/.cc-remote/daemon.sock`), sends the request, blocks on the daemon's reply, then emits `{ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: <answer text> } }`. The model treats the deny reason as a synthesized tool result and proceeds. Fallback reasons cover `expired`, `session_unknown`, `no_pwa` (each instructs the model to pick a sensible default rather than re-call AskUserQuestion).
+- **settings** — `.claude/settings.json` registers PreToolUse matcher `AskUserQuestion` → hook command `$CLAUDE_PROJECT_DIR/.claude/hooks/ask-user-relay.ts` with a 350s timeout (matches the daemon's 5min `expires_at` plus headroom).
+- **Tests** — proto frame round-trip (5 cases); registry `getByClaudeSessionId`; daemon socket round-trip; hub router fan-out (4 cases); PWA reducer for `ask_user_question_{request,resolved}` + `outbound_ask_answer`; SSR snapshots of `AskQuestionSurface`; hook script integration tests against a fake daemon socket (round-trip, daemon-offline fallback, non-AskUserQuestion pass-through). e2e-real scenario `23-ask-user-question.test.ts` drives the full path through compose hub → fake-claude session register → spawn hook → click in PWA → assert hook stdout.
+
 ## Backlog (non-UI, no plan written yet)
 
 These are deferred follow-ups beyond what the 16 plans + rework + real-e2e + chat-routing covered. Each would need its own plan/spec before starting.

@@ -508,3 +508,57 @@ test("permission_resolved clears pending command even if pendingPermissions is m
   });
   expect(s.pendingCommands["p-1"]).toBeUndefined();
 });
+
+test("ask_user_question_request adds to pendingQuestions; resolved clears it", () => {
+  const askFrame = {
+    type: "ask_user_question_request" as const,
+    daemon_id: "d", session_id: "s",
+    request_id: "ask-1",
+    questions: [{
+      question: "Where to put it?",
+      header: "Location",
+      multiSelect: false,
+      options: [{ label: "docs/" }, { label: "src/" }],
+    }],
+    expires_at: 9999,
+  };
+  let s = reducer(initialHubState(), { type: "frame", frame: askFrame });
+  expect(s.pendingQuestions["ask-1"]).toBeDefined();
+  expect(s.pendingQuestions["ask-1"]?.questions[0]?.options[0]?.label).toBe("docs/");
+
+  s = reducer(s, {
+    type: "outbound_ask_answer",
+    daemon_id: "d", session_id: "s", request_id: "ask-1", started_at: 1,
+  });
+  expect(s.pendingQuestions["ask-1"]).toBeDefined();
+  expect(s.pendingCommands["ask-1"]?.kind).toBe("ask_answer");
+  expect(s.pendingCommands["ask-1"]?.status).toBe("pending");
+
+  s = reducer(s, {
+    type: "frame",
+    frame: {
+      type: "ask_user_question_resolved",
+      daemon_id: "d", session_id: "s", request_id: "ask-1",
+      resolution: "answered",
+    },
+  });
+  expect(s.pendingQuestions["ask-1"]).toBeUndefined();
+  expect(s.pendingCommands["ask-1"]).toBeUndefined();
+});
+
+test("ask_user_question_resolved with no local pendingQuestions still clears pendingCommand", () => {
+  let s = reducer(initialHubState(), {
+    type: "outbound_ask_answer",
+    daemon_id: "d", session_id: "s", request_id: "ask-2", started_at: 1,
+  });
+  expect(s.pendingCommands["ask-2"]?.kind).toBe("ask_answer");
+  s = reducer(s, {
+    type: "frame",
+    frame: {
+      type: "ask_user_question_resolved",
+      daemon_id: "d", session_id: "s", request_id: "ask-2",
+      resolution: "answered",
+    },
+  });
+  expect(s.pendingCommands["ask-2"]).toBeUndefined();
+});

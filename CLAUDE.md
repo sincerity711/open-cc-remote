@@ -1,47 +1,49 @@
-# CLAUDE.md
+# cc-remote (channel)
 
-Project-local guidance for Claude Code working in this repo.
+Remote-control real Claude Code TUI from a PWA. Architecture:
+**CC TUI ↔ daemon (host) ↔ hub (docker) ↔ PWA (browser)**.
 
-## What this repo is
+## Quick orientation
 
-`open-cc-remote` — a system that exposes Claude Code sessions running on local machines (via a channel plugin) to a phone/web PWA, through a self-hosted hub. Built incrementally across 16 plans documented under `docs/superpowers/plans/2026-05-18-open-cc-remote-plan-*.md`. Source of truth for the design: `docs/superpowers/specs/2026-05-18-open-cc-remote-design.md`.
+| Doc | When to read |
+|---|---|
+| [`docs/operations/local-debug-environment.md`](docs/operations/local-debug-environment.md) | **Read first** before debugging the demo. Covers `tools/demo-channel.sh`, the AskUserQuestion remote-relay hook, the hub-Docker-image-drift footgun, and a step-by-step checklist for "PWA isn't showing the picker". |
+| [`docs/operations/push-deployment.md`](docs/operations/push-deployment.md) | Web-push (VAPID) config. |
+| [`docs/operations/reverse-proxy.md`](docs/operations/reverse-proxy.md) | Reverse-proxy bypass for daemon-auth paths + `HUB_TRUSTED_PROXIES` + rate-limit env vars. |
+| [`docs/operations/sap-cf-deploy.md`](docs/operations/sap-cf-deploy.md) | SAP Cloud Foundry deploy. |
+| [`docs/design/`](docs/design/) | UI design references (cards, light/dark mocks). |
+| [`docs/TODO.md`](docs/TODO.md) | Non-UI backlog. |
 
-## Status
+## Layout
 
-- Plugin MCP rework complete (tag `plan-plugin-mcp-rework`): `docs/superpowers/plans/2026-05-19-plugin-mcp-rework-plan.md` (spec: `docs/superpowers/specs/2026-05-19-plugin-mcp-rework-design.md`)
-- 16 milestones tagged: `plan-01-foundation` through `plan-16-status`
-- Real-e2e plan (`docs/superpowers/plans/2026-05-19-real-e2e-plan.md`) is paused, unblocked once the rework lands
+- `packages/daemon/` — host process; tails CC's jsonl, owns the local hook
+  socket at `/tmp/cc-remote-demo/daemon.sock`, talks to hub over WSS.
+- `packages/hub/` — docker container; frame router + IAS bridge. **Note**:
+  built into a Docker image, so source changes need an image rebuild — see
+  the local-debug doc, §5.
+- `packages/pwa/` — vite + React app.
+- `packages/plugin/` — `cc-remote` MCP plugin loaded by CC.
+- `packages/proto/` — wire-frame types shared across daemon/hub/PWA.
+- `.claude/hooks/ask-user-relay.ts` — CC PreToolUse hook that proxies
+  AskUserQuestion to the PWA. **Not git-tracked yet** — see local-debug
+  doc, §3.
+- `e2e-real/` — Playwright + docker-compose harness. Real CC against real
+  hub + fake-IAS.
+- `tools/demo-channel.sh` — bring up local demo (hub container, daemon,
+  PWA, tmux'd CC) for hands-on testing.
 
-See `docs/TODO.md` for the unfinished work and the order to resume.
-
-## Important context for new sessions
-
-The plugin in `packages/plugin/` was built against an earlier Claude Code interface (`--channels plugin:cc-remote@local`) that no longer exists in Claude Code 2.1.143. Real Claude Code now uses `--plugin-dir <path>` or `claude plugin install <name>@<marketplace>`, and plugins must be MCP stdio servers declaring `experimental: { 'claude/channel': {}, 'claude/channel/permission': {} }`.
-
-The 164 existing tests work because the `tools/fake-claude/` harness spawns the plugin directly and bypasses Claude Code's actual plugin-loading mechanism. The plugin needs MCP modernization (the paused PMCP plan) before any real Claude Code integration is meaningful.
-
-Wire format details for the channel-permission protocol are at `docs/superpowers/research/channel-permission-protocol.md`.
-
-## How to run things
+## Common commands
 
 ```bash
-bun install
-bun test                   # all 164 tests, ~10s
-bun run typecheck          # all 5 packages
+# bring up local demo
+./tools/demo-channel.sh up
+
+# attach to the real CC TUI
+tmux attach -t demo-claude
+
+# unit tests
+bun test
+
+# real-environment e2e
+cd e2e-real && bun playwright test
 ```
-
-Local manual quickstart and the rest of the runbook are in `README.md`.
-
-## Conventions to follow
-
-- Plans live in `docs/superpowers/plans/YYYY-MM-DD-<name>.md`
-- Specs live in `docs/superpowers/specs/YYYY-MM-DD-<name>-design.md`
-- Each numbered plan ends with a git tag (`plan-NN-name`) once acceptance passes
-- Bun runtime + TypeScript strict + bun:test; PWA uses Vite + React
-- Workspace: `packages/*` (production) + `tools/*` (test harnesses) + `e2e/` (in-process e2e) + `e2e-real/` (real-component e2e — paused)
-- Each commit message starts with `feat(<pkg>):`, `test(<pkg>):`, `docs:`, `chore:`, or `research:`
-- Keep the existing fake-only `e2e/` suite working; it's the merge gate
-
-## Memory system
-
-Per-session memory: `~/.claude/projects/-Users-i060912-SAPDevelop-channel/memory/MEMORY.md` (and the linked entries). Notable entries: project naming, auth design, real-e2e prerequisite, snapshot at 2026-05-18.

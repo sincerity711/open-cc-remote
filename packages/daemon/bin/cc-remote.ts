@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-import { hostname } from "node:os";
-import { existsSync, mkdirSync, writeFileSync, unlinkSync, chmodSync } from "node:fs";
+import { hostname, homedir } from "node:os";
+import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, chmodSync, renameSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { defaultStateDir } from "../src/config.ts";
@@ -53,8 +53,25 @@ async function cmdPair(args: ParsedArgs): Promise<void> {
   const result = (await res.json()) as { jwt: string; daemon_id: string; exp: number };
 
   const configPath = join(stateDir, "config.json");
-  writeFileSync(configPath, JSON.stringify({ daemon_id, hub_url: hub }, null, 2) + "\n");
-  try { chmodSync(configPath, 0o600); } catch {}
+  // Merge into any existing config.json so prior settings (allow_kill,
+  // allow_start, allowed_cwd_prefix, spawn_command, idle_window_ms, …) survive
+  // re-pairing. Only daemon_id + hub_url are authoritative from the pair flow.
+  let existing: Record<string, unknown> = {};
+  if (existsSync(configPath)) {
+    try {
+      const raw = readFileSync(configPath, "utf8");
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      if (parsed && typeof parsed === "object") existing = parsed;
+    } catch (e) {
+      process.stderr.write(`cc-remote: warning — could not parse existing config.json (${(e as Error).message}); overwriting\n`);
+    }
+  }
+  const merged = { ...existing, daemon_id, hub_url: hub };
+  // Atomic write: tmp + rename so a crash mid-write can't truncate config.
+  const tmp = `${configPath}.tmp`;
+  writeFileSync(tmp, JSON.stringify(merged, null, 2) + "\n");
+  try { chmodSync(tmp, 0o600); } catch {}
+  renameSync(tmp, configPath);
 
   const statePath = join(stateDir, "state.json");
   writeFileSync(
@@ -163,6 +180,56 @@ async function cmdInstall(args: ParsedArgs): Promise<void> {
   process.stdout.write(`✔ daemon installed and started\n`);
 }
 
+async function cmdInit(args: ParsedArgs): Promise<void> {
+  const stateDir = args["state-dir"] ?? defaultStateDir();
+  const hub = args.hub ?? "ws://localhost:17745";
+  const force = args.force === "true";
+
+  const configPath = join(stateDir, "config.json");
+  if (existsSync(configPath) && !force) {
+    process.stderr.write(
+      `cc-remote init: ${configPath} already exists. Use --force to overwrite.\n`,
+    );
+    process.exit(2);
+  }
+
+  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+
+  const home = homedir();
+  // Sane defaults: enable allow_kill / allow_start, scope cwd to $HOME, and
+  // bake a working spawn_command that pairs with the mcp-config.json the
+  // daemon writes idempotently into <state_dir> on startup. Users with a
+  // non-standard `claude` install can edit config.json afterwards.
+  const mcpConfigPath = join(stateDir, "mcp-config.json");
+  const spawnCommand = `claude --mcp-config ${mcpConfigPath} --dangerously-load-development-channels server:cc-remote`;
+  const cfg = {
+    daemon_id: hostname(),
+    hub_url: hub,
+    allow_kill: true,
+    allow_start: true,
+    allowed_cwd_prefix: [home],
+    spawn_command: spawnCommand,
+    idle_window_ms: 3000,
+  };
+
+  // Atomic write: tmp + rename.
+  const tmp = `${configPath}.tmp`;
+  writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n");
+  try { chmodSync(tmp, 0o600); } catch {}
+  const fs = await import("node:fs");
+  fs.renameSync(tmp, configPath);
+
+  process.stdout.write(`✔ wrote ${configPath}\n`);
+  process.stdout.write(`  daemon_id:           ${cfg.daemon_id}\n`);
+  process.stdout.write(`  hub_url:             ${cfg.hub_url}\n`);
+  process.stdout.write(`  allowed_cwd_prefix:  ${JSON.stringify(cfg.allowed_cwd_prefix)}\n`);
+  process.stdout.write(`  spawn_command:       ${cfg.spawn_command}\n`);
+  process.stdout.write(`\nnext steps:\n`);
+  process.stdout.write(`  1. cc-remote pair --hub ${hub} --code <code-from-pwa>\n`);
+  process.stdout.write(`  2. cc-remote daemon\n`);
+  process.stdout.write(`\n(if 'claude' isn't on PATH, edit spawn_command in ${configPath})\n`);
+}
+
 async function cmdStatus(): Promise<void> {
   const { existsSync, readFileSync } = await import("node:fs");
   const { loadConfig } = await import("../src/config.ts");
@@ -177,7 +244,7 @@ async function cmdStatus(): Promise<void> {
   process.stdout.write(`allow_start:         ${cfg.allow_start}\n`);
   if (cfg.allow_start) {
     process.stdout.write(`allowed_cwd_prefix:  ${JSON.stringify(cfg.allowed_cwd_prefix)}\n`);
-    process.stdout.write(`spawn_command:       ${cfg.spawn_command}\n`);
+    process.stdout.write(`spawn_command:       ${cfg.spawn_command ?? "(unset — start_session will be rejected)"}\n`);
   }
   process.stdout.write(`idle_window_ms:      ${cfg.idle_window_ms}\n`);
   process.stdout.write("\n");
@@ -273,6 +340,8 @@ function usage(): string {
     "usage: cc-remote <command> [options]",
     "",
     "commands:",
+    "  init [--state-dir <path>] [--hub <url>] [--force]",
+    "                               write a starter config.json (no pair)",
     "  daemon                       run the long-lived daemon",
     "  daemon rotate-token          rotate the DPoP-bound JWT",
     "  pair --hub <url> --code <c>  bind this machine to the hub",
@@ -288,7 +357,8 @@ const sub = process.argv[3];
 const args = parseArgs(process.argv.slice(sub && !sub.startsWith("--") ? 4 : 3));
 
 try {
-  if (cmd === "pair") await cmdPair(args);
+  if (cmd === "init") await cmdInit(args);
+  else if (cmd === "pair") await cmdPair(args);
   else if (cmd === "daemon" && sub === "rotate-token") await cmdDaemonRotateToken();
   else if (cmd === "daemon") await cmdDaemon();
   else if (cmd === "install") await cmdInstall(args);

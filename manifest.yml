@@ -1,0 +1,17 @@
+# SAP Cloud Foundry manifest. Adjust the placeholders before `cf push`.
+# See docs/operations/sap-cf-deploy.md for end-to-end steps.
+applications:
+  - name: cc-remote-hub
+    docker:
+      image: docker.io/sincerity711/cc-remote-hub:0.1.0
+    memory: 256M
+    disk_quota: 512M
+    instances: 1
+    health-check-type: http
+    health-check-http-endpoint: /healthz
+    services:
+      - cc-remote-identity
+    env:
+      HUB_IAS_ALLOWED_SUBJECTS: ciro.xu@sap.com
+      HUB_PWA_URL: /
+      # HUB_JWT_SECRET set via `cf set-env` (see deploy doc)

@@ -111,7 +111,11 @@ test("slash_inventory arrives, /clear submission lands in daemon as cli_command"
     });
 
     await sc.step("slash-clear-submitted", async () => {
-      await session.page.getByTestId("chat-input").fill("/clear");
+      // Trailing space closes the SlashMenu (filterEntries returns [] once
+      // draft has args), so Enter submits the form instead of being eaten by
+      // the menu's pick-entry keydown handler. Equivalent to a user typing
+      // "/clear<space><Enter>".
+      await session.page.getByTestId("chat-input").fill("/clear ");
       await session.page.getByTestId("chat-input").press("Enter");
     });
 

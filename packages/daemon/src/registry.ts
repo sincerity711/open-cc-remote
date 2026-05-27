@@ -30,6 +30,17 @@ export class LiveSessions {
     return this.sessions.get(session_id);
   }
 
+  /** Reverse lookup by claude_session_id (the JSONL filename UUID). Returns
+   * the first match, since claude_session_id is unique per running session.
+   * Used by the AskUserQuestion hook flow — hooks only know CC's session_id
+   * (== claude_session_id), not the plugin-issued daemon session_id. */
+  getByClaudeSessionId(claude_session_id: string): SessionSnapshot | undefined {
+    for (const s of this.sessions.values()) {
+      if (s.claude_session_id === claude_session_id) return s;
+    }
+    return undefined;
+  }
+
   list(): SessionSnapshot[] {
     return [...this.sessions.values()];
   }

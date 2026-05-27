@@ -48,14 +48,16 @@ export type PluginToDaemon =
   | { type: "register"; session: SessionSnapshot }
   | { type: "bye"; session_id: string }
   | PluginPermissionRequest
-  | PluginChatOut;
+  | PluginChatOut
+  | HookAskUserQuestionRequest;
 
 export type DaemonToPlugin =
   | { type: "ack"; ref: "register" | "bye" | "chat_out" }
   | { type: "daemon_going_down"; reason: "shutdown" | "restart" }
   | DaemonBindResolved
   | PluginPermissionReply
-  | DaemonChatIn;
+  | DaemonChatIn
+  | HookAskUserQuestionAnswer;
 
 /**
  * Daemon → plugin notification: we resolved the JSONL filename and now know
@@ -121,6 +123,8 @@ export type DaemonToHub =
   | SessionStateFrame
   | DaemonStartSessionRejected
   | PluginChatOut
+  | DaemonAskUserQuestionRequest
+  | DaemonAskUserQuestionResolved
   | DaemonSlashInventory;
 
 export type HubToDaemon =
@@ -130,6 +134,7 @@ export type HubToDaemon =
   | HubToDaemonKillSession
   | HubToDaemonStartSession
   | HubToDaemonChatSend
+  | HubAskUserQuestionAnswer
   | HubToDaemonCliCommand;
 
 // ─── hub ↔ PWA (WSS) ──────────────────────────────────────────────────
@@ -159,6 +164,8 @@ export type HubToPwa =
   | PwaStartSessionRejected
   | PwaChatBroadcast
   | HubChatErrorBroadcast
+  | PwaAskUserQuestionRequest
+  | PwaAskUserQuestionResolved
   | PwaSlashInventory;
 
 export type PwaToHub =
@@ -168,6 +175,7 @@ export type PwaToHub =
   | PwaToHubKillSession
   | PwaToHubStartSession
   | PwaToHubChatSend
+  | PwaToHubAskUserQuestionAnswer
   | PwaToHubCliCommand;
 
 // ─── kill_session (dangerous action) ──────────────────────────────────

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import type {
   HubToPwa, PwaToHub, DaemonView, EventFrameForPwa, PwaPermissionRequest,
   PwaChatBroadcast, PwaStartSessionRejected, SessionState, AGUIEvent, SlashEntry,
+  PwaAskUserQuestionRequest,
 } from "@cc-remote/proto";
 import {
   createPending, confirmPending, failPending, timeoutPending, dismissPending, findPending,
@@ -84,6 +85,13 @@ export interface HubState {
   daemons: DaemonView[];
   events: Record<string, BufferedEvent[]>;
   pendingPermissions: Record<string, PwaPermissionRequest>;
+  /**
+   * Pending AskUserQuestion requests forwarded by the PreToolUse hook through
+   * the daemon. Keyed by request_id. UI renders a card per pending request;
+   * answering dispatches `outbound_ask_answer` and on `ask_user_question_resolved`
+   * the entry is dropped.
+   */
+  pendingQuestions: Record<string, PwaAskUserQuestionRequest>;
   completedCounts: Record<string, number>;
   chatMessages: Record<string, PwaChatBroadcast[]>;
   chatErrors: Record<string, string>;  // keyed by eventKey, value = reason of last error
@@ -118,6 +126,7 @@ export function eventKey(daemon_id: string, session_id: string): string {
 export function initialHubState(): HubState {
   return {
     connected: false, daemons: [], events: {}, pendingPermissions: {},
+    pendingQuestions: {},
     completedCounts: {},
     chatMessages: {}, chatErrors: {},
     startSessionErrors: {},
@@ -141,6 +150,7 @@ export type HubAction =
   | { type: "outbound_start_session"; daemon_id: string; request_id: string; started_at: number }
   | { type: "outbound_request_history"; daemon_id: string; session_id: string; request_id: string; started_at: number }
   | { type: "outbound_permission_reply"; daemon_id: string; session_id: string; request_id: string; decision: "allow" | "deny"; started_at: number }
+  | { type: "outbound_ask_answer"; daemon_id: string; session_id: string; request_id: string; started_at: number }
   | { type: "outbound_kill_session"; daemon_id: string; session_id: string; started_at: number }
   | { type: "command_timeout"; id: string }
   | { type: "command_dismiss"; id: string }
@@ -230,6 +240,23 @@ export function reducer(state: HubState, action: HubAction): HubState {
         started_at: action.started_at,
         status: "pending",
         label: action.decision,
+      };
+      return { ...state, pendingCommands: createPending(cleaned, cmd) };
+    }
+
+    case "outbound_ask_answer": {
+      const cleaned = dropStalePending(state.pendingCommands, (c) =>
+        c.kind === "ask_answer"
+        && c.id === action.request_id
+        && c.status !== "pending",
+      );
+      const cmd: PendingCommand = {
+        id: action.request_id,
+        kind: "ask_answer",
+        daemon_id: action.daemon_id,
+        session_id: action.session_id,
+        started_at: action.started_at,
+        status: "pending",
       };
       return { ...state, pendingCommands: createPending(cleaned, cmd) };
     }
@@ -400,6 +427,21 @@ export function reducer(state: HubState, action: HubAction): HubState {
           delete next[frame.request_id];
           return { ...prev, pendingPermissions: next, pendingCommands: nextPending };
         }
+        case "ask_user_question_request":
+          return {
+            ...prev,
+            pendingQuestions: { ...prev.pendingQuestions, [frame.request_id]: frame },
+          };
+        case "ask_user_question_resolved": {
+          const nextPending = confirmPending(prev.pendingCommands, frame.request_id);
+          if (!prev.pendingQuestions[frame.request_id]) {
+            if (nextPending === prev.pendingCommands) return prev;
+            return { ...prev, pendingCommands: nextPending };
+          }
+          const next = { ...prev.pendingQuestions };
+          delete next[frame.request_id];
+          return { ...prev, pendingQuestions: next, pendingCommands: nextPending };
+        }
         case "task_completed": {
           const k = eventKey(frame.daemon_id, frame.session_id);
           const prevCount = prev.completedCounts[k] ?? 0;
@@ -490,6 +532,7 @@ export function reducer(state: HubState, action: HubAction): HubState {
 
 export interface UseHubResult extends HubState {
   sendPermissionReply: (req: PwaPermissionRequest, decision: "allow" | "deny") => void;
+  sendAskAnswer: (req: PwaAskUserQuestionRequest, answers: (string | null)[]) => void;
   requestHistory: (daemon_id: string, session_id: string, before_offset: number, limit: number) => void;
   killSession: (daemon_id: string, session_id: string) => void;
   startSession: (daemon_id: string, cwd: string, name?: string) => void;
@@ -647,6 +690,30 @@ export function useHub(
         session_id: req.session_id,
         request_id: req.request_id,
         decision,
+        started_at: Date.now(),
+      }));
+      armTimeout(req.request_id);
+    },
+    [armTimeout],
+  );
+
+  const sendAskAnswer = useCallback(
+    (req: PwaAskUserQuestionRequest, answers: (string | null)[]) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const msg: PwaToHub = {
+        type: "ask_user_question_answer",
+        daemon_id: req.daemon_id,
+        session_id: req.session_id,
+        request_id: req.request_id,
+        answers,
+      };
+      ws.send(JSON.stringify(msg));
+      setState((prev) => reducer(prev, {
+        type: "outbound_ask_answer",
+        daemon_id: req.daemon_id,
+        session_id: req.session_id,
+        request_id: req.request_id,
         started_at: Date.now(),
       }));
       armTimeout(req.request_id);
@@ -821,7 +888,7 @@ export function useHub(
 
   return {
     ...state,
-    sendPermissionReply, requestHistory, killSession, startSession, sendChat, sendCliCommand,
+    sendPermissionReply, sendAskAnswer, requestHistory, killSession, startSession, sendChat, sendCliCommand,
     clearStartSessionError, pendingChatSendFor, pendingStartSessionFor, pendingHistoryFor,
     pendingPermissionReplyFor, pendingKillFor, dismissPendingCommand,
   };

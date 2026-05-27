@@ -16,6 +16,7 @@ import { HomeScreen } from "./screens/HomeScreen";
 import { useDevice } from "./hooks/useMediaQuery";
 import { usePermissionQueue } from "./hooks/usePermissionQueue";
 import { PermissionSurface } from "./screens/PermissionSurface";
+import { AskQuestionSurface } from "./screens/AskQuestionSurface";
 import { SignInScreen } from "./screens/SignInScreen";
 import type { PendingCommand } from "./hooks/pendingCommands";
 
@@ -59,7 +60,7 @@ export function RealApp() {
       setAuthNotice("Session expired, please sign in again.");
     },
   });
-  const { connected, daemons, events, pendingPermissions, sendPermissionReply, completedCounts, chatErrors, startSessionErrors, clearStartSessionError, pendingChatSendFor, dismissPendingCommand, pendingPermissionReplyFor } = hub;
+  const { connected, daemons, events, pendingPermissions, pendingQuestions, sendPermissionReply, sendAskAnswer, completedCounts, chatErrors, startSessionErrors, clearStartSessionError, pendingChatSendFor, dismissPendingCommand, pendingPermissionReplyFor } = hub;
   const { lastSeenOffsets, markSeen } = useLastSeen();
   const selectedKey = selected ? eventKey(selected.daemon_id, selected.session_id) : null;
   const sessionTimeline = useSessionTimeline(
@@ -276,6 +277,27 @@ export function RealApp() {
           Already handled on another device.
         </div>
       )}
+      {(() => {
+        const askActive = Object.values(pendingQuestions)[0];
+        if (!askActive) return null;
+        return (
+          <AskQuestionSurface
+            request={askActive}
+            daemonHostname={
+              daemons.find((d) => d.daemon_id === askActive.daemon_id)?.hostname ??
+              askActive.daemon_id
+            }
+            device={device}
+            onAnswer={(answers) => sendAskAnswer(askActive, answers)}
+            onClose={() => {
+              // Local-only dismissal; daemon side keeps the request open until
+              // expiry or another tab answers. Re-rendering on `pendingQuestions`
+              // change will resurface it.
+            }}
+            pendingReply={hub.pendingCommands[askActive.request_id]}
+          />
+        );
+      })()}
     </>
   );
 }

@@ -3,6 +3,7 @@ export type PendingCommandKind =
   | "start_session"
   | "request_history"
   | "permission_reply"
+  | "ask_answer"
   | "kill_session";
 
 export type PendingCommandStatus = "pending" | "failed" | "timed_out";

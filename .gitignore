@@ -13,4 +13,5 @@ test-results/
 *.sqlite-shm
 *.sqlite-wal
 *.tsbuildinfo
-.claude/scheduled_tasks.lock
+.claude/
+.superpowers/

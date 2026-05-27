@@ -221,6 +221,92 @@ test("onPwaCommand forwards permission_reply to addressed daemon", () => {
   }]);
 });
 
+test("ask_user_question_request frame fans out to PWAs with daemon_id", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const broadcasts: unknown[] = [];
+  preg.add({}, (f) => broadcasts.push(f));
+  const router = new Router(dreg, preg);
+
+  router.onDaemonFrame("d-1", { type: "hello", daemon_id: "d-1", epoch: 1,
+    hostname: "h", agent_version: "0", sessions: [] });
+  broadcasts.length = 0;
+
+  router.onDaemonFrame("d-1", {
+    type: "ask_user_question_request",
+    session_id: "s1",
+    request_id: "ask-1",
+    questions: [{
+      question: "Where to put it?",
+      header: "Location",
+      multiSelect: false,
+      options: [{ label: "docs/" }, { label: "src/" }],
+    }],
+    expires_at: 9999,
+  });
+  expect(broadcasts).toEqual([{
+    type: "ask_user_question_request",
+    daemon_id: "d-1",
+    session_id: "s1",
+    request_id: "ask-1",
+    questions: [{
+      question: "Where to put it?",
+      header: "Location",
+      multiSelect: false,
+      options: [{ label: "docs/" }, { label: "src/" }],
+    }],
+    expires_at: 9999,
+  }]);
+});
+
+test("ask_user_question_resolved frame fans out to PWAs", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const broadcasts: unknown[] = [];
+  preg.add({}, (f) => broadcasts.push(f));
+  const router = new Router(dreg, preg);
+  router.onDaemonFrame("d-1", { type: "hello", daemon_id: "d-1", epoch: 1,
+    hostname: "h", agent_version: "0", sessions: [] });
+  broadcasts.length = 0;
+
+  router.onDaemonFrame("d-1", {
+    type: "ask_user_question_resolved",
+    session_id: "s1",
+    request_id: "ask-1",
+    resolution: "answered",
+  });
+  expect(broadcasts).toEqual([{
+    type: "ask_user_question_resolved",
+    daemon_id: "d-1",
+    session_id: "s1",
+    request_id: "ask-1",
+    resolution: "answered",
+  }]);
+});
+
+test("onPwaCommand forwards ask_user_question_answer to addressed daemon", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+  const sentToDaemon: unknown[] = [];
+  dreg.add("d-1", {}, (f) => sentToDaemon.push(f));
+
+  router.onPwaCommand({
+    type: "ask_user_question_answer",
+    daemon_id: "d-1",
+    session_id: "s1",
+    request_id: "ask-1",
+    answers: ["docs/", null],
+  });
+
+  expect(sentToDaemon).toEqual([{
+    type: "ask_user_question_answer",
+    session_id: "s1",
+    request_id: "ask-1",
+    answers: ["docs/", null],
+  }]);
+});
+
 test("permission_request triggers Web Push fanout to subscriptions of daemon's owner", async () => {
   const dir = mkdtempSync(join(tmpdir(), "ccr-rp-"));
   try {

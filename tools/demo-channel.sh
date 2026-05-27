@@ -23,6 +23,17 @@ DAEMON_ID="demo-1"
 HUB_HOST_PORT=17745
 PWA_HOST_PORT=15173
 
+_t0=$(date +%s)
+_t_prev=$_t0
+_step() {
+  local now elapsed_total elapsed_step
+  now=$(date +%s)
+  elapsed_total=$((now - _t0))
+  elapsed_step=$((now - _t_prev))
+  _t_prev=$now
+  printf '[+%3ds Δ%2ds] %s\n' "$elapsed_total" "$elapsed_step" "$*"
+}
+
 stop() {
   echo "[demo] stopping..."
   tmux kill-session -t "$TMUX_NAME" 2>/dev/null || true
@@ -72,15 +83,15 @@ EOF
 fi
 export ISSUER_HOST
 
-echo "[demo] bringing up hub + fake-ias (compose)..."
+_step "bringing up hub + fake-ias (compose)..."
 (cd e2e-real && ISSUER_HOST="${ISSUER_HOST}" docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --wait)
 
-echo "[demo] issuing pairing code..."
+_step "issuing pairing code..."
 PAIR_CODE=$(cd e2e-real && docker compose -f docker-compose.yml -f docker-compose.demo.yml exec -T hub \
   bun run /app/packages/hub/src/admin.ts issue-pairing-code i060912@sap.com "$DAEMON_ID" | tr -d '[:space:]')
 echo "[demo] pairing code: $PAIR_CODE"
 
-echo "[demo] writing daemon config..."
+_step "writing daemon config..."
 cat > "${DEMO_STATE_DIR}/config.json" <<EOF
 {
   "daemon_id": "$DAEMON_ID",
@@ -93,21 +104,21 @@ cat > "${DEMO_STATE_DIR}/config.json" <<EOF
 }
 EOF
 
-echo "[demo] starting daemon..."
+_step "starting daemon..."
 CC_REMOTE_STATE_DIR="$DEMO_STATE_DIR" \
   bun run packages/daemon/src/index.ts \
   > "$DAEMON_LOG" 2>&1 &
 echo $! > "${DEMO_STATE_DIR}/daemon.pid"
 sleep 2
 
-echo "[demo] pairing daemon..."
+_step "pairing daemon..."
 CC_REMOTE_STATE_DIR="$DEMO_STATE_DIR" \
   bun run packages/daemon/bin/cc-remote.ts pair \
   --hub "http://localhost:${HUB_HOST_PORT}" --code "$PAIR_CODE" --daemon-id "$DAEMON_ID"
 
 # `pair` rewrites config.json down to {daemon_id, hub_url}. Re-emit the rich
 # config so allow_start / spawn_command / etc. survive the pair step.
-echo "[demo] re-writing daemon config (post-pair)..."
+_step "re-writing daemon config (post-pair)..."
 cat > "${DEMO_STATE_DIR}/config.json" <<EOF
 {
   "daemon_id": "$DAEMON_ID",
@@ -120,7 +131,7 @@ cat > "${DEMO_STATE_DIR}/config.json" <<EOF
 }
 EOF
 
-echo "[demo] restarting daemon (pick up paired identity)..."
+_step "restarting daemon (paired identity)..."
 pkill -F "${DEMO_STATE_DIR}/daemon.pid" 2>/dev/null || true
 sleep 1
 CC_REMOTE_STATE_DIR="$DEMO_STATE_DIR" \
@@ -129,7 +140,7 @@ CC_REMOTE_STATE_DIR="$DEMO_STATE_DIR" \
 echo $! > "${DEMO_STATE_DIR}/daemon.pid"
 sleep 2
 
-echo "[demo] writing mcp-config for the plugin..."
+_step "writing mcp-config for the plugin..."
 cat > "${DEMO_STATE_DIR}/mcp-config.json" <<EOF
 {
   "mcpServers": {
@@ -142,14 +153,14 @@ cat > "${DEMO_STATE_DIR}/mcp-config.json" <<EOF
 }
 EOF
 
-echo "[demo] starting PWA dev server (vite, port ${PWA_HOST_PORT})..."
+_step "starting PWA dev server (vite, port ${PWA_HOST_PORT})..."
 (cd packages/pwa && \
   VITE_HUB_URL="ws://localhost:${HUB_HOST_PORT}" \
   bun run dev -- --port "${PWA_HOST_PORT}" --strictPort > "$PWA_LOG" 2>&1 &
  echo $! > "${DEMO_STATE_DIR}/pwa.pid")
 sleep 3
 
-echo "[demo] starting tmux claude session ($TMUX_NAME)..."
+_step "starting tmux claude session ($TMUX_NAME)..."
 tmux new-session -d -s "$TMUX_NAME" -x 200 -y 50 -c "$DEMO_STATE_DIR"
 # Use either ANTHROPIC_API_KEY or the AUTH_TOKEN/BASE_URL pair (whichever the user has).
 if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
@@ -181,13 +192,14 @@ dismiss_dialog() {
   return 1
 }
 
-echo "[demo] auto-dismissing claude boot dialogs..."
+_step "auto-dismissing claude boot dialogs..."
 dismiss_dialog "Enter to confirm|local development" 20 || \
   echo "[demo] WARN: dev-channels dialog not seen; CC version drift?"
 dismiss_dialog "trust.*workspace|trust.*folder|safety check|created or one you trust" 8 || \
   true   # workspace-trust is per-cwd and may already be remembered
 
 # Wait for the interactive `❯` prompt to appear.
+_step "waiting for claude prompt..."
 end=$(( $(date +%s) + 30 ))
 while [[ $(date +%s) -lt $end ]]; do
   if tmux capture-pane -t "$TMUX_NAME" -p 2>/dev/null | grep -qE "❯"; then
@@ -195,6 +207,8 @@ while [[ $(date +%s) -lt $end ]]; do
   fi
   sleep 0.3
 done
+
+_step "ready"
 
 cat <<EOF
 

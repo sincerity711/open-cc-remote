@@ -78,14 +78,23 @@ test("DPoP jti replay is rejected", async () => {
   } finally { s.cleanup(); }
 });
 
-test("htu normalization: http<->ws and https<->wss", async () => {
+test("htu normalization: any scheme combination matches (http/https/ws/wss)", async () => {
   const s = await setupPaired();
   try {
-    const wsUrl = "ws://h/y";
-    const httpUrl = "http://h/y";
-    const dpop = await makeDpop(s.privateKey, "GET", wsUrl);
-    const r = await verifyDaemonAuth(s.db, SECRET, s.daemon_id, s.jwt, dpop, httpUrl, "GET");
-    expect(r.daemon_id).toBe("macbook");
+    // Behind a TLS-terminating reverse proxy the daemon signs against the
+    // public wss:// URL while the hub sees req.url with the internal http://
+    // scheme. All four schemes must canonicalize to the same value.
+    const cases: Array<[string, string]> = [
+      ["ws://h/y",   "http://h/y"],   // local dev path
+      ["wss://h/y",  "https://h/y"],  // standalone TLS hub
+      ["wss://h/y",  "http://h/y"],   // CF / TLS-terminating reverse proxy
+      ["https://h/y", "wss://h/y"],   // refresh path: daemon signs https, hub sees wss (unlikely but symmetric)
+    ];
+    for (const [signed, seen] of cases) {
+      const dpop = await makeDpop(s.privateKey, "GET", signed);
+      const r = await verifyDaemonAuth(s.db, SECRET, s.daemon_id, s.jwt, dpop, seen, "GET");
+      expect(r.daemon_id).toBe("macbook");
+    }
   } finally { s.cleanup(); }
 });
 

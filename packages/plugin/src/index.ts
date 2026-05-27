@@ -29,6 +29,10 @@ async function main() {
   let mcp: Server | null = null;
   // Hold the SessionSnapshot we registered with so we can re-send it on
   // reconnect. The plugin process outlives any single daemon process now.
+  // Mutable: the daemon will tell us claude_session_id via `bind_resolved`,
+  // and we patch it in so a future re-register can carry the resolved id —
+  // letting the new daemon skip bindJsonl (which would race against an idle
+  // JSONL whose mtime is outside the pre-scan window).
   let registeredSession: import("@cc-remote/proto").SessionSnapshot | null = null;
 
   let daemon: DaemonClient;
@@ -108,6 +112,14 @@ async function main() {
         emitPermissionDecision(mcp!, f.request_id, f.decision);
       } else if (f.type === "chat_in") {
         emitChatIn(mcp!, f);
+      } else if (f.type === "bind_resolved") {
+        // Cache the daemon-resolved claude_session_id so a future re-register
+        // (after daemon restart) can hand it back and let the new daemon skip
+        // bindJsonl. Only patch when our cached snapshot matches.
+        if (registeredSession && registeredSession.session_id === f.session_id) {
+          registeredSession = { ...registeredSession, claude_session_id: f.claude_session_id };
+          process.stderr.write(`cc-remote plugin: bind resolved claude_session_id=${f.claude_session_id} for ${f.session_id}\n`);
+        }
       } else if (f.type === "daemon_going_down") {
         process.stderr.write(`cc-remote plugin: daemon going down (${f.reason}); waiting to reconnect\n`);
       }

@@ -1,22 +1,26 @@
 // Scenario 17 — floating "New events ↓" pill.
 //
 // Spec §3.4 invariant: when the user has scrolled up in a session timeline
-// (autoScroll === false) and new events arrive (items.length grows), the
-// SessionTimeline must render a clickable pill that scrolls to the bottom
-// and re-enables auto-scroll.
+// (autoScroll === false) and new events arrive with jsonl_offset beyond the
+// per-session lastSeen anchor (see useLastSeen), the SessionTimeline must
+// render a clickable pill that scrolls to the bottom and re-enables
+// auto-scroll (the autoScroll effect then advances the anchor and the pill
+// dismisses).
 //
 // Approach:
 //   1. Boot real claude with the chat-priming prompt so we get a session
 //      and the channel-reply tool wiring.
 //   2. Open the session and send a first chat so the timeline has at least
-//      one user bubble + assistant card.
+//      one user bubble + assistant card. While at the bottom the lastSeen
+//      anchor advances to the latest jsonl_offset.
 //   3. Force the timeline scroll position to the top via evaluate() — this
 //      flips `autoScroll` to `false` via the existing onScroll handler. We
 //      do this even when content is shorter than the viewport (the onScroll
 //      handler still fires from a programmatic scrollTop change).
-//   4. Send a second chat. This adds a UserBubble immediately; while the
-//      user is scrolled up, the pill must appear.
-//   5. Click the pill: it must scroll to bottom and disappear.
+//   4. Send a second chat. The round-tripped event has offset > lastSeen →
+//      unreadCount > 0; while scrolled up the pill must appear.
+//   5. Click the pill: it must scroll to bottom; the autoScroll effect
+//      advances lastSeen, unreadCount returns to 0, and the pill dismisses.
 
 import { test, expect } from "@playwright/test";
 import { resolve, dirname } from "node:path";
@@ -127,19 +131,25 @@ test("new events pill: appears while scrolled up, scrolls and dismisses on click
     });
 
     await sc.step("pill-appears-on-new-event", async () => {
-      // While scrolled up, send a second chat. The new user bubble bumps
-      // items.length beyond lastSeenLength → the pill must render.
+      // While scrolled up, send a second chat. The round-tripped event has
+      // jsonl_offset > the frozen lastSeen anchor → unreadCount > 0 → pill.
+      // 60s timeout — real claude might still be mid-reply to "hi" when this
+      // chat lands; the channel notification queues until claude's next
+      // turn boundary, so the JSONL write that drives the pill can take
+      // 15-30s in the worst case (vs. ~2s when idle). Mirrors the pattern
+      // in scenario 12 (chat round-trip) which uses 30s for assistant reply.
       const SECOND = `MSG-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
       await session.page.getByTestId("chat-input").fill(SECOND);
       await session.page.getByTestId("chat-input").press("Enter");
-      await session.page.getByTestId("timeline-jump-new").waitFor({ timeout: 10_000 });
+      await session.page.getByTestId("timeline-jump-new").waitFor({ timeout: 60_000 });
       await expect(session.page.getByTestId("timeline-jump-new")).toBeVisible();
     });
 
     await sc.step("pill-scrolls-and-dismisses", async () => {
       await session.page.getByTestId("timeline-jump-new").click();
-      // The click triggers smooth scroll to bottom + setAutoScroll(true) +
-      // resets lastSeenLength → the pill must disappear.
+      // The click triggers smooth scroll to bottom + setAutoScroll(true);
+      // the autoScroll effect then advances lastSeen → unreadCount=0 →
+      // the pill must disappear.
       await expect(session.page.getByTestId("timeline-jump-new")).toHaveCount(0, {
         timeout: 5_000,
       });

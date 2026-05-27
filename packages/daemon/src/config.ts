@@ -11,7 +11,15 @@ export interface DaemonConfig {
   allow_kill: boolean;
   allow_start: boolean;
   allowed_cwd_prefix: string[];
-  spawn_command: string;
+  /**
+   * Required when `allow_start=true`. `cc-remote init` writes a working
+   * default (`claude --mcp-config <state>/mcp-config.json
+   * --dangerously-load-development-channels server:cc-remote`) so a paired
+   * daemon can spawn sessions out of the box. start_session rejects with
+   * reason `spawn_command_unset` if this is missing — surfaced to the PWA via
+   * the start_session_rejected frame.
+   */
+  spawn_command: string | undefined;
   idle_window_ms: number;
 }
 
@@ -43,7 +51,9 @@ export function loadConfig(stateDir: string = defaultStateDir()): DaemonConfig {
     allow_kill: data.allow_kill === true,
     allow_start: data.allow_start === true,
     allowed_cwd_prefix: data.allowed_cwd_prefix ?? [],
-    spawn_command: data.spawn_command ?? "claude --channels plugin:cc-remote@local",
+    spawn_command: typeof data.spawn_command === "string" && data.spawn_command.length > 0
+      ? data.spawn_command
+      : undefined,
     idle_window_ms: typeof data.idle_window_ms === "number" ? data.idle_window_ms : 30_000,
   };
 }

@@ -37,7 +37,8 @@ export interface FromClaudeCodeContext {
 }
 
 const HIDDEN_PAYLOAD_TYPES = new Set<string>([
-  "attachment",
+  // NB: "attachment" is handled explicitly above (queued_command surfaces
+  // as a user TEXT_MESSAGE_CHUNK; other subtypes emit nothing).
   "queue-operation",
   "mcp_instructions_data",
   "ai-title",
@@ -288,6 +289,39 @@ export function fromClaudeCode(
         }
       }
     }
+    return out;
+  }
+
+  // ── attachment ──────────────────────────────────────────────────────
+  // Claude Code drops `attachment` rows into the JSONL for queued commands
+  // (channel injections that arrive mid-tool-call) and for file/image
+  // attachments. We only surface queued_command attachments — everything
+  // else is intentionally silent (the PWA filters payloadType==="attachment"
+  // as RAW, so the fallback would never be visible anyway).
+  if (payloadType === "attachment") {
+    const attachment = isObject(jsonlRow) ? jsonlRow["attachment"] : undefined;
+    const subtype = stringField(attachment, "type");
+    if (subtype === "queued_command") {
+      const prompt = stringField(attachment, "prompt");
+      // queued_command always wraps the user's prose in a <channel> envelope
+      // when it originated from cc-remote. Strip the envelope unconditionally;
+      // stripChannelEnvelope is a no-op when the envelope is absent.
+      const body = stripChannelEnvelope(prompt);
+      // Note: the row carries `isMeta:true`, but that flag is Claude's marker
+      // for "system inject" prose — for channel queued_command it's misleading,
+      // so we ignore it here (unlike the regular user-message branch).
+      if (body) {
+        out.push({
+          type: EventType.TEXT_MESSAGE_CHUNK,
+          messageId: `event:${offset}:queued_user`,
+          role: "user",
+          delta: body,
+          ...(ts !== undefined ? { timestamp: ts } : {}),
+          rawEvent: jsonlRow,
+        } as AgUiEvent);
+      }
+    }
+    // Other attachment subtypes (image, file, …) emit nothing.
     return out;
   }
 

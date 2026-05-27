@@ -55,7 +55,9 @@ test("loadConfig allow_start + allowed_cwd_prefix + spawn_command have defaults;
     const c1 = loadConfig(dir);
     expect(c1.allow_start).toBe(false);
     expect(c1.allowed_cwd_prefix).toEqual([]);
-    expect(c1.spawn_command).toContain("claude");
+    // spawn_command is intentionally undefined when unset (the previous
+    // baked-in default referred to a pre-2.1 claude CLI and silently no-op'd).
+    expect(c1.spawn_command).toBeUndefined();
 
     writeFileSync(join(dir, "config.json"), JSON.stringify({
       daemon_id: "d", hub_url: "ws://x",
@@ -70,6 +72,16 @@ test("loadConfig allow_start + allowed_cwd_prefix + spawn_command have defaults;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("loadConfig spawn_command empty string => undefined", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ccr-c3b-"));
+  try {
+    writeFileSync(join(dir, "config.json"), JSON.stringify({
+      daemon_id: "d", hub_url: "ws://x", spawn_command: "",
+    }));
+    expect(loadConfig(dir).spawn_command).toBeUndefined();
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("loadConfig idle_window_ms defaults to 30000; honors override", () => {

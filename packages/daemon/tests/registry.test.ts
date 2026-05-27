@@ -32,3 +32,13 @@ test("ignores duplicate add of same session_id", () => {
   expect(count).toBe(1);
   expect(reg.list()).toHaveLength(1);
 });
+
+test("getByClaudeSessionId — returns matching snapshot, undefined when absent", () => {
+  const reg = new LiveSessions();
+  reg.add({ ...make("a"), claude_session_id: "claude-aaa" });
+  reg.add({ ...make("b"), claude_session_id: "claude-bbb" });
+  reg.add({ ...make("c"), claude_session_id: null });
+  expect(reg.getByClaudeSessionId("claude-aaa")?.session_id).toBe("a");
+  expect(reg.getByClaudeSessionId("claude-bbb")?.session_id).toBe("b");
+  expect(reg.getByClaudeSessionId("claude-zzz")).toBeUndefined();
+});

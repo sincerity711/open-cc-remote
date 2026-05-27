@@ -141,6 +141,26 @@ export class Router {
         });
         return;
       }
+      case "ask_user_question_request": {
+        const state = this.daemons.get(daemon_id);
+        if (!state) return;
+        this.pwaReg.broadcast({
+          type: "ask_user_question_request", daemon_id,
+          session_id: frame.session_id, request_id: frame.request_id,
+          questions: frame.questions, expires_at: frame.expires_at,
+        });
+        return;
+      }
+      case "ask_user_question_resolved": {
+        const state = this.daemons.get(daemon_id);
+        if (!state) return;
+        this.pwaReg.broadcast({
+          type: "ask_user_question_resolved", daemon_id,
+          session_id: frame.session_id, request_id: frame.request_id,
+          resolution: frame.resolution,
+        });
+        return;
+      }
       case "history_chunk": {
         const state = this.daemons.get(daemon_id);
         if (!state) return;
@@ -297,6 +317,13 @@ export class Router {
       if (frame.name !== undefined) out.name = frame.name;
       if (frame.request_id !== undefined) out.request_id = frame.request_id;
       this.daemonReg.send(frame.daemon_id, out);
+    } else if (frame.type === "ask_user_question_answer") {
+      this.daemonReg.send(frame.daemon_id, {
+        type: "ask_user_question_answer",
+        session_id: frame.session_id,
+        request_id: frame.request_id,
+        answers: frame.answers,
+      });
     }
   }
 

@@ -2,15 +2,28 @@
 // All functions operate on the compose file at e2e-real/docker-compose.yml.
 
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const composeDir = resolve(__dirname, "..");
 const composeFile = resolve(composeDir, "docker-compose.yml");
+const composeOverride = resolve(composeDir, "docker-compose.override.yml");
+
+function composeFileArgs(): string[] {
+  // Explicitly include the override file if it exists. `-f` is required
+  // because we already pass `-f docker-compose.yml`; once any `-f` is set,
+  // compose stops auto-loading override files.
+  const args = ["-f", composeFile];
+  if (existsSync(composeOverride)) {
+    args.push("-f", composeOverride);
+  }
+  return args;
+}
 
 function runCompose(args: string[], opts: { timeoutMs?: number } = {}): { code: number; stdout: string; stderr: string } {
-  const r = spawnSync("docker", ["compose", "-f", composeFile, ...args], {
+  const r = spawnSync("docker", ["compose", ...composeFileArgs(), ...args], {
     cwd: composeDir,
     encoding: "utf8",
     timeout: opts.timeoutMs ?? 180_000,

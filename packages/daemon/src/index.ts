@@ -144,6 +144,15 @@ const idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const clientToSession = new Map<Socket, string>();
 const sessionToClient = new Map<string, Socket>();
 const requestToClient = new Map<string, Socket>();
+// AskUserQuestion relay: request_id → { client (hook socket), session_id, expiry timer }.
+// Distinct from `requestToClient` (which is for permission requests) so the
+// two flows can't collide on the request_id namespace.
+interface AskPending {
+  client: Socket;
+  session_id: string;
+  timer: ReturnType<typeof setTimeout>;
+}
+const askToClient = new Map<string, AskPending>();
 const pendingStarts = createPendingStarts({ ttlMs: 60_000 });
 
 const hub = startHubClient({
@@ -178,6 +187,28 @@ const hub = startHubClient({
         decided_via: "pwa",
       });
       fsm.onPermissionResolved(frame.session_id);
+    } else if (frame.type === "ask_user_question_answer") {
+      // PWA answered an AskUserQuestion. Route the answer back to the hook
+      // socket so it can synthesize the PreToolUse stdout response, then tell
+      // the hub the request is resolved (PWA echoes that to other clients).
+      const pending = askToClient.get(frame.request_id);
+      if (!pending) return; // already resolved or expired
+      clearTimeout(pending.timer);
+      askToClient.delete(frame.request_id);
+      try {
+        sockServer.replyTo(pending.client, {
+          type: "ask_user_question_answer",
+          request_id: frame.request_id,
+          answers: frame.answers,
+          resolution: "answered",
+        });
+      } catch {}
+      hub.send({
+        type: "ask_user_question_resolved",
+        session_id: frame.session_id,
+        request_id: frame.request_id,
+        resolution: "answered",
+      });
     } else if (frame.type === "request_history") {
       const session = sessions.get(frame.session_id);
       if (!session) {
@@ -379,6 +410,55 @@ function startSessionWatcher(s: SessionSnapshot, claudeId: string): void {
   watchers.set(s.session_id, watcher);
 }
 
+function handleHookAskUserQuestionRequest(
+  frame: import("@cc-remote/proto").HookAskUserQuestionRequest,
+  client: Socket,
+): void {
+  // Resolve daemon session_id from claude_session_id (what the hook reads
+  // from CC stdin). If we don't know about it yet — daemon was started after
+  // the JSONL file appeared, or claude bypassed registration — fail fast.
+  const session = sessions.getByClaudeSessionId(frame.claude_session_id);
+  if (!session) {
+    process.stderr.write(`daemon: ask_user_question_request — no session for claude_session=${frame.claude_session_id}\n`);
+    try {
+      sockServer.replyTo(client, {
+        type: "ask_user_question_answer",
+        request_id: frame.request_id,
+        answers: frame.questions.map(() => null),
+        resolution: "session_unknown",
+      });
+    } catch {}
+    return;
+  }
+  const ttl = Math.max(0, frame.expires_at - Date.now());
+  const timer = setTimeout(() => {
+    askToClient.delete(frame.request_id);
+    try {
+      sockServer.replyTo(client, {
+        type: "ask_user_question_answer",
+        request_id: frame.request_id,
+        answers: frame.questions.map(() => null),
+        resolution: "expired",
+      });
+    } catch {}
+    hub.send({
+      type: "ask_user_question_resolved",
+      session_id: session.session_id,
+      request_id: frame.request_id,
+      resolution: "expired",
+    });
+  }, ttl);
+  timer.unref();
+  askToClient.set(frame.request_id, { client, session_id: session.session_id, timer });
+  hub.send({
+    type: "ask_user_question_request",
+    session_id: session.session_id,
+    request_id: frame.request_id,
+    questions: frame.questions,
+    expires_at: frame.expires_at,
+  });
+}
+
 sessions.onAdd((s: SessionSnapshot) => {
   fsm.register(s.session_id);
   const matchedReqId = pendingStarts.consume(s.cwd);
@@ -518,6 +598,13 @@ const sockServer = startSocketServer({
       // Forward plugin's chat_out to the hub; hub will mint message_id + broadcast.
       handlePluginChatOut(frame, { send: (f) => hub.send(f) });
       sockServer.replyTo(client, { type: "ack", ref: "chat_out" });
+    } else if (frame.type === "ask_user_question_request") {
+      // PreToolUse hook on AskUserQuestion connects to the daemon socket and
+      // sends this frame. We resolve the daemon session_id from the
+      // claude_session_id the hook reads from CC stdin, forward to hub, and
+      // hold the client connection open until either the PWA answers
+      // (delivered via hub `ask_user_question_answer`) or the request expires.
+      handleHookAskUserQuestionRequest(frame, client);
     }
   },
   onClose: (client) => {
@@ -527,6 +614,14 @@ const sockServer = startSocketServer({
       sessions.remove(session_id);
     }
     clientToSession.delete(client);
+    // Drop any pending AskUserQuestion entries owned by this client so the
+    // expiry timer doesn't try to write to a closed socket.
+    for (const [rid, p] of askToClient) {
+      if (p.client === client) {
+        clearTimeout(p.timer);
+        askToClient.delete(rid);
+      }
+    }
     // Note: requestToClient entries from this client will leak until a hub
     // permission_reply tries to deliver and fails silently. Acceptable for v1
     // (Plan 4 doesn't include cleanup-on-disconnect; future plan can revisit).

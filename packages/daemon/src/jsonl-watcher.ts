@@ -67,7 +67,11 @@ export function startWatcher(opts: WatcherOptions): WatcherHandle {
 
   try {
     watcher = watch(dir, { persistent: false }, (_event, filename) => {
-      if (filename === fileName) {
+      // macOS FSEvents frequently reports `filename` as null/undefined; we
+      // also drain on those events since drain is cheap and idempotent
+      // (returns early when size <= offset). Filtering on filename alone
+      // caused multi-minute idle-detection delays in production.
+      if (filename == null || filename === fileName) {
         setImmediate(drain);
       }
     });

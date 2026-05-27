@@ -21,6 +21,14 @@ import type {
   PwaToHubCliCommand,
   HubToDaemonCliCommand,
   SlashEntry,
+  HookAskUserQuestionRequest,
+  HookAskUserQuestionAnswer,
+  DaemonAskUserQuestionRequest,
+  PwaAskUserQuestionRequest,
+  PwaToHubAskUserQuestionAnswer,
+  HubAskUserQuestionAnswer,
+  PluginToDaemon,
+  DaemonToPlugin,
 } from "../src/frames.ts";
 
 // ─── PwaToHubChatSend ─────────────────────────────────────────────────
@@ -342,5 +350,105 @@ test("HubToDaemonCliCommand includes user for audit", () => {
   expect(parsed.type).toBe("cli_command");
   if (parsed.type === "cli_command") {
     expect(parsed.user).toBe("alice@example.com");
+  }
+});
+
+// ─── ask_user_question relay ──────────────────────────────────────────
+
+test("HookAskUserQuestionRequest: shape narrows on type", () => {
+  const f: HookAskUserQuestionRequest = {
+    type: "ask_user_question_request",
+    claude_session_id: "cs1",
+    request_id: "rq1",
+    questions: [
+      {
+        question: "Where to put the file?",
+        header: "Location",
+        multiSelect: false,
+        options: [
+          { label: "docs/", description: "alongside other docs" },
+          { label: "src/", description: "next to code" },
+        ],
+      },
+    ],
+    expires_at: 123,
+  };
+  const parsed = JSON.parse(JSON.stringify(f)) as PluginToDaemon;
+  expect(parsed.type).toBe("ask_user_question_request");
+  if (parsed.type === "ask_user_question_request") {
+    expect(parsed.claude_session_id).toBe("cs1");
+    expect(parsed.questions[0]?.options[0]?.label).toBe("docs/");
+  }
+});
+
+test("HookAskUserQuestionAnswer: resolution variants", () => {
+  const variants: HookAskUserQuestionAnswer["resolution"][] = [
+    "answered", "expired", "session_unknown", "no_pwa",
+  ];
+  for (const r of variants) {
+    const f: HookAskUserQuestionAnswer = {
+      type: "ask_user_question_answer",
+      request_id: "rq1",
+      answers: ["docs/"],
+      resolution: r,
+    };
+    const parsed = JSON.parse(JSON.stringify(f)) as DaemonToPlugin;
+    expect(parsed.type).toBe("ask_user_question_answer");
+    if (parsed.type === "ask_user_question_answer") {
+      expect(parsed.resolution).toBe(r);
+    }
+  }
+});
+
+test("DaemonAskUserQuestionRequest narrows in DaemonToHub", () => {
+  const f: DaemonAskUserQuestionRequest = {
+    type: "ask_user_question_request",
+    session_id: "s1",
+    request_id: "rq1",
+    questions: [{ question: "?", header: "H", multiSelect: false, options: [{ label: "a" }] }],
+    expires_at: 0,
+  };
+  const parsed = JSON.parse(JSON.stringify(f)) as DaemonToHub;
+  expect(parsed.type).toBe("ask_user_question_request");
+});
+
+test("PwaAskUserQuestionRequest narrows in HubToPwa with daemon_id", () => {
+  const f: PwaAskUserQuestionRequest = {
+    type: "ask_user_question_request",
+    daemon_id: "d1",
+    session_id: "s1",
+    request_id: "rq1",
+    questions: [{ question: "?", header: "H", multiSelect: true, options: [{ label: "x" }, { label: "y" }] }],
+    expires_at: 0,
+  };
+  const parsed = JSON.parse(JSON.stringify(f)) as HubToPwa;
+  expect(parsed.type).toBe("ask_user_question_request");
+  if (parsed.type === "ask_user_question_request") {
+    expect(parsed.daemon_id).toBe("d1");
+    expect(parsed.questions[0]?.multiSelect).toBe(true);
+  }
+});
+
+test("PwaToHubAskUserQuestionAnswer + HubAskUserQuestionAnswer round-trip", () => {
+  const a: PwaToHubAskUserQuestionAnswer = {
+    type: "ask_user_question_answer",
+    daemon_id: "d1",
+    session_id: "s1",
+    request_id: "rq1",
+    answers: ["docs/", null],
+  };
+  const ap = JSON.parse(JSON.stringify(a)) as PwaToHub;
+  expect(ap.type).toBe("ask_user_question_answer");
+
+  const b: HubAskUserQuestionAnswer = {
+    type: "ask_user_question_answer",
+    session_id: "s1",
+    request_id: "rq1",
+    answers: ["docs/", null],
+  };
+  const bp = JSON.parse(JSON.stringify(b)) as HubToDaemon;
+  expect(bp.type).toBe("ask_user_question_answer");
+  if (bp.type === "ask_user_question_answer") {
+    expect(bp.answers).toEqual(["docs/", null]);
   }
 });
