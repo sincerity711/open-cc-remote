@@ -8,12 +8,24 @@ export interface ConsumedCode {
 }
 
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+const CODE_LEN = 8;
 
 function generateCode(): string {
+  // Reject-resample to avoid modulo bias on the 31-char alphabet.
+  const buf = new Uint8Array(CODE_LEN * 2);
   let raw = "";
-  for (let i = 0; i < 6; i++) raw += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
-  return raw.slice(0, 3) + "-" + raw.slice(3);
+  while (raw.length < CODE_LEN) {
+    crypto.getRandomValues(buf);
+    for (let i = 0; i < buf.length && raw.length < CODE_LEN; i++) {
+      const b = buf[i]!;
+      if (b >= 248) continue; // 256 % 31 == 8 → reject [248,255] for unbiased modulo
+      raw += ALPHABET[b % ALPHABET.length];
+    }
+  }
+  return raw.slice(0, 4) + "-" + raw.slice(4);
 }
+
+export const MAX_PAIR_TTL_MS = 5 * 60_000;
 
 export function issueCode(
   db: Db,
@@ -22,12 +34,13 @@ export function issueCode(
   metadata: Record<string, unknown> | null,
   ttlMs: number,
 ): string {
+  const ttl = Math.min(ttlMs, MAX_PAIR_TTL_MS);
   for (let i = 0; i < 5; i++) {
     const code = generateCode();
     try {
       db.prepare(
         "INSERT INTO pairing_codes (code, kind, issuer_sub, metadata, expires_at) VALUES (?, ?, ?, ?, ?)",
-      ).run(code, kind, issuer_sub, metadata ? JSON.stringify(metadata) : null, Date.now() + ttlMs);
+      ).run(code, kind, issuer_sub, metadata ? JSON.stringify(metadata) : null, Date.now() + ttl);
       return code;
     } catch { /* PK collision, retry */ }
   }

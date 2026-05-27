@@ -8,7 +8,13 @@ const JTI_WINDOW_MS = 5 * 60_000;
 const DPOP_IAT_TOLERANCE_SEC = 60;
 
 function normalizeUrl(u: string): string {
-  return u.replace(/^https:\/\//i, "wss://").replace(/^http:\/\//i, "ws://");
+  // Equate the four schemes (http/https/ws/wss). Used as a fallback when the
+  // hub has no trusted-proxy config — preserves pre-2026-05-27 behavior where
+  // a daemon signs `wss://` and the hub sees `http://` after TLS termination.
+  // When HUB_TRUSTED_PROXIES is set, routes.ts reconstructs the public URL
+  // from X-Forwarded-Proto/Host before calling verifyDaemonAuth, and the
+  // schemes will already match exactly.
+  return u.replace(/^(?:https|wss|http|ws):\/\//i, "wss://");
 }
 
 export interface DaemonAuthResult {

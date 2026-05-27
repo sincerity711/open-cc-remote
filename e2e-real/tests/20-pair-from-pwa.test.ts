@@ -62,11 +62,11 @@ test("pair a daemon end-to-end via the PWA Settings UI", async ({ page }, testIn
     await sc.step("code-generated", async () => {
       const drawer = session.page.getByTestId("settings-drawer");
       await drawer.getByRole("button", { name: "Generate code" }).click();
-      // Code text appears in the pair box; format `XXX-XXX`.
+      // Code text appears in the pair box; format `XXXX-XXXX`.
       const codeLocator = drawer.locator("p.font-mono").first();
-      await expect(codeLocator).toHaveText(/^[A-HJ-NP-Z2-9]{3}-[A-HJ-NP-Z2-9]{3}$/, { timeout: 10_000 });
+      await expect(codeLocator).toHaveText(/^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/, { timeout: 10_000 });
       code = (await codeLocator.textContent())?.trim() ?? "";
-      expect(code).toMatch(/^[A-HJ-NP-Z2-9]{3}-[A-HJ-NP-Z2-9]{3}$/);
+      expect(code).toMatch(/^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/);
       await expect(drawer.getByText(`Copy "cc-remote pair ${code}"`)).toBeVisible();
     });
 

@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto";
+import { parseTrustedProxies, type TrustedProxies } from "./proxy.ts";
+import { loadRateLimitFromEnv, type RateLimitConfig } from "./rate-limit.ts";
 
 export interface IasOidcConfig {
   issuer_url: string;
@@ -20,8 +22,11 @@ export interface HubConfig {
   jwt_secret: string;
   disable_auth: boolean;
   pwa_url: string;
+  static_dir?: string;
   ias?: IasOidcConfig;
   vapid?: VapidConfig;
+  trusted_proxies: TrustedProxies;
+  rate_limit: RateLimitConfig;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
@@ -62,5 +67,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): HubConfig {
     );
   }
 
-  return { port, db_path, jwt_secret, disable_auth, pwa_url, ias, vapid };
+  return {
+    port, db_path, jwt_secret, disable_auth, pwa_url,
+    static_dir: env.HUB_STATIC_DIR, ias, vapid,
+    trusted_proxies: parseTrustedProxies(env.HUB_TRUSTED_PROXIES),
+    rate_limit: loadRateLimitFromEnv(env),
+  };
 }

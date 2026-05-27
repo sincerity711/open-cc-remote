@@ -22,7 +22,7 @@ test("issueCode then consumeCode returns metadata", () => {
   const { db, cleanup } = tmpDb();
   try {
     const code = Codes.issueCode(db, "daemon", "u1", { daemon_id: "macbook" }, 60_000);
-    expect(code).toMatch(/^[A-Z2-9]{3}-[A-Z2-9]{3}$/);
+    expect(code).toMatch(/^[A-Z2-9]{4}-[A-Z2-9]{4}$/);
     const got = Codes.consumeCode(db, code);
     expect(got).toEqual({ kind: "daemon", issuer_sub: "u1", metadata: { daemon_id: "macbook" } });
   } finally { cleanup(); }
@@ -48,7 +48,7 @@ test("consumeCode with expired code returns null", () => {
 test("consumeCode with unknown code returns null", () => {
   const { db, cleanup } = tmpDb();
   try {
-    expect(Codes.consumeCode(db, "ZZZ-ZZZ")).toBeNull();
+    expect(Codes.consumeCode(db, "ZZZZ-ZZZZ")).toBeNull();
   } finally { cleanup(); }
 });
 

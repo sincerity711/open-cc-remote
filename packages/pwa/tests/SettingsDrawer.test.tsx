@@ -95,11 +95,11 @@ test("pair-code active state shows code and copy command", () => {
       {...baseProps}
       daemons={readyDaemons}
       pushState={readyPushState}
-      pairing={{ status: "active", code: "ABC-XYZ", expiresAt: Date.now() + 60_000, remainingSec: 60 }}
+      pairing={{ status: "active", code: "ABCD-WXYZ", expiresAt: Date.now() + 60_000, remainingSec: 60 }}
     />,
   );
-  expect(markup).toContain("ABC-XYZ");
-  expect(markup).toContain("cc-remote pair ABC-XYZ");
+  expect(markup).toContain("ABCD-WXYZ");
+  expect(markup).toContain("cc-remote pair ABCD-WXYZ");
   expect(markup).toContain("Cancel");
 });
 

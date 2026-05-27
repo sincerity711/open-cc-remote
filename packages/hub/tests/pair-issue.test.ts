@@ -31,7 +31,7 @@ test("POST /pair/issue returns code + ttl when authenticated", async () => {
     });
     expect(res.status).toBe(200);
     const body = await res.json() as { code: string; expires_in_sec: number };
-    expect(body.code).toMatch(/^[A-HJ-NP-Z2-9]{3}-[A-HJ-NP-Z2-9]{3}$/);
+    expect(body.code).toMatch(/^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/);
     expect(body.expires_in_sec).toBe(300);
   } finally { s.cleanup(); }
 });

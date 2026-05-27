@@ -16,7 +16,9 @@ const offline_push_delay_ms = offlinePushEnv !== undefined && offlinePushEnv !==
 
 const { fetch, websocket } = makeServer({
   db, ias, jwt_secret: cfg.jwt_secret, disable_auth: cfg.disable_auth, pwa_url: cfg.pwa_url, push,
-  offline_push_delay_ms,
+  offline_push_delay_ms, static_dir: cfg.static_dir,
+  trusted_proxies: cfg.trusted_proxies,
+  rate_limit: cfg.rate_limit,
 });
 const server = Bun.serve({ port: cfg.port, fetch, websocket });
 const flags = [

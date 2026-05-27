@@ -5,6 +5,8 @@ import { DaemonRegistry, PwaRegistry } from "./connections.ts";
 import { Router } from "./router.ts";
 import { startLogin, handleCallback, type IasContext } from "./auth/ias.ts";
 import type { PushHelper } from "./push.ts";
+import { resolveRequest, parseTrustedProxies, type TrustedProxies } from "./proxy.ts";
+import { RateLimiter, DEFAULT_RATE_LIMIT, type RateLimitConfig } from "./rate-limit.ts";
 
 type WsKind = "daemon" | "pwa";
 interface WsData { kind: WsKind; key: string; user?: string; user_id?: string; }
@@ -18,6 +20,8 @@ export interface MakeServerOpts {
   push?: PushHelper;
   offline_push_delay_ms?: number;
   static_dir?: string;
+  trusted_proxies?: TrustedProxies;
+  rate_limit?: RateLimitConfig;
 }
 
 export function makeServer(opts: MakeServerOpts = {}) {
@@ -26,9 +30,14 @@ export function makeServer(opts: MakeServerOpts = {}) {
   const router = new Router(daemonReg, pwaReg, opts.db, opts.push, {
     offline_push_delay_ms: opts.offline_push_delay_ms,
   });
+  const trustedProxies = opts.trusted_proxies ?? parseTrustedProxies(undefined);
+  const rateLimitCfg = opts.rate_limit ?? DEFAULT_RATE_LIMIT;
+  const limiter = new RateLimiter();
 
   const fetch = async (req: Request, server: ReturnType<typeof Bun.serve>) => {
     const url = new URL(req.url);
+    const peer = server.requestIP(req)?.address;
+    const resolved = resolveRequest(req, peer, trustedProxies);
 
     if (url.pathname === "/healthz") return new Response("ok");
 
@@ -204,6 +213,9 @@ export function makeServer(opts: MakeServerOpts = {}) {
 
     if (url.pathname === "/pair" && req.method === "POST") {
       if (!opts.db || !opts.jwt_secret) return new Response("not configured", { status: 503 });
+      if (!limiter.check(`pair:${resolved.client_ip}`, rateLimitCfg.pair_per_min)) {
+        return new Response("rate limited", { status: 429 });
+      }
       try {
         const body = await req.json();
         const { handlePair } = await import("./pair.ts");
@@ -216,6 +228,9 @@ export function makeServer(opts: MakeServerOpts = {}) {
 
     if (url.pathname === "/pair/refresh" && req.method === "POST") {
       if (!opts.db || !opts.jwt_secret) return new Response("not configured", { status: 503 });
+      if (!limiter.check(`pair-refresh:${resolved.client_ip}`, rateLimitCfg.pair_refresh_per_min)) {
+        return new Response("rate limited", { status: 429 });
+      }
       const auth = req.headers.get("authorization");
       const dpopHeader = req.headers.get("dpop");
       if (!auth?.startsWith("DPoP ") || !dpopHeader) {
@@ -230,7 +245,7 @@ export function makeServer(opts: MakeServerOpts = {}) {
         daemon_id = claims.sub;
         const { verifyDaemonAuth } = await import("./auth/dpop-verify.ts");
         await verifyDaemonAuth(
-          opts.db, opts.jwt_secret, daemon_id, oldJwt, dpopHeader, req.url, req.method,
+          opts.db, opts.jwt_secret, daemon_id, oldJwt, dpopHeader, resolved.url, req.method,
         );
       } catch (e) {
         return new Response((e as Error).message, { status: 401 });
@@ -247,6 +262,9 @@ export function makeServer(opts: MakeServerOpts = {}) {
     if (url.pathname === "/ws/daemon") {
       const id = url.searchParams.get("daemon_id");
       if (!id) return new Response("daemon_id required", { status: 400 });
+      if (!limiter.check(`ws-daemon:${resolved.client_ip}`, rateLimitCfg.ws_daemon_per_min)) {
+        return new Response("rate limited", { status: 429 });
+      }
 
       if (!opts.disable_auth) {
         if (!opts.db || !opts.jwt_secret) return new Response("auth not configured", { status: 503 });
@@ -258,7 +276,7 @@ export function makeServer(opts: MakeServerOpts = {}) {
         try {
           const { verifyDaemonAuth } = await import("./auth/dpop-verify.ts");
           await verifyDaemonAuth(
-            opts.db, opts.jwt_secret, id, auth.slice(5), dpopHeader, req.url, req.method,
+            opts.db, opts.jwt_secret, id, auth.slice(5), dpopHeader, resolved.url, req.method,
           );
         } catch (e) {
           return new Response((e as Error).message, { status: 401 });
@@ -401,7 +419,7 @@ export function makeServer(opts: MakeServerOpts = {}) {
         const pf = frame as PwaToHub;
         if (pf.type === "subscribe") {
           router.onPwaSubscribe((f) => ws.send(JSON.stringify(f)));
-        } else if (pf.type === "permission_reply" || pf.type === "request_history" || pf.type === "kill_session" || pf.type === "start_session") {
+        } else if (pf.type === "permission_reply" || pf.type === "request_history" || pf.type === "kill_session" || pf.type === "start_session" || pf.type === "ask_user_question_answer") {
           router.onPwaCommand(pf);
         } else if (pf.type === "chat_send") {
           router.onPwaChatSend(

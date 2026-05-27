@@ -1619,7 +1619,7 @@ function SettingsSurface({
           <SettingsSection title="Pair new daemon">
             <div className="rounded-card border-border bg-muted border p-4 text-center">
               <p className="text-muted-foreground text-sm">Pairing code</p>
-              <p className="mt-3 font-mono text-2xl font-semibold">482-913</p>
+              <p className="mt-3 font-mono text-2xl font-semibold">4825-913P</p>
               <p className="text-muted-foreground mt-2 text-xs">
                 Expires in 10:00
               </p>
