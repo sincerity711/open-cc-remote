@@ -8,3 +8,9 @@ dist/
 e2e-real/artifacts/
 playwright-report/
 e2e-real/test-results/
+test-results/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.tsbuildinfo
+.claude/scheduled_tasks.lock
