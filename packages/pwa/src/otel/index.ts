@@ -29,7 +29,6 @@ export function initWebOtel({ collectorUrl }: InitArgs): void {
   const provider = new WebTracerProvider({
     resource: new Resource({ "service.name": "pwa" }),
   });
-  // @ts-expect-error addSpanProcessor is published
   provider.addSpanProcessor(
     new BatchSpanProcessor(
       new OTLPTraceExporter({ url: `${collectorUrl.replace(/\/$/, "")}/v1/traces` }),

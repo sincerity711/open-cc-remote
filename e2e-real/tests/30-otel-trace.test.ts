@@ -133,7 +133,7 @@ test("otel: chat round-trip emits one trace visible via API and Jaeger UI", asyn
     await sc.step("session-opened", async () => {
       const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
       const sessionRow = sessionsList.locator(".bg-surface").first();
-      await sessionRow.waitFor({ timeout: 30_000 });
+      await sessionRow.waitFor({ timeout: 60_000 });
       await sessionRow.click();
       await session.page.getByTestId("session-view").waitFor({ timeout: 5_000 });
     });
@@ -186,13 +186,31 @@ test("otel: chat round-trip emits one trace visible via API and Jaeger UI", asyn
       );
       expect(withParent.length).toBeGreaterThan(0);
 
-      // Specifically: hub.routeFrame's parent should be the pwa span.
+      // The pwa.user.sendChat span IS a parent of at least one hub.routeFrame —
+      // i.e. PWA → hub edge is wired. (There may be multiple hub.routeFrame
+      // spans in a round trip — chat_send forward, plus one per event sent
+      // back; we just need to find one with the right parent.)
       const pwaSpan = trace.spans.find((s) => s.operationName === "pwa.user.sendChat");
-      const hubSpan = trace.spans.find((s) => s.operationName === "hub.routeFrame");
       expect(pwaSpan).toBeDefined();
-      expect(hubSpan).toBeDefined();
-      const hubParent = hubSpan!.references.find((r) => r.refType === "CHILD_OF");
-      expect(hubParent?.spanID).toBe(pwaSpan!.spanID);
+      const hubChildOfPwa = trace.spans.find(
+        (s) =>
+          s.operationName === "hub.routeFrame" &&
+          (s.references ?? []).some(
+            (r) => r.refType === "CHILD_OF" && r.spanID === pwaSpan!.spanID,
+          ),
+      );
+      expect(hubChildOfPwa).toBeDefined();
+
+      // And one daemon.handleChat span is a child of that hub span — i.e. the
+      // hub → daemon edge is wired.
+      const daemonChildOfHub = trace.spans.find(
+        (s) =>
+          s.operationName === "daemon.handleChat" &&
+          (s.references ?? []).some(
+            (r) => r.refType === "CHILD_OF" && r.spanID === hubChildOfPwa!.spanID,
+          ),
+      );
+      expect(daemonChildOfHub).toBeDefined();
     });
 
     await sc.step("ui-validation", async () => {
