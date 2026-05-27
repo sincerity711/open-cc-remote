@@ -25,6 +25,14 @@ import { ClaudeCodeAdapter } from "./adapters/claude-code.ts";
 import { precheckStartSession } from "./start-session.ts";
 import { ensureMcpConfig } from "./mcp-config.ts";
 import { createPendingStarts } from "./pending-starts.ts";
+import { initOtel, shutdownOtel } from "@cc-remote/observability";
+import { beginRoundTrip, withSessionChildSpan, endRoundTrip } from "./otel.ts";
+
+// Fire-and-forget OTel init. When OTEL_EXPORTER_OTLP_ENDPOINT is unset
+// this is a no-op that returns immediately.
+void initOtel({ serviceName: "daemon" });
+process.on("SIGTERM", () => { void shutdownOtel(); });
+process.on("SIGINT", () => { void shutdownOtel(); });
 
 /**
  * Best-effort dismissal of Claude Code's interactive boot dialogs in a freshly-
@@ -323,6 +331,18 @@ const hub = startHubClient({
     else if (frame.type === "chat_send") {
       // chat_send from hub → translate to chat_in and forward to the plugin's
       // Unix socket for the target session. Unknown session logs + drops.
+      // OTel: this opens the round-trip's root span; JSONL events join via
+      // SessionMap, end_turn ends it.
+      beginRoundTrip({
+        spanName: "daemon.handleChat",
+        sessionId: frame.session_id,
+        trace: frame.trace,
+        attrs: {
+          session_id: frame.session_id,
+          message_id: frame.message_id,
+          message_len: frame.content.length,
+        },
+      });
       handleHubChatSend(frame, {
         sessionToClient,
         replyTo: (client, out) => sockServer.replyTo(client, out),
@@ -362,11 +382,19 @@ function startSessionWatcher(s: SessionSnapshot, claudeId: string): void {
         sessionId: s.session_id,
         jsonlOffset: jsonl_offset,
       });
+      const rowType = (row as { type?: string }).type ?? "unknown";
+      const { trace: traceCtx } = withSessionChildSpan(
+        s.session_id,
+        "daemon.jsonlEvent",
+        { event_type: rowType, jsonl_offset },
+        () => {},
+      );
       hub.send({
         type: "event",
         session_id: s.session_id,
         jsonl_offset,
         payload,
+        ...(traceCtx ? { trace: traceCtx } : {}),
       });
 
       // Drive the session FSM. Every line is activity → working (unless
@@ -393,6 +421,8 @@ function startSessionWatcher(s: SessionSnapshot, claudeId: string): void {
         if (p.message?.stop_reason === "end_turn") {
           cancelIdle();
           hub.send({ type: "task_completed", session_id: s.session_id, ts: Date.now() });
+          // Round-trip done — close the OTel root span before idle timer.
+          endRoundTrip(s.session_id);
           const t = setTimeout(() => {
             idleTimers.delete(s.session_id);
             hub.send({ type: "idle", session_id: s.session_id, ts: Date.now() });

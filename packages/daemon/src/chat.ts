@@ -38,6 +38,7 @@ export function handleHubChatSend(
     user_id: frame.user_id,
     content: frame.content,
     ts: frame.ts,
+    ...(frame.trace ? { trace: frame.trace } : {}),
   };
   router.replyTo(client, out);
 }

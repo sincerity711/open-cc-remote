@@ -3,6 +3,11 @@ import { openDb } from "./db.ts";
 import { loadIas } from "./auth/ias.ts";
 import { makeServer } from "./routes.ts";
 import { createPushHelper } from "./push.ts";
+import { initOtel, shutdownOtel } from "@cc-remote/observability";
+
+void initOtel({ serviceName: "hub" });
+process.on("SIGTERM", () => { void shutdownOtel(); });
+process.on("SIGINT", () => { void shutdownOtel(); });
 
 const cfg = loadConfig();
 const db = openDb(cfg.db_path);

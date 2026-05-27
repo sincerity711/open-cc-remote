@@ -10,6 +10,12 @@ import { buildSession } from "./session.ts";
 import { installPermissionRelay, emitPermissionDecision } from "./permission.ts";
 import { installChatRelay, emitChatIn } from "./chat.ts";
 import { installTools } from "./tools.ts";
+import { initOtel, shutdownOtel, extractContext } from "@cc-remote/observability";
+import { trace, context, SpanKind } from "@opentelemetry/api";
+
+void initOtel({ serviceName: "plugin" });
+process.on("SIGTERM", () => { void shutdownOtel(); });
+process.on("SIGINT", () => { void shutdownOtel(); });
 
 const INSTRUCTIONS = [
   "The PWA user reads cc-remote, not this session. Anything you want them to see must go through the reply tool — your transcript output never reaches them.",
@@ -111,7 +117,21 @@ async function main() {
       if (f.type === "permission_reply") {
         emitPermissionDecision(mcp!, f.request_id, f.decision);
       } else if (f.type === "chat_in") {
-        emitChatIn(mcp!, f);
+        // Wrap the chat_in dispatch in a `plugin.dispatch` span attached
+        // to the daemon-forwarded trace ctx. Span ends synchronously
+        // after emitChatIn returns (the model invocation lives downstream
+        // of MCP, beyond our reach).
+        const parentCtx = extractContext(f.trace);
+        const span = trace.getTracer("@cc-remote/plugin", "0.1.0").startSpan(
+          "plugin.dispatch",
+          { kind: SpanKind.INTERNAL, attributes: { session_id: f.session_id, frame_type: "chat_in", message_id: f.message_id } },
+          parentCtx,
+        );
+        try {
+          context.with(trace.setSpan(parentCtx, span), () => emitChatIn(mcp!, f));
+        } finally {
+          span.end();
+        }
       } else if (f.type === "bind_resolved") {
         // Cache the daemon-resolved claude_session_id so a future re-register
         // (after daemon restart) can hand it back and let the new daemon skip

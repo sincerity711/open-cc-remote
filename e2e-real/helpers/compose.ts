@@ -11,7 +11,7 @@ const composeDir = resolve(__dirname, "..");
 const composeFile = resolve(composeDir, "docker-compose.yml");
 const composeOverride = resolve(composeDir, "docker-compose.override.yml");
 
-function composeFileArgs(): string[] {
+function composeFileArgs(extra: string[] = []): string[] {
   // Explicitly include the override file if it exists. `-f` is required
   // because we already pass `-f docker-compose.yml`; once any `-f` is set,
   // compose stops auto-loading override files.
@@ -19,11 +19,12 @@ function composeFileArgs(): string[] {
   if (existsSync(composeOverride)) {
     args.push("-f", composeOverride);
   }
+  for (const f of extra) args.push("-f", f);
   return args;
 }
 
-function runCompose(args: string[], opts: { timeoutMs?: number } = {}): { code: number; stdout: string; stderr: string } {
-  const r = spawnSync("docker", ["compose", ...composeFileArgs(), ...args], {
+function runCompose(args: string[], opts: { timeoutMs?: number; extraFiles?: string[] } = {}): { code: number; stdout: string; stderr: string } {
+  const r = spawnSync("docker", ["compose", ...composeFileArgs(opts.extraFiles), ...args], {
     cwd: composeDir,
     encoding: "utf8",
     timeout: opts.timeoutMs ?? 180_000,
@@ -63,7 +64,7 @@ async function waitPortFree(port: number, deadlineMs: number): Promise<boolean> 
   return false;
 }
 
-export async function upCompose(): Promise<void> {
+export async function upCompose(opts: { extraFiles?: string[] } = {}): Promise<void> {
   // Pre-flight: any leftover container/volume/tmux from a prior crashed
   // scenario must be torn down before `up --wait` is meaningful. Without
   // this, `up --wait` on a stale-but-unhealthy container hangs until the
@@ -77,21 +78,21 @@ export async function upCompose(): Promise<void> {
 
   if (await isPortBound(7745)) {
     process.stderr.write(`[upCompose] port 7745 still bound — running pre-emptive 'down -v'\n`);
-    runCompose(["down", "-v", "--remove-orphans", "-t", "1"], { timeoutMs: 30_000 });
+    runCompose(["down", "-v", "--remove-orphans", "-t", "1"], { timeoutMs: 30_000, extraFiles: opts.extraFiles });
     await waitPortFree(7745, 10_000);
   }
 
   // Try `up --wait`. Stale-container races (Docker daemon reports
   // "No such container: <id>") are recoverable: `down -v` purges the
   // dangling reference and the next `up` succeeds. Retry once.
-  let r = runCompose(["up", "-d", "--wait"], { timeoutMs: 300_000 });
+  let r = runCompose(["up", "-d", "--wait"], { timeoutMs: 300_000, extraFiles: opts.extraFiles });
   if (r.code !== 0 && /No such container/i.test(r.stderr)) {
     process.stderr.write(
       `[upCompose] stale-container race detected — running 'down -v --remove-orphans' and retrying once\n`,
     );
-    runCompose(["down", "-v", "--remove-orphans", "-t", "5"], { timeoutMs: 30_000 });
+    runCompose(["down", "-v", "--remove-orphans", "-t", "5"], { timeoutMs: 30_000, extraFiles: opts.extraFiles });
     await waitPortFree(7745, 10_000);
-    r = runCompose(["up", "-d", "--wait"], { timeoutMs: 300_000 });
+    r = runCompose(["up", "-d", "--wait"], { timeoutMs: 300_000, extraFiles: opts.extraFiles });
   }
 
   if (r.code !== 0) {
@@ -123,7 +124,7 @@ export function sweepCcrTmuxSessions(): string[] {
   return names;
 }
 
-export async function downCompose(): Promise<void> {
+export async function downCompose(opts: { extraFiles?: string[] } = {}): Promise<void> {
   // Sweep orphan tmux sessions FIRST: if a scenario crashed mid-run with a
   // claude+plugin still attached to the daemon, that plugin's socket holds
   // the daemon socket open which can keep `docker compose down` waiting on
@@ -141,14 +142,14 @@ export async function downCompose(): Promise<void> {
   // Tight timeout (1s grace) and --remove-orphans: tests crashing mid-run can
   // leave containers in states that take minutes to drain gracefully; tests
   // don't need that drain.
-  let r = runCompose(["down", "-v", "--remove-orphans", "-t", "1"], { timeoutMs: 30_000 });
+  let r = runCompose(["down", "-v", "--remove-orphans", "-t", "1"], { timeoutMs: 30_000, extraFiles: opts.extraFiles });
   if (r.code !== 0) {
     // Race observed: `Container ... Error while Removing` — retry once after
     // a short settle. If still failing, fall through and the next upCompose
     // pre-flight will clean up.
     process.stderr.write(`[downCompose] first 'down -v' failed (code ${r.code}): ${r.stderr}\nretrying after 1s\n`);
     await new Promise((res) => setTimeout(res, 1_000));
-    r = runCompose(["down", "-v", "--remove-orphans", "-t", "1"], { timeoutMs: 30_000 });
+    r = runCompose(["down", "-v", "--remove-orphans", "-t", "1"], { timeoutMs: 30_000, extraFiles: opts.extraFiles });
     if (r.code !== 0) {
       process.stderr.write(`[downCompose] second 'down -v' also failed (code ${r.code}): ${r.stderr}\n`);
     }

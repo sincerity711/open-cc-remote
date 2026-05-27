@@ -10,6 +10,7 @@ import { findDaemon } from "./repos/daemons.ts";
 import { dispatchTopic } from "./push-dispatch.ts";
 import { getTopic } from "./push-topics.ts";
 import { ulid } from "./ulid.ts";
+import { routeFrameSpan } from "./otel.ts";
 
 const RING_BUFFER_SIZE = 200;
 const DEFAULT_OFFLINE_PUSH_DELAY_MS = 30_000;
@@ -104,14 +105,21 @@ export class Router {
       case "event": {
         const state = this.daemons.get(daemon_id);
         if (!state) return;
-        const out: EventFrameForPwa = {
-          type: "event", daemon_id,
-          session_id: frame.session_id, jsonl_offset: frame.jsonl_offset,
-          payload: frame.payload,
-        };
-        state.events.push(out);
-        if (state.events.length > RING_BUFFER_SIZE) state.events.shift();
-        this.pwaReg.broadcast(out);
+        routeFrameSpan(
+          frame.trace,
+          { frame_type: "event", daemon_id, session_id: frame.session_id },
+          (outboundTrace) => {
+            const out: EventFrameForPwa = {
+              type: "event", daemon_id,
+              session_id: frame.session_id, jsonl_offset: frame.jsonl_offset,
+              payload: frame.payload,
+              ...(outboundTrace ? { trace: outboundTrace } : (frame.trace ? { trace: frame.trace } : {})),
+            };
+            state.events.push(out);
+            if (state.events.length > RING_BUFFER_SIZE) state.events.shift();
+            this.pwaReg.broadcast(out);
+          },
+        );
         return;
       }
       case "permission_request": {
@@ -337,46 +345,54 @@ export class Router {
     auth: { user: string; user_id: string },
     senderSend: (f: HubToPwa) => void,
   ): void {
-    const message_id = ulid();
-    const ts = Math.floor(Date.now() / 1000);
-    const reply_to = frame.reply_to ?? null;
+    routeFrameSpan(
+      frame.trace,
+      { frame_type: "chat_send", daemon_id: frame.daemon_id, session_id: frame.session_id },
+      (outboundTrace) => {
+        const message_id = ulid();
+        const ts = Math.floor(Date.now() / 1000);
+        const reply_to = frame.reply_to ?? null;
 
-    if (!this.daemonReg.has(frame.daemon_id)) {
-      const errOut: HubChatErrorBroadcast = {
-        type: "chat_error",
-        daemon_id: frame.daemon_id,
-        session_id: frame.session_id,
-        reason: "daemon_offline",
-        ...(frame.client_message_id !== undefined ? { client_message_id: frame.client_message_id } : {}),
-      };
-      senderSend(errOut);
-      return;
-    }
+        if (!this.daemonReg.has(frame.daemon_id)) {
+          const errOut: HubChatErrorBroadcast = {
+            type: "chat_error",
+            daemon_id: frame.daemon_id,
+            session_id: frame.session_id,
+            reason: "daemon_offline",
+            ...(frame.client_message_id !== undefined ? { client_message_id: frame.client_message_id } : {}),
+          };
+          senderSend(errOut);
+          return;
+        }
 
-    const out: HubToDaemonChatSend = {
-      type: "chat_send",
-      session_id: frame.session_id,
-      message_id,
-      user: auth.user,
-      user_id: auth.user_id,
-      content: frame.content,
-      reply_to,
-      ts,
-    };
-    this.daemonReg.send(frame.daemon_id, out);
+        const out: HubToDaemonChatSend = {
+          type: "chat_send",
+          session_id: frame.session_id,
+          message_id,
+          user: auth.user,
+          user_id: auth.user_id,
+          content: frame.content,
+          reply_to,
+          ts,
+          ...(outboundTrace ? { trace: outboundTrace } : {}),
+        };
+        this.daemonReg.send(frame.daemon_id, out);
 
-    this.pwaReg.broadcast({
-      type: "chat",
-      daemon_id: frame.daemon_id,
-      session_id: frame.session_id,
-      message_id,
-      from: "pwa",
-      user: auth.user,
-      content: frame.content,
-      reply_to,
-      ts,
-      ...(frame.client_message_id !== undefined ? { client_message_id: frame.client_message_id } : {}),
-    });
+        this.pwaReg.broadcast({
+          type: "chat",
+          daemon_id: frame.daemon_id,
+          session_id: frame.session_id,
+          message_id,
+          from: "pwa",
+          user: auth.user,
+          content: frame.content,
+          reply_to,
+          ts,
+          ...(frame.client_message_id !== undefined ? { client_message_id: frame.client_message_id } : {}),
+          ...(outboundTrace ? { trace: outboundTrace } : {}),
+        });
+      },
+    );
   }
 
   onPwaCliCommand(

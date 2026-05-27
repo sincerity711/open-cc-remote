@@ -4,6 +4,19 @@ import type { AGUIEvent } from "./agui/events";
 // Auth, permission, history, file-transfer frames come in later plans.
 
 /**
+ * W3C Trace Context, embedded as an optional field on frames that
+ * trigger downstream work. Receivers extract it to continue the
+ * round-trip's trace; emitters of follow-up notifications inject the
+ * context they collected by joining on session_id (see daemon's
+ * SessionMap). Field is fully optional — when absent, downstream
+ * starts a fresh root span.
+ */
+export interface TraceCtx {
+  traceparent: string;
+  tracestate?: string;
+}
+
+/**
  * Daemon-owned session state machine. Source of truth: JSONL events +
  * permission protocol. The daemon classifies; hub forwards; PWA renders.
  *
@@ -87,6 +100,9 @@ export interface EventFrame {
   session_id: string;
   jsonl_offset: number;     // byte offset *after* this line in the JSONL file
   payload: AGUIEvent[];     // post-adapter; one source row → N AG-UI events
+  /** W3C trace ctx — daemon attaches via SessionMap when an active
+   *  round-trip exists for this session. Optional. */
+  trace?: TraceCtx;
 }
 
 export interface EventFrameForPwa extends EventFrame {
@@ -316,6 +332,8 @@ export interface DaemonChatIn {
   user_id: string;             // PWA bearer sub claim
   content: string;
   ts: number;
+  /** W3C trace context — plumbed from hub via daemon for span continuity. */
+  trace?: TraceCtx;
 }
 
 // PWA → Hub
@@ -330,6 +348,8 @@ export interface PwaToHubChatSend {
    * `chat_error`) back to this send. Echoed verbatim by the hub.
    */
   client_message_id?: string;
+  /** Optional W3C trace context — populated when PWA-side OTel is on. */
+  trace?: TraceCtx;
 }
 
 // Hub → Daemon
@@ -342,6 +362,8 @@ export interface HubToDaemonChatSend {
   content: string;
   reply_to: string | null;
   ts: number;                  // unix seconds
+  /** Forwarded W3C trace context. */
+  trace?: TraceCtx;
 }
 
 // Hub → PWA (broadcast)
@@ -358,6 +380,9 @@ export interface PwaChatBroadcast {
   /** Echoed when this broadcast originated from a PWA chat_send. Absent for
    *  Claude-originated messages. */
   client_message_id?: string;
+  /** W3C trace context — set by the daemon when emitting (joined to the
+   *  round-trip root via SessionMap). */
+  trace?: TraceCtx;
 }
 
 // Hub → PWA (chat error, e.g. daemon offline)

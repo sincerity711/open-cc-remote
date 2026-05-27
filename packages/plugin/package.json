@@ -8,8 +8,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@cc-remote/observability": "workspace:*",
     "@cc-remote/proto": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "@opentelemetry/api": "^1.9.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {

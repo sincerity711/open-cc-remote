@@ -11,7 +11,13 @@
     "icons": "bun run scripts/build-icons.mjs"
   },
   "dependencies": {
+    "@cc-remote/observability": "workspace:*",
     "@cc-remote/proto": "workspace:*",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.55.0",
+    "@opentelemetry/resources": "^1.28.0",
+    "@opentelemetry/sdk-trace-base": "^1.28.0",
+    "@opentelemetry/sdk-trace-web": "^1.28.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.16.0",

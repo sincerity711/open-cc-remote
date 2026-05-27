@@ -60,6 +60,21 @@ test("PwaToHubChatSend: reply_to is optional", () => {
   expect(f.reply_to).toBeUndefined();
 });
 
+test("PwaToHubChatSend: trace ctx round-trips through JSON", () => {
+  const f: PwaToHubChatSend = {
+    type: "chat_send",
+    daemon_id: "d1",
+    session_id: "s1",
+    content: "hi",
+    trace: { traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01" },
+  };
+  const parsed = JSON.parse(JSON.stringify(f)) as PwaToHub;
+  expect(parsed.type).toBe("chat_send");
+  if (parsed.type === "chat_send") {
+    expect(parsed.trace?.traceparent).toBe("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01");
+  }
+});
+
 // ─── HubToDaemonChatSend ──────────────────────────────────────────────
 test("HubToDaemonChatSend: round-trip JSON narrowing", () => {
   const f: HubToDaemonChatSend = {

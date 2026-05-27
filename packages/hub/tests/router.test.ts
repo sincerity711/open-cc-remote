@@ -113,13 +113,15 @@ test("event frame is broadcast to PWAs with daemon_id added", () => {
     payload: [],
   });
 
-  expect(broadcasts).toEqual([{
-    type: "event",
-    daemon_id: "d-1",
-    session_id: "s1",
-    jsonl_offset: 42,
-    payload: [],
-  }]);
+  expect(broadcasts).toHaveLength(1);
+  const broadcast = broadcasts[0] as { type: string; daemon_id: string; session_id: string; jsonl_offset: number; payload: unknown[] };
+  // The OTel layer may add an optional `trace` field when a tracer is
+  // active; assert only the business fields, ignore observability metadata.
+  expect(broadcast.type).toBe("event");
+  expect(broadcast.daemon_id).toBe("d-1");
+  expect(broadcast.session_id).toBe("s1");
+  expect(broadcast.jsonl_offset).toBe(42);
+  expect(broadcast.payload).toEqual([]);
 });
 
 test("ring buffer caps at 200", () => {

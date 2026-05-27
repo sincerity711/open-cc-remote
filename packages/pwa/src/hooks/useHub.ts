@@ -8,6 +8,7 @@ import {
   createPending, confirmPending, failPending, timeoutPending, dismissPending, findPending,
   type PendingCommand, type PendingCommands,
 } from "./pendingCommands";
+import { startUserSpan, recordRenderSpan } from "../otel/runtime";
 
 export { type PendingCommand, type PendingCommands };
 
@@ -344,6 +345,11 @@ export function reducer(state: HubState, action: HubAction): HubState {
             pendingCommands: confirmPending(prev.pendingCommands, killCommandId(frame.daemon_id, frame.session_id)),
           };
         case "event": {
+          recordRenderSpan("event", frame.trace, {
+            daemon_id: frame.daemon_id,
+            session_id: frame.session_id,
+            jsonl_offset: frame.jsonl_offset,
+          });
           const k = eventKey(frame.daemon_id, frame.session_id);
           const existing = prev.events[k] ?? [];
           const trimmed = appendEventToBuffer(existing, frame);
@@ -800,11 +806,20 @@ export function useHub(
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
       const client_message_id = `cm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      // Open the round-trip's PWA root span. startUserSpan ends the span
+      // synchronously and returns its trace ctx, which we stamp on the
+      // outbound frame so hub continues the trace.
+      const { trace: traceCtx } = startUserSpan(
+        "sendChat",
+        { daemon_id, session_id, message_len: content.length },
+        () => undefined,
+      );
       const msg: PwaToHub = {
         type: "chat_send",
         daemon_id, session_id, content,
         client_message_id,
         ...(reply_to ? { reply_to } : {}),
+        ...(traceCtx ? { trace: traceCtx } : {}),
       };
       ws.send(JSON.stringify(msg));
       setState((prev) =>

@@ -23,6 +23,22 @@ DAEMON_ID="demo-1"
 HUB_HOST_PORT=17745
 PWA_HOST_PORT=15173
 
+# Optional --otel: bring up Jaeger all-in-one and export OTel env to all
+# spawned children. Disabled by default. Filtered out before the
+# start/stop dispatch below so the rest of the script stays unchanged.
+WITH_OTEL=0
+ARGS=()
+for a in "$@"; do
+  if [[ "$a" == "--otel" ]]; then WITH_OTEL=1; else ARGS+=("$a"); fi
+done
+set -- "${ARGS[@]+${ARGS[@]}}"
+
+if [[ "$WITH_OTEL" == "1" ]]; then
+  export OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4318"
+  export VITE_OTEL_ENABLED="1"
+  export VITE_OTEL_COLLECTOR_URL="http://localhost:4318"
+fi
+
 _t0=$(date +%s)
 _t_prev=$_t0
 _step() {
@@ -40,6 +56,7 @@ stop() {
   pkill -F "${DEMO_STATE_DIR}/daemon.pid" 2>/dev/null || true
   pkill -F "${DEMO_STATE_DIR}/pwa.pid" 2>/dev/null || true
   (cd e2e-real && docker compose -f docker-compose.yml -f docker-compose.demo.yml down -v --remove-orphans -t 5 2>&1) | tail -3 || true
+  (cd e2e-real && docker compose -f docker-compose.otel.yml down -v --remove-orphans -t 5 2>&1) | tail -3 || true
   echo "[demo] stopped."
 }
 
@@ -84,7 +101,13 @@ fi
 export ISSUER_HOST
 
 _step "bringing up hub + fake-ias (compose)..."
-(cd e2e-real && ISSUER_HOST="${ISSUER_HOST}" docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --wait)
+if [[ "$WITH_OTEL" == "1" ]]; then
+  (cd e2e-real && ISSUER_HOST="${ISSUER_HOST}" docker compose -f docker-compose.otel.yml up -d --wait)
+  echo "[demo] Jaeger UI: http://localhost:16686"
+  (cd e2e-real && ISSUER_HOST="${ISSUER_HOST}" docker compose -f docker-compose.yml -f docker-compose.demo.yml -f docker-compose.otel-hub.yml up -d --wait)
+else
+  (cd e2e-real && ISSUER_HOST="${ISSUER_HOST}" docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --wait)
+fi
 
 _step "issuing pairing code..."
 PAIR_CODE=$(cd e2e-real && docker compose -f docker-compose.yml -f docker-compose.demo.yml exec -T hub \
