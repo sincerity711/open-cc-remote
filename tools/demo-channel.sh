@@ -154,10 +154,12 @@ cat > "${DEMO_STATE_DIR}/mcp-config.json" <<EOF
 EOF
 
 _step "starting PWA dev server (vite, port ${PWA_HOST_PORT})..."
-(cd packages/pwa && \
-  VITE_HUB_URL="ws://localhost:${HUB_HOST_PORT}" \
-  bun run dev -- --port "${PWA_HOST_PORT}" --strictPort > "$PWA_LOG" 2>&1 &
- echo $! > "${DEMO_STATE_DIR}/pwa.pid")
+# Subshell `&` rather than `& inside subshell` — the latter makes the
+# subshell wait on its background child before exiting, which hangs the
+# whole script because vite never exits.
+(cd packages/pwa && exec env VITE_HUB_URL="ws://localhost:${HUB_HOST_PORT}" \
+  bun run dev -- --port "${PWA_HOST_PORT}" --strictPort) > "$PWA_LOG" 2>&1 &
+echo $! > "${DEMO_STATE_DIR}/pwa.pid"
 sleep 3
 
 _step "starting tmux claude session ($TMUX_NAME)..."
