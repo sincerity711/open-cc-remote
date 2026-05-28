@@ -8,6 +8,7 @@ Remote-control real Claude Code TUI from a PWA. Architecture:
 | Doc | When to read |
 |---|---|
 | [`docs/operations/local-debug-environment.md`](docs/operations/local-debug-environment.md) | **Read first** before debugging the demo. Covers `tools/demo-channel.sh`, the AskUserQuestion remote-relay hook, the hub-Docker-image-drift footgun, and a step-by-step checklist for "PWA isn't showing the picker". |
+| [`docs/operations/observability.md`](docs/operations/observability.md) | How to look at logs and traces. `tools/demo-channel.sh --otel` brings up Jaeger; UI at `:16686` shows one trace per chat round-trip across PWA / hub / daemon / plugin. Walk the waterfall to find which step failed. |
 | [`docs/operations/push-deployment.md`](docs/operations/push-deployment.md) | Web-push (VAPID) config. |
 | [`docs/operations/reverse-proxy.md`](docs/operations/reverse-proxy.md) | Reverse-proxy bypass for daemon-auth paths + `HUB_TRUSTED_PROXIES` + rate-limit env vars. |
 | [`docs/operations/sap-cf-deploy.md`](docs/operations/sap-cf-deploy.md) | SAP Cloud Foundry deploy. |
