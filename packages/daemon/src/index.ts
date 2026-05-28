@@ -165,6 +165,11 @@ interface AskPending {
   timer: ReturnType<typeof setTimeout>;
 }
 const askToClient = new Map<string, AskPending>();
+// session_id → latest slash_inventory entries. Populated when a session
+// registers; replayed on hub reconnect so a hub restart doesn't strand the
+// PWA with an empty `/` menu (hub's onPwaSubscribe replays from its own
+// cache once we re-fill it).
+const slashInventoryBySession = new Map<string, import("@cc-remote/proto").SlashEntry[]>();
 const pendingStarts = createPendingStarts({ ttlMs: 60_000 });
 
 const hub = startHubClient({
@@ -195,6 +200,11 @@ const hub = startHubClient({
         questions: p.questions,
         expires_at: p.expires_at,
       });
+    }
+    // Replay slash_inventory for each known session so the hub re-fills its
+    // cache and any PWA that later subscribes still sees the `/` menu.
+    for (const [session_id, entries] of slashInventoryBySession) {
+      out.push({ type: "slash_inventory", session_id, entries });
     }
     return out;
   },
@@ -531,6 +541,7 @@ sessions.onAdd((s: SessionSnapshot) => {
   // Push the slash command inventory once per session register.
   scanInventory({ cwd: s.cwd, homeDir: homedir() })
     .then((entries) => {
+      slashInventoryBySession.set(s.session_id, entries);
       hub.send({ type: "slash_inventory", session_id: s.session_id, entries });
     })
     .catch((e) => {
@@ -583,6 +594,7 @@ sessions.onAdd((s: SessionSnapshot) => {
 
 sessions.onRemove((session_id: string) => {
   hub.send({ type: "session_close", session_id, reason: "plugin_bye" });
+  slashInventoryBySession.delete(session_id);
   fsm.remove(session_id);
   const w = watchers.get(session_id);
   if (w) {

@@ -3,6 +3,7 @@ import type {
   PwaToHubChatSend, HubToDaemonChatSend, HubChatErrorBroadcast,
   PwaToHubCliCommand, HubToDaemonCliCommand,
   PwaAskUserQuestionRequest,
+  PwaSlashInventory, SlashEntry,
 } from "@cc-remote/proto";
 import type { DaemonRegistry, PwaRegistry } from "./connections.ts";
 import type { Db } from "./db.ts";
@@ -29,6 +30,11 @@ interface DaemonState {
   // on PWA subscribe; cleared when ask_user_question_resolved arrives or the
   // daemon disconnects.
   pendingAskQuestions: Map<string, PwaAskUserQuestionRequest>;
+  // Latest slash_inventory per session_id. The daemon emits it once when a
+  // session registers; we cache it so a PWA that connects later (or
+  // refreshes) still sees commands. Cleared on session_close / daemon
+  // disconnect.
+  slashInventory: Map<string, SlashEntry[]>;
 }
 
 export interface RouterOptions {
@@ -84,6 +90,7 @@ export class Router {
           sessions: new Map(frame.sessions.map((s) => [s.session_id, s])),
           events: [],
           pendingAskQuestions: new Map(),
+          slashInventory: new Map(),
         };
         this.daemons.set(daemon_id, state);
         this.pwaReg.broadcast({
@@ -107,6 +114,7 @@ export class Router {
         const state = this.daemons.get(daemon_id);
         if (!state) return;
         state.sessions.delete(frame.session_id);
+        state.slashInventory.delete(frame.session_id);
         this.pwaReg.broadcast({ type: "session_close", daemon_id, session_id: frame.session_id, reason: frame.reason });
         return;
       }
@@ -266,6 +274,7 @@ export class Router {
       case "slash_inventory": {
         const state = this.daemons.get(daemon_id);
         if (!state) return;
+        state.slashInventory.set(frame.session_id, frame.entries);
         this.pwaReg.broadcast({
           type: "slash_inventory",
           daemon_id,
@@ -312,6 +321,15 @@ export class Router {
     send({ type: "snapshot", daemons: this.snapshot() });
     for (const d of this.daemons.values()) {
       for (const q of d.pendingAskQuestions.values()) send(q);
+      for (const [session_id, entries] of d.slashInventory) {
+        const f: PwaSlashInventory = {
+          type: "slash_inventory",
+          daemon_id: d.daemon_id,
+          session_id,
+          entries,
+        };
+        send(f);
+      }
     }
   }
 
