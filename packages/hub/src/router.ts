@@ -283,6 +283,23 @@ export class Router {
         });
         return;
       }
+      case "session_rebound": {
+        const state = this.daemons.get(daemon_id);
+        if (!state) return;
+        // Drop cached events for the session — they belong to the previous
+        // claude_session_id and shouldn't be served to a PWA that subscribes
+        // post-rebind. Untouched events for other sessions stay.
+        state.events = state.events.filter(
+          (e) => e.session_id !== frame.session_id,
+        );
+        this.pwaReg.broadcast({
+          type: "session_rebound",
+          daemon_id,
+          session_id: frame.session_id,
+          claude_session_id: frame.claude_session_id,
+        });
+        return;
+      }
     }
   }
 

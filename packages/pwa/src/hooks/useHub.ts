@@ -344,6 +344,25 @@ export function reducer(state: HubState, action: HubAction): HubState {
                 : d),
             pendingCommands: confirmPending(prev.pendingCommands, killCommandId(frame.daemon_id, frame.session_id)),
           };
+        case "session_rebound": {
+          // CC rotated its conversation (`/clear`, `--resume`, etc.) — the
+          // daemon rebound to a new claude_session_id. Drop all timeline
+          // state for this session so the UI starts from a clean slate.
+          const k = eventKey(frame.daemon_id, frame.session_id);
+          const nextEvents = { ...prev.events };       delete nextEvents[k];
+          const nextChatMsgs = { ...prev.chatMessages }; delete nextChatMsgs[k];
+          const nextChatErrs = { ...prev.chatErrors }; delete nextChatErrs[k];
+          const nextNoMore = { ...prev.noMoreHistory }; delete nextNoMore[k];
+          const nextCompleted = { ...prev.completedCounts }; delete nextCompleted[k];
+          return {
+            ...prev,
+            events: nextEvents,
+            chatMessages: nextChatMsgs,
+            chatErrors: nextChatErrs,
+            noMoreHistory: nextNoMore,
+            completedCounts: nextCompleted,
+          };
+        }
         case "event": {
           recordRenderSpan("event", frame.trace, {
             daemon_id: frame.daemon_id,

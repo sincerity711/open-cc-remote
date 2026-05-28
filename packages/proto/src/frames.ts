@@ -141,7 +141,8 @@ export type DaemonToHub =
   | PluginChatOut
   | DaemonAskUserQuestionRequest
   | DaemonAskUserQuestionResolved
-  | DaemonSlashInventory;
+  | DaemonSlashInventory
+  | DaemonSessionRebound;
 
 export type HubToDaemon =
   | { type: "ping"; ts: number }
@@ -182,7 +183,8 @@ export type HubToPwa =
   | HubChatErrorBroadcast
   | PwaAskUserQuestionRequest
   | PwaAskUserQuestionResolved
-  | PwaSlashInventory;
+  | PwaSlashInventory
+  | PwaSessionRebound;
 
 export type PwaToHub =
   | { type: "subscribe" }  // Plan 1 PWA only subscribes; commands come in Plan 4
@@ -435,6 +437,26 @@ export interface HubToDaemonCliCommand {
   text: string;
   /** Bearer subject of the PWA user, for daemon log audit. */
   user: string;
+}
+
+// ─── session_rebound (CC /clear or /resume creates a new jsonl) ───────
+
+/** Daemon noticed a new jsonl appeared in this session's projects dir
+ *  (typically after CC `/clear` or `--resume`). The daemon has stopped the
+ *  watcher on the old file and is now reading from the new claude_session_id.
+ *  The old conversation events are no longer authoritative — PWA should
+ *  drop cached timeline state and start fresh from the next event/history. */
+export interface DaemonSessionRebound {
+  type: "session_rebound";
+  session_id: string;
+  claude_session_id: string;
+}
+
+export interface PwaSessionRebound {
+  type: "session_rebound";
+  daemon_id: string;
+  session_id: string;
+  claude_session_id: string;
 }
 
 export interface DaemonPermissionRequest {

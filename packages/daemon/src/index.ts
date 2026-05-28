@@ -1,5 +1,5 @@
 import { hostname } from "node:os";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, watch as fsWatch, type FSWatcher } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import type { Socket } from "node:net";
@@ -148,6 +148,12 @@ if (existsSync(cfg.state_path)) {
 }
 
 const watchers = new Map<string, WatcherHandle>();
+// Per-session watcher on the parent projects dir (~/.claude/projects/<encoded
+// cwd>/). Detects new jsonl files arriving after the initial bind — happens
+// when the user runs `/clear`, `/compact-some-variants`, or `--resume` inside
+// CC, which rotates claude_session_id. Keeps `watchers` in sync by rebinding
+// to the new file. Cleared on session_close.
+const projectsDirWatchers = new Map<string, FSWatcher>();
 const idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const clientToSession = new Map<Socket, string>();
 const sessionToClient = new Map<string, Socket>();
@@ -474,6 +480,77 @@ function startSessionWatcher(s: SessionSnapshot, claudeId: string): void {
   watchers.set(s.session_id, watcher);
 }
 
+/**
+ * Watch the parent projects dir for *new* jsonl files appearing after the
+ * initial bind. When CC rotates its conversation (`/clear`, `--resume`,
+ * etc.) it writes a new `<uuid>.jsonl` and stops touching the old one — the
+ * existing per-file watcher would then sit on a dead file and the PWA would
+ * silently miss every subsequent event.
+ *
+ * Triggered handler:
+ *   1. tear down the per-file watcher
+ *   2. update sessions registry with the new claude_session_id
+ *   3. notify plugin via bind_resolved (so a future re-register carries the
+ *      new id and we skip the post-restart bind race)
+ *   4. tell hub → PWA via session_rebound (clears stale timeline)
+ *   5. re-arm the per-file watcher on the new file
+ *
+ * Single watcher per session_id; closes on session_close.
+ */
+function startProjectsDirWatcher(s: SessionSnapshot): void {
+  const dir = dirname(jsonlPath(s.cwd, "_placeholder"));
+  let w: FSWatcher;
+  try {
+    w = fsWatch(dir, { persistent: false }, (_event, filename) => {
+      if (!filename) return;
+      const m = /^(.+)\.jsonl$/.exec(filename);
+      if (!m || !m[1]) return;
+      const newClaudeId = m[1];
+      // Read CURRENT bound id from registry (may already have rotated).
+      const cur = sessions.get(s.session_id);
+      if (!cur) return;
+      if (cur.claude_session_id === newClaudeId) return; // writes to bound file
+      // Defensive: only treat as fresh if the file's mtime is recent. A user
+      // rummaging through old jsonls (e.g. `cat old.jsonl`) shouldn't trigger
+      // a rebind — only a write that happened just now.
+      let mt: number;
+      try { mt = statSync(join(dir, filename)).mtimeMs; } catch { return; }
+      if (mt < Date.now() - 30_000) return;
+      rebindSession(s.session_id, newClaudeId);
+    });
+    w.on("error", (e) => process.stderr.write(`daemon: projects-dir watcher error for ${s.session_id}: ${(e as Error).message}\n`));
+  } catch (e) {
+    process.stderr.write(`daemon: projects-dir watcher install failed for ${s.session_id} (${dir}): ${(e as Error).message}\n`);
+    return;
+  }
+  projectsDirWatchers.set(s.session_id, w);
+}
+
+function rebindSession(session_id: string, newClaudeId: string): void {
+  const s = sessions.get(session_id);
+  if (!s) return;
+  process.stderr.write(`daemon: rebind session=${session_id} ${s.claude_session_id ?? "(none)"} → ${newClaudeId}\n`);
+  // 1. tear down old per-file watcher
+  const old = watchers.get(session_id);
+  if (old) { old.close(); watchers.delete(session_id); }
+  // 2. update registry
+  sessions.update(session_id, { claude_session_id: newClaudeId });
+  // 3. notify plugin (so a daemon-restart re-register carries the new id)
+  const client = sessionToClient.get(session_id);
+  if (client) {
+    try {
+      sockServer.replyTo(client, { type: "bind_resolved", session_id, claude_session_id: newClaudeId });
+    } catch (e) {
+      process.stderr.write(`daemon: rebind plugin notify failed for ${session_id}: ${(e as Error).message}\n`);
+    }
+  }
+  // 4. tell hub → PWA so the timeline resets
+  hub.send({ type: "session_rebound", session_id, claude_session_id: newClaudeId });
+  // 5. re-arm per-file watcher on the new file
+  const updated = sessions.get(session_id);
+  if (updated) startSessionWatcher(updated, newClaudeId);
+}
+
 function handleHookAskUserQuestionRequest(
   frame: import("@cc-remote/proto").HookAskUserQuestionRequest,
   client: Socket,
@@ -557,6 +634,10 @@ sessions.onAdd((s: SessionSnapshot) => {
     if (existsSync(path)) {
       process.stderr.write(`daemon: skipping bind for re-register session=${s.session_id} claude=${s.claude_session_id}\n`);
       startSessionWatcher(s, s.claude_session_id);
+      // Arm the projects-dir watcher only AFTER the first claude_session_id
+      // is known — otherwise the very first jsonl write would falsely look
+      // like a "new" file and trigger a phantom rebind.
+      startProjectsDirWatcher(s);
       return;
     }
     // File doesn't exist yet — fall through to bindJsonl as a safety net.
@@ -589,6 +670,9 @@ sessions.onAdd((s: SessionSnapshot) => {
     }
 
     startSessionWatcher(s, claudeId);
+    // Same as the re-register branch: arm the dir watcher AFTER the initial
+    // claude_session_id is set so we don't mistake the first write for a /clear.
+    startProjectsDirWatcher(s);
   });
 });
 
@@ -600,6 +684,11 @@ sessions.onRemove((session_id: string) => {
   if (w) {
     w.close();
     watchers.delete(session_id);
+  }
+  const dw = projectsDirWatchers.get(session_id);
+  if (dw) {
+    dw.close();
+    projectsDirWatchers.delete(session_id);
   }
   const t = idleTimers.get(session_id);
   if (t) { clearTimeout(t); idleTimers.delete(session_id); }
@@ -713,6 +802,8 @@ const shutdown = () => {
   setTimeout(() => {
     for (const w of watchers.values()) w.close();
     watchers.clear();
+    for (const dw of projectsDirWatchers.values()) dw.close();
+    projectsDirWatchers.clear();
     for (const t of idleTimers.values()) clearTimeout(t);
     idleTimers.clear();
     sockServer.close();
