@@ -51,7 +51,7 @@ const HIDDEN_PAYLOAD_TYPES = new Set<string>([
 ]);
 
 const HIDDEN_TOOL_NAME_PREFIXES = ["mcp__cc-remote__"];
-const HIDDEN_TOOL_NAMES = new Set(["ToolSearch"]);
+const HIDDEN_TOOL_NAMES = new Set(["ToolSearch", "AskUserQuestion"]);
 
 function isHiddenToolName(name: string): boolean {
   if (HIDDEN_TOOL_NAMES.has(name)) return true;

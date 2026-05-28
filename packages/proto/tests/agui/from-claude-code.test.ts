@@ -129,6 +129,29 @@ describe("fromClaudeCode contract", () => {
     expect(text?.delta).toBe("Done — see you tomorrow.");
   });
 
+  test("AskUserQuestion tool_use is hidden (relayed via channel, not the timeline)", () => {
+    // The hook intercepts AskUserQuestion and renders the picker via the
+    // ask_user_question_request frame. The model's tool_use call is denied
+    // and never executes, so emitting a tool-call card in the timeline is
+    // misleading — hide it. The deny reason still surfaces as a tool_result.
+    const row = {
+      type: "assistant",
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            id: "toolu_auq_1",
+            name: "AskUserQuestion",
+            input: { questions: [{ question: "Pick one", options: [] }] },
+          },
+        ],
+      },
+    };
+    const events = fromClaudeCode(row, ctx);
+    const toolCall = events.find((e) => e.type === EventType.TOOL_CALL_CHUNK);
+    expect(toolCall).toBeUndefined();
+  });
+
   test("attachment.queued_command emits a user TEXT_MESSAGE_CHUNK with envelope stripped", () => {
     // Claude Code spools mid-tool-call channel injections into JSONL as
     // `attachment` rows with subtype `queued_command`. The prompt body is
