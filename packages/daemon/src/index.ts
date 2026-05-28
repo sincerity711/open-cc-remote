@@ -152,12 +152,16 @@ const idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const clientToSession = new Map<Socket, string>();
 const sessionToClient = new Map<string, Socket>();
 const requestToClient = new Map<string, Socket>();
-// AskUserQuestion relay: request_id → { client (hook socket), session_id, expiry timer }.
+// AskUserQuestion relay: request_id → { client (hook socket), session_id,
+// the request's questions + expires_at (kept so we can re-emit the frame to
+// hub after a reconnect — see hub `onOpen` replay below), expiry timer }.
 // Distinct from `requestToClient` (which is for permission requests) so the
 // two flows can't collide on the request_id namespace.
 interface AskPending {
   client: Socket;
   session_id: string;
+  questions: import("@cc-remote/proto").DaemonAskUserQuestionRequest["questions"];
+  expires_at: number;
   timer: ReturnType<typeof setTimeout>;
 }
 const askToClient = new Map<string, AskPending>();
@@ -174,6 +178,26 @@ const hub = startHubClient({
     agent_version: "0.1.0",
     sessions: sessions.list(),
   }),
+  onOpen: () => {
+    // Replay still-valid in-flight ask_user_question_requests so a hub
+    // restart doesn't strand the picker. Hub's pendingAskQuestions cache
+    // (router.ts) will re-broadcast to PWAs and replay to fresh PWA
+    // subscribers. Expired entries are dropped — the daemon's own timer
+    // will fire shortly and resolve them as `expired` regardless.
+    const now = Date.now();
+    const out: DaemonToHub[] = [];
+    for (const [request_id, p] of askToClient) {
+      if (p.expires_at <= now) continue;
+      out.push({
+        type: "ask_user_question_request",
+        session_id: p.session_id,
+        request_id,
+        questions: p.questions,
+        expires_at: p.expires_at,
+      });
+    }
+    return out;
+  },
   onFrame: (frame: HubToDaemon) => {
     if (frame.type === "permission_reply") {
       const ok = resolveRequest(db, frame.request_id, frame.decision, "pwa");
@@ -479,7 +503,13 @@ function handleHookAskUserQuestionRequest(
     });
   }, ttl);
   timer.unref();
-  askToClient.set(frame.request_id, { client, session_id: session.session_id, timer });
+  askToClient.set(frame.request_id, {
+    client,
+    session_id: session.session_id,
+    questions: frame.questions,
+    expires_at: frame.expires_at,
+    timer,
+  });
   hub.send({
     type: "ask_user_question_request",
     session_id: session.session_id,

@@ -7,6 +7,13 @@ export interface HubClientOptions {
   daemon_id: string;
   hello: () => DaemonToHub;
   onFrame: (frame: HubToDaemon) => void;
+  /**
+   * Optional: invoked after every successful (re)connect, *after* hello has
+   * been sent. Returns frames to re-send to the hub — used to replay
+   * in-flight requests (ask_user_question_request, permission_request) so a
+   * hub restart doesn't strand them.
+   */
+  onOpen?: () => DaemonToHub[];
   jwt?: string;
   privateJwk?: JWK;
   backoffStartMs?: number;
@@ -64,6 +71,8 @@ export function startHubClient(opts: HubClientOptions): HubClientHandle {
     ws.addEventListener("open", () => {
       backoff = startMs;
       ws!.send(JSON.stringify(opts.hello()));
+      const replays = opts.onOpen ? opts.onOpen() : [];
+      for (const f of replays) ws!.send(JSON.stringify(f));
       while (pending.length > 0) {
         const f = pending.shift()!;
         ws!.send(JSON.stringify(f));
