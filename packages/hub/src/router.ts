@@ -2,6 +2,7 @@ import type {
   DaemonToHub, HubToPwa, HubToDaemonStartSession, SessionSnapshot, DaemonView, EventFrameForPwa, PwaToHub,
   PwaToHubChatSend, HubToDaemonChatSend, HubChatErrorBroadcast,
   PwaToHubCliCommand, HubToDaemonCliCommand,
+  PwaAskUserQuestionRequest,
 } from "@cc-remote/proto";
 import type { DaemonRegistry, PwaRegistry } from "./connections.ts";
 import type { Db } from "./db.ts";
@@ -22,6 +23,12 @@ interface DaemonState {
   epoch: number;
   sessions: Map<string, SessionSnapshot>;
   events: EventFrameForPwa[];
+  // In-flight AskUserQuestion requests keyed on request_id. The daemon's hook
+  // owns the authoritative timer; this cache exists so a refreshed PWA can
+  // re-render the picker without us asking the daemon to re-emit. Replayed
+  // on PWA subscribe; cleared when ask_user_question_resolved arrives or the
+  // daemon disconnects.
+  pendingAskQuestions: Map<string, PwaAskUserQuestionRequest>;
 }
 
 export interface RouterOptions {
@@ -76,6 +83,7 @@ export class Router {
           epoch: frame.epoch,
           sessions: new Map(frame.sessions.map((s) => [s.session_id, s])),
           events: [],
+          pendingAskQuestions: new Map(),
         };
         this.daemons.set(daemon_id, state);
         this.pwaReg.broadcast({
@@ -152,16 +160,19 @@ export class Router {
       case "ask_user_question_request": {
         const state = this.daemons.get(daemon_id);
         if (!state) return;
-        this.pwaReg.broadcast({
+        const out: PwaAskUserQuestionRequest = {
           type: "ask_user_question_request", daemon_id,
           session_id: frame.session_id, request_id: frame.request_id,
           questions: frame.questions, expires_at: frame.expires_at,
-        });
+        };
+        state.pendingAskQuestions.set(frame.request_id, out);
+        this.pwaReg.broadcast(out);
         return;
       }
       case "ask_user_question_resolved": {
         const state = this.daemons.get(daemon_id);
         if (!state) return;
+        state.pendingAskQuestions.delete(frame.request_id);
         this.pwaReg.broadcast({
           type: "ask_user_question_resolved", daemon_id,
           session_id: frame.session_id, request_id: frame.request_id,
@@ -299,6 +310,9 @@ export class Router {
 
   onPwaSubscribe(send: (f: HubToPwa) => void): void {
     send({ type: "snapshot", daemons: this.snapshot() });
+    for (const d of this.daemons.values()) {
+      for (const q of d.pendingAskQuestions.values()) send(q);
+    }
   }
 
   onPwaCommand(frame: PwaToHub): void {

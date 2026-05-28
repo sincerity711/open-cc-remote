@@ -286,6 +286,43 @@ test("ask_user_question_resolved frame fans out to PWAs", () => {
   }]);
 });
 
+test("PWA subscribe replays in-flight ask_user_question_requests", () => {
+  // Refresh path: hook is still waiting on the daemon side; a freshly
+  // connected PWA should re-render the picker without us asking the daemon
+  // to re-emit. Resolved/expired questions must NOT replay.
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+  router.onDaemonFrame("d-1", { type: "hello", daemon_id: "d-1", epoch: 1,
+    hostname: "h", agent_version: "0", sessions: [] });
+
+  router.onDaemonFrame("d-1", {
+    type: "ask_user_question_request", session_id: "s1", request_id: "ask-A",
+    questions: [{ question: "first?", header: "Q", multiSelect: false, options: [] }],
+    expires_at: 1_000,
+  });
+  router.onDaemonFrame("d-1", {
+    type: "ask_user_question_request", session_id: "s1", request_id: "ask-B",
+    questions: [{ question: "second?", header: "Q", multiSelect: false, options: [] }],
+    expires_at: 2_000,
+  });
+  // ask-A is resolved before the new PWA connects → must not replay.
+  router.onDaemonFrame("d-1", {
+    type: "ask_user_question_resolved", session_id: "s1", request_id: "ask-A",
+    resolution: "answered",
+  });
+
+  const sent: unknown[] = [];
+  router.onPwaSubscribe((f) => sent.push(f));
+
+  // First frame is the snapshot, then the lone in-flight question.
+  expect((sent[0] as { type: string }).type).toBe("snapshot");
+  const replays = sent.slice(1) as Array<{ type: string; request_id?: string }>;
+  expect(replays.length).toBe(1);
+  expect(replays[0].type).toBe("ask_user_question_request");
+  expect(replays[0].request_id).toBe("ask-B");
+});
+
 test("onPwaCommand forwards ask_user_question_answer to addressed daemon", () => {
   const dreg = new DaemonRegistry<unknown>();
   const preg = new PwaRegistry<unknown>();
