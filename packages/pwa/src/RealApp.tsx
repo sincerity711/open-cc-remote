@@ -278,7 +278,15 @@ export function RealApp() {
         </div>
       )}
       {(() => {
-        const askActive = Object.values(pendingQuestions)[0];
+        // Only pop the picker when the user has the corresponding session
+        // open. After a refresh hub replays every in-flight question across
+        // all daemons; rendering them all on top of the daemons-list view
+        // ambushes the user. Confine to the selected session — they re-enter
+        // that session to answer, mirroring the local-CC mental model.
+        if (!selected) return null;
+        const askActive = Object.values(pendingQuestions).find(
+          (q) => q.daemon_id === selected.daemon_id && q.session_id === selected.session_id,
+        );
         if (!askActive) return null;
         return (
           <AskQuestionSurface
