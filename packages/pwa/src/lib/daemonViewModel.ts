@@ -126,12 +126,3 @@ function pickSessionName(cwd: string, session_id: string): string {
   }
   return session_id.slice(0, 8);
 }
-
-/**
- * Convenience aggregation used by AppShell counters and HomeScreen mini card.
- */
-export function totalPendingApprovals(
-  pendingPermissions: Record<string, PwaPermissionRequest>,
-): number {
-  return Object.keys(pendingPermissions).length;
-}

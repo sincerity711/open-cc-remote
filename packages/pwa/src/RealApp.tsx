@@ -10,12 +10,10 @@ import { SettingsDrawer, type Appearance } from "./screens/SettingsDrawer";
 import { useDaemons } from "./hooks/useDaemons";
 import { usePushTopics } from "./hooks/usePushTopics";
 import { usePairing } from "./hooks/usePairing";
-import { computeDaemonViewModels, totalPendingApprovals } from "./lib/daemonViewModel";
+import { computeDaemonViewModels } from "./lib/daemonViewModel";
 import { AppShell } from "./screens/AppShell";
 import { HomeScreen } from "./screens/HomeScreen";
 import { useDevice } from "./hooks/useMediaQuery";
-import { usePermissionQueue } from "./hooks/usePermissionQueue";
-import { PermissionSurface } from "./screens/PermissionSurface";
 import { AskQuestionSurface } from "./screens/AskQuestionSurface";
 import { SignInScreen } from "./screens/SignInScreen";
 import type { PendingCommand } from "./hooks/pendingCommands";
@@ -80,20 +78,6 @@ export function RealApp() {
     }),
     [daemons, events, pendingPermissions, completedCounts, lastSeenOffsets],
   );
-  const permissionQueue = usePermissionQueue(pendingPermissions);
-  const pendingApprovalsCount = totalPendingApprovals(pendingPermissions);
-
-  const pendingReply = permissionQueue.active
-    ? pendingPermissionReplyFor(permissionQueue.active.request_id)
-    : undefined;
-
-  const activeRequestId = permissionQueue.active?.request_id;
-  useEffect(() => {
-    if (!activeRequestId) return;
-    if (!pendingPermissions[activeRequestId]) {
-      permissionQueue.advance();
-    }
-  }, [activeRequestId, pendingPermissions, permissionQueue]);
   const daemonsHook = useDaemons(HUB_URL, bearer, showSettings);
   const pushHook = usePushTopics(HUB_URL, bearer);
   const pairingHook = usePairing(HUB_URL, bearer, daemonsHook.refresh);
@@ -140,17 +124,6 @@ export function RealApp() {
     }
     return;
   }, [appearance]);
-  const topPending = Object.values(pendingPermissions)[0];
-  const topPendingPreview = topPending
-    ? {
-        daemonHostname:
-          daemons.find((d) => d.daemon_id === topPending.daemon_id)?.hostname ??
-          topPending.daemon_id,
-        sessionName: topPending.session_id,
-        tool: topPending.tool,
-        commandSummary: topPending.args_summary,
-      }
-    : undefined;
 
   if (!bearer) {
     return <SignInScreen loginHref={signInHref} notice={authNotice ?? undefined} />;
@@ -163,26 +136,33 @@ export function RealApp() {
     ? selectedDaemon?.sessions.find((s) => s.session_id === selected.session_id)
     : undefined;
 
+  const pendingPermissionInSelectedSession = selected
+    ? Object.values(pendingPermissions).find(
+        (p) =>
+          p.daemon_id === selected.daemon_id &&
+          p.session_id === selected.session_id,
+      )
+    : undefined;
+
+  const pendingPermissionReply = pendingPermissionInSelectedSession
+    ? pendingPermissionReplyFor(pendingPermissionInSelectedSession.request_id)
+    : undefined;
+
   return (
     <>
       <AppShell
         device={device}
         connected={connected}
-        pendingApprovalsCount={pendingApprovalsCount}
         onOpenSettings={() => setShowSettings(true)}
-        onOpenPermission={permissionQueue.openSurface}
         onSignOut={() => signOut()}
         sessionActiveOnMobile={!!selected}
         home={
           <HomeScreen
             daemons={daemonModels}
-            pendingApprovalsCount={pendingApprovalsCount}
-            topPendingPreview={topPendingPreview}
             selectedSessionId={selected?.session_id}
             onSelectSession={(daemon_id, session_id) => setSelected({ daemon_id, session_id })}
             onStartSession={(daemon_id, cwd) => hub.startSession(daemon_id, cwd)}
             onKillSession={(daemon_id, session_id) => hub.killSession(daemon_id, session_id)}
-            onOpenPermission={permissionQueue.openSurface}
             startSessionErrors={startSessionErrors}
             onDismissStartSessionError={clearStartSessionError}
             pendingStartSessionByDaemon={pendingStartSessionByDaemon}
@@ -200,7 +180,13 @@ export function RealApp() {
               }}
               items={sessionTimeline.items}
               composerBlocked={sessionTimeline.composerBlocked}
-              pendingPermissionInThisSession={sessionTimeline.pendingInThisSession}
+              pendingPermissionInThisSession={pendingPermissionInSelectedSession}
+              pendingPermissionReply={pendingPermissionReply}
+              onSendPermissionReply={
+                pendingPermissionInSelectedSession
+                  ? (decision) => sendPermissionReply(pendingPermissionInSelectedSession, decision)
+                  : undefined
+              }
               chatError={selectedChatError}
               connected={connected}
               idle={sessionTimeline.idle}
@@ -215,7 +201,6 @@ export function RealApp() {
               onLoadEarlier={sessionTimeline.loadEarlier}
               onSendChat={(content) => hub.sendChat(selected.daemon_id, selected.session_id, content)}
               onSendCliCommand={(text) => hub.sendCliCommand(selected.daemon_id, selected.session_id, text)}
-              onOpenPermission={() => permissionQueue.openSurface()}
               onBack={() => setSelected(null)}
               onDismissPendingCommand={dismissPendingCommand}
             />
@@ -249,33 +234,6 @@ export function RealApp() {
           onSetAppearance={setAppearance}
           onClose={() => setShowSettings(false)}
         />
-      )}
-      {permissionQueue.open && permissionQueue.active && (() => {
-        const active = permissionQueue.active;
-        return (
-          <PermissionSurface
-            request={active}
-            daemonHostname={
-              daemons.find((d) => d.daemon_id === active.daemon_id)?.hostname ??
-              active.daemon_id
-            }
-            queueIndex={permissionQueue.queueIndex}
-            queueSize={permissionQueue.queueSize}
-            device={device}
-            onAllow={() => sendPermissionReply(active, "allow")}
-            onDeny={() => sendPermissionReply(active, "deny")}
-            onClose={permissionQueue.closeSurface}
-            pendingReply={pendingReply}
-          />
-        );
-      })()}
-      {permissionQueue.handledNotice && (
-        <div
-          className="bg-surface text-foreground border-border shadow-card fixed top-16 left-1/2 z-[60] -translate-x-1/2 rounded-md border px-3 py-2 text-sm"
-          role="status"
-        >
-          Already handled on another device.
-        </div>
       )}
       {(() => {
         // Only pop the picker when the user has the corresponding session
