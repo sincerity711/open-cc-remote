@@ -128,27 +128,25 @@ test("permission relay: PWA approve → tool runs → task_completed", async ({ 
       await session.page.getByTestId("session-view").waitFor({ timeout: 5_000 });
     });
 
-    await sc.step("permission-mini-card", async () => {
-      // The mini-card lives on the home screen; on mobile the equivalent is
-      // the in-session warning strip above the composer. Either signal counts.
-      const mini = session.page.getByTestId("permission-mini");
-      const inSessionWarning = session.page.getByText(
-        "Permission required before Claude can continue.",
-      );
-      await Promise.race([
-        mini.waitFor({ timeout: 30_000 }),
-        inSessionWarning.waitFor({ timeout: 30_000 }),
-      ]);
-    });
-
-    await sc.step("permission-surface-open", async () => {
-      await session.page.getByRole("button", { name: "Review" }).first().click();
-      await session.page.getByTestId("permission-surface").waitFor({ timeout: 5_000 });
+    await sc.step("inline-permission-card", async () => {
+      // After the redesign, the pending permission renders directly inside
+      // the selected session's timeline — no global mini-card, no modal.
+      const card = session.page.getByTestId("inline-permission-card");
+      await card.waitFor({ timeout: 30_000 });
+      // Card carries the request_id as data attribute and shows the command.
+      await expect(card).toContainText(argsSummary);
+      await expect(card).toContainText("Bash");
     });
 
     await sc.step("permission-allowed", async () => {
-      await session.page.getByRole("button", { name: /Allow/ }).click();
-      await expect(session.page.getByTestId("permission-surface")).toHaveCount(0, { timeout: 10_000 });
+      await session.page
+        .getByTestId("inline-permission-card")
+        .getByRole("button", { name: /Allow once/ })
+        .click();
+      // Card unmounts when the reducer drops the permission_request.
+      await expect(session.page.getByTestId("inline-permission-card")).toHaveCount(0, {
+        timeout: 10_000,
+      });
     });
 
     await sc.step("tool-result-rendered", async () => {
