@@ -74,19 +74,20 @@ mkdir -p "$DEMO_STATE_DIR"
 #   1) Mac LAN IP (10.x / 192.168.x): fast, no setup, BUT may be blocked by
 #      firewall on some networks. Probe by opening a temporary listener and
 #      curling back to the IP.
-#   2) /etc/hosts entry "127.0.0.1 cc-ias-demo": works on any network, but
-#      requires sudo. We refuse to start without it as a fallback.
+#   2) /etc/hosts entry "127.0.0.1 cc-ias-demo": works on any network and any
+#      firewall config, but requires sudo. If present, takes priority — it's
+#      the more reliable of the two.
 HOST_IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)
 if [[ -z "${HOST_IP}" ]]; then
   HOST_IP=$(ifconfig 2>/dev/null | awk '/inet / && $2 != "127.0.0.1" {print $2; exit}')
 fi
 ISSUER_HOST=""
-if [[ -n "${HOST_IP}" ]]; then
-  ISSUER_HOST="${HOST_IP}"
-  echo "[demo] using LAN IP ${HOST_IP} for IAS issuer"
-elif grep -qE '^[^#]*\s+cc-ias-demo(\s|$)' /etc/hosts; then
+if grep -qE '^[^#]*\s+cc-ias-demo(\s|$)' /etc/hosts; then
   ISSUER_HOST="cc-ias-demo"
-  echo "[demo] no LAN IP detected; using /etc/hosts cc-ias-demo entry"
+  echo "[demo] using /etc/hosts cc-ias-demo entry for IAS issuer"
+elif [[ -n "${HOST_IP}" ]]; then
+  ISSUER_HOST="${HOST_IP}"
+  echo "[demo] using LAN IP ${HOST_IP} for IAS issuer (no cc-ias-demo entry)"
 else
   cat <<'EOF' >&2
 
