@@ -25,7 +25,7 @@ function setupServer() {
 
 // ── Task 2: GET /push/topics ──────────────────────────────────────────────────
 
-test("GET /push/topics returns 4 topic metadata entries with default flags", async () => {
+test("GET /push/topics returns 2 topic metadata entries with default flags", async () => {
   const s = setupServer();
   try {
     const c = createDevice(s.db, "u1", "iPhone", null, 60_000);
@@ -33,7 +33,7 @@ test("GET /push/topics returns 4 topic metadata entries with default flags", asy
     const res = await fetch(s.url("/push/topics"), { headers: { authorization: `Bearer ${c.bearer}` } });
     expect(res.status).toBe(200);
     const body = await res.json() as { topics: Array<{ id: string; default_enabled: boolean; bypass_dnd: boolean }> };
-    expect(body.topics.map((t) => t.id).sort()).toEqual(["completed", "idle", "offline", "permission"]);
+    expect(body.topics.map((t) => t.id).sort()).toEqual(["idle", "permission"]);
     const permission = body.topics.find((t) => t.id === "permission")!;
     expect(permission.default_enabled).toBe(true);
     expect(permission.bypass_dnd).toBe(true);

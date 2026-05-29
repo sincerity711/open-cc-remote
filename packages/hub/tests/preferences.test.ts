@@ -47,12 +47,13 @@ test("GET /push/preferences returns current prefs", async () => {
     addPushSub(s.db, c.device_id, "https://x", "p", "a");
     const res = await fetch(s.url("/push/preferences"), { headers: { authorization: `Bearer ${c.bearer}` } });
     expect(res.status).toBe(200);
-    // New shim returns all 4 baseline topic keys using registry defaults.
+    // Shim returns the 2 baseline topic keys using registry defaults.
     const body = await res.json() as Record<string, boolean>;
     expect(body.permission).toBe(true);   // default_enabled=true
-    expect(body.offline).toBe(false);
-    expect(body.completed).toBe(false);
     expect(body.idle).toBe(false);
+    // The legacy completed/offline keys are no longer surfaced.
+    expect(body.completed).toBeUndefined();
+    expect(body.offline).toBeUndefined();
   } finally { s.cleanup(); }
 });
 
@@ -101,16 +102,16 @@ test("PUT /push/preferences writes to topic_subscriptions and is observable via 
   } finally { s.cleanup(); }
 });
 
-test("GET /push/preferences reflects topic_subscriptions for the four legacy keys", async () => {
+test("GET /push/preferences reflects topic_subscriptions for surviving keys", async () => {
   const s = setupServer();
   try {
     const c = createDevice(s.db, "u1", "iPhone", null, 60_000);
     addPushSub(s.db, c.device_id, "https://x", "p", "a");
-    setSubscription(s.db, c.device_id, "completed", "", true);
+    setSubscription(s.db, c.device_id, "idle", "", true);
     const res = await fetch(s.url("/push/preferences"), { headers: { authorization: `Bearer ${c.bearer}` } });
     const body = await res.json() as Record<string, boolean>;
-    // Legacy contract: returns currently-set keys; permission default-true is folded in.
+    // Returns currently-set keys; permission default-true is folded in.
     expect(body.permission).toBe(true);
-    expect(body.completed).toBe(true);
+    expect(body.idle).toBe(true);
   } finally { s.cleanup(); }
 });
