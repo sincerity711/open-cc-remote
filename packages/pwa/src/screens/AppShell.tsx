@@ -1,4 +1,4 @@
-import { Bell, Laptop, Settings } from "lucide-react";
+import { Laptop, Settings } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type React from "react";
 import { Button } from "../components/ui/button";
@@ -24,9 +24,7 @@ function loadStoredHomeWidth(): number {
 export interface AppShellProps {
   device: AppShellDevice;
   connected: boolean;
-  pendingApprovalsCount: number;
   onOpenSettings: () => void;
-  onOpenPermission: () => void;
   onSignOut: () => void;
   /** Side-by-side panes when device !== mobile. On mobile, one or the other. */
   home: React.ReactNode;
@@ -38,9 +36,7 @@ export interface AppShellProps {
 export function AppShell({
   device,
   connected,
-  pendingApprovalsCount,
   onOpenSettings,
-  onOpenPermission,
   onSignOut,
   home,
   session,
@@ -95,21 +91,6 @@ export function AppShell({
               Sign out
             </Button>
           )}
-          {device !== "desktop" && (
-            <button
-              aria-label={`Permissions (${pendingApprovalsCount} pending)`}
-              className="text-muted-foreground hover:bg-muted hover:text-foreground relative inline-flex size-9 items-center justify-center rounded-md"
-              onClick={onOpenPermission}
-              type="button"
-            >
-              <Bell className="size-4" />
-              {pendingApprovalsCount > 0 && (
-                <span className="bg-warning text-warning-foreground absolute right-0.5 top-0.5 inline-flex size-4 items-center justify-center rounded-full text-[10px] font-bold">
-                  {pendingApprovalsCount}
-                </span>
-              )}
-            </button>
-          )}
           <Button
             aria-label="Open settings"
             onClick={onOpenSettings}
@@ -130,11 +111,7 @@ export function AppShell({
         style={device === "desktop" ? { gridTemplateColumns: desktopGridCols } : undefined}
       >
         {device === "desktop" && (
-          <DesktopNav
-            pendingApprovalsCount={pendingApprovalsCount}
-            onOpenPermission={onOpenPermission}
-            onOpenSettings={onOpenSettings}
-          />
+          <DesktopNav onOpenSettings={onOpenSettings} />
         )}
 
         {device === "mobile" ? (
@@ -178,12 +155,8 @@ export function AppShell({
 }
 
 function DesktopNav({
-  pendingApprovalsCount,
-  onOpenPermission,
   onOpenSettings,
 }: {
-  pendingApprovalsCount: number;
-  onOpenPermission: () => void;
   onOpenSettings: () => void;
 }) {
   return (
@@ -193,18 +166,6 @@ function DesktopNav({
         className="text-foreground bg-muted flex size-11 items-center justify-center rounded-md"
       >
         <Laptop className="size-5" />
-      </button>
-      <button
-        aria-label={`Permissions (${pendingApprovalsCount} pending)`}
-        className="text-muted-foreground hover:bg-muted hover:text-foreground relative flex size-11 items-center justify-center rounded-md"
-        onClick={onOpenPermission}
-      >
-        <Bell className="size-5" />
-        {pendingApprovalsCount > 0 && (
-          <span className="bg-warning text-warning-foreground absolute right-1 top-1 inline-flex size-4 items-center justify-center rounded-full text-[10px] font-bold">
-            {pendingApprovalsCount}
-          </span>
-        )}
       </button>
       <button
         aria-label="Settings"
