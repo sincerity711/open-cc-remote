@@ -46,7 +46,6 @@ test("SessionView renders header, timeline items, and composer", () => {
       composerBlocked={false}
       onLoadEarlier={() => {}}
       onSendChat={() => {}}
-      onOpenPermission={() => {}}
       onBack={() => {}}
     />,
   );
@@ -62,7 +61,7 @@ test("SessionView renders header, timeline items, and composer", () => {
   expect(markup).toContain("Message Claude");
 });
 
-test("SessionView shows the permission warning strip when blocked", () => {
+test("SessionView renders InlinePermissionCard inside the timeline when this session has a pending request", () => {
   const markup = renderToStaticMarkup(
     <SessionView
       header={{ name: "session-1", model: null, cwd: "/x", online: true }}
@@ -77,16 +76,53 @@ test("SessionView shows the permission warning strip when blocked", () => {
         args_summary: "rm -rf /",
         expires_at: 1_700_000_000,
       }}
+      onSendPermissionReply={() => {}}
       onLoadEarlier={() => {}}
       onSendChat={() => {}}
-      onOpenPermission={() => {}}
       onBack={() => {}}
     />,
   );
 
-  expect(markup).toContain("Permission required before Claude can continue.");
-  expect(markup).toContain("Review");
+  expect(markup).toContain('data-testid="inline-permission-card"');
+  expect(markup).toContain("rm -rf /");
+  expect(markup).toContain("Bash");
+  // composer placeholder still says "Waiting for permission" while blocked
   expect(markup).toContain("Waiting for permission");
+});
+
+test("SessionView reflects pendingPermissionReply spinner state on the inline card", () => {
+  const markup = renderToStaticMarkup(
+    <SessionView
+      header={{ name: "session-1", model: null, cwd: "/x", online: true }}
+      items={[]}
+      composerBlocked={true}
+      pendingPermissionInThisSession={{
+        type: "permission_request",
+        daemon_id: "d",
+        session_id: "s",
+        request_id: "req-1",
+        tool: "Bash",
+        args_summary: "ls",
+        expires_at: 0,
+      }}
+      pendingPermissionReply={{
+        id: "req-1",
+        kind: "permission_reply",
+        daemon_id: "d",
+        session_id: "s",
+        started_at: 0,
+        status: "pending",
+        label: "allow",
+      }}
+      onSendPermissionReply={() => {}}
+      onLoadEarlier={() => {}}
+      onSendChat={() => {}}
+      onBack={() => {}}
+    />,
+  );
+
+  expect(markup).toContain("Sending decision");
+  expect(markup).toMatch(/<button[^>]*disabled[^>]*>\s*Allow once/);
 });
 
 test("SessionView reports offline state in header and disables composer placeholder", () => {
@@ -97,7 +133,6 @@ test("SessionView reports offline state in header and disables composer placehol
       composerBlocked={false}
       onLoadEarlier={() => {}}
       onSendChat={() => {}}
-      onOpenPermission={() => {}}
       onBack={() => {}}
     />,
   );
@@ -115,7 +150,6 @@ test("SessionView shows the connection-lost banner when not connected", () => {
       connected={false}
       onLoadEarlier={() => {}}
       onSendChat={() => {}}
-      onOpenPermission={() => {}}
       onBack={() => {}}
     />,
   );
@@ -138,7 +172,6 @@ test("SessionView shows 'Sending message...' row while a chat send is pending", 
       }}
       onLoadEarlier={() => {}}
       onSendChat={() => {}}
-      onOpenPermission={() => {}}
       onBack={() => {}}
       onDismissPendingCommand={() => {}}
     />,
@@ -160,7 +193,6 @@ test("SessionView shows timeout message when chat send timed out", () => {
       }}
       onLoadEarlier={() => {}}
       onSendChat={() => {}}
-      onOpenPermission={() => {}}
       onBack={() => {}}
       onDismissPendingCommand={() => {}}
     />,
@@ -177,7 +209,6 @@ test("SessionView no longer renders queued-count banner", () => {
       connected={false}
       onLoadEarlier={() => {}}
       onSendChat={() => {}}
-      onOpenPermission={() => {}}
       onBack={() => {}}
       onDismissPendingCommand={() => {}}
     />,
@@ -195,7 +226,6 @@ test("SessionView omits the connection-lost banner when connected", () => {
       connected={true}
       onLoadEarlier={() => {}}
       onSendChat={() => {}}
-      onOpenPermission={() => {}}
       onBack={() => {}}
     />,
   );
@@ -212,7 +242,6 @@ test("SessionView no longer renders the IdleWaitingCard — status chip in the h
       idle={true}
       onLoadEarlier={() => {}}
       onSendChat={() => {}}
-      onOpenPermission={() => {}}
       onBack={() => {}}
     />,
   );
@@ -235,7 +264,6 @@ test("SessionView shows failed-with-error message", () => {
       }}
       onLoadEarlier={() => {}}
       onSendChat={() => {}}
-      onOpenPermission={() => {}}
       onBack={() => {}}
       onDismissPendingCommand={() => {}}
     />,
@@ -254,7 +282,6 @@ test("SessionView disables composer when disconnected", () => {
       connected={false}
       onLoadEarlier={() => {}}
       onSendChat={() => {}}
-      onOpenPermission={() => {}}
       onBack={() => {}}
       onDismissPendingCommand={() => {}}
     />,

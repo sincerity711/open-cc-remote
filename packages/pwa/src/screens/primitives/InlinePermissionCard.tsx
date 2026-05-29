@@ -12,8 +12,10 @@ export interface InlinePermissionCardProps {
 
 /**
  * Inline session-bound permission prompt. Replaces the deleted full-screen
- * `<PermissionSurface>` modal. Lives in `SessionView`'s timeline scroll area
- * — only renders when the SELECTED session has a pending permission request.
+ * `<PermissionSurface>` modal. Mounted by `SessionView` at the top of the
+ * chat-log region (sibling to the timeline scroller, NOT inside it) so it
+ * stays pinned and always visible until the user decides — only renders
+ * when the SELECTED session has a pending permission request.
  *
  * Visual contract (variant B per the design spec):
  *   - Container with warning-tinted border + subtle shadow

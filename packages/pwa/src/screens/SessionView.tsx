@@ -6,13 +6,16 @@ import { StatusChip } from "./primitives/StatusChip";
 import { SessionTimeline } from "./timeline/SessionTimeline";
 import type { RenderItem } from "./timeline/types";
 import type { PendingCommand } from "../hooks/pendingCommands";
-import { SlashMenu, filterEntries } from "./primitives/SlashMenu";
+import { SlashMenu } from "./primitives/SlashMenu";
+import { InlinePermissionCard } from "./primitives/InlinePermissionCard";
 
 export interface SessionViewProps {
   header: { name: string; model: string | null; cwd: string; online: boolean };
   items: RenderItem[];
   composerBlocked: boolean;
   pendingPermissionInThisSession?: PwaPermissionRequest;
+  /** PendingCommand keyed on the request_id, set while the daemon ack is in flight. */
+  pendingPermissionReply?: PendingCommand;
   chatError?: string;
   connected?: boolean;
   idle?: boolean;
@@ -27,7 +30,8 @@ export interface SessionViewProps {
   onLoadEarlier: () => void;
   onSendChat: (content: string) => void;
   onSendCliCommand?: (text: string) => void;
-  onOpenPermission: (request_id: string) => void;
+  /** Decision handler for the inline permission card. Wired by RealApp. */
+  onSendPermissionReply?: (decision: "allow" | "deny") => void;
   onBack: () => void;
   onDismissPendingCommand?: (id: string) => void;
 }
@@ -37,6 +41,7 @@ export function SessionView({
   items,
   composerBlocked,
   pendingPermissionInThisSession,
+  pendingPermissionReply,
   chatError,
   connected = true,
   idle = false,
@@ -51,7 +56,7 @@ export function SessionView({
   onLoadEarlier,
   onSendChat,
   onSendCliCommand,
-  onOpenPermission,
+  onSendPermissionReply,
   onBack,
   onDismissPendingCommand,
 }: SessionViewProps) {
@@ -110,6 +115,15 @@ export function SessionView({
       </header>
 
       <div className="flex flex-1 flex-col overflow-hidden" data-testid="chat-log">
+        {pendingPermissionInThisSession && onSendPermissionReply && (
+          <div className="px-3 pt-3">
+            <InlinePermissionCard
+              request={pendingPermissionInThisSession}
+              pendingReply={pendingPermissionReply}
+              onDecide={onSendPermissionReply}
+            />
+          </div>
+        )}
         <SessionTimeline
           items={items}
           idle={idle}
@@ -117,7 +131,6 @@ export function SessionView({
           historyLoading={historyLoading}
           historyTimedOut={historyTimedOut}
           onLoadEarlier={onLoadEarlier}
-          onOpenPermission={onOpenPermission}
           maxOffset={maxOffset}
           unreadCount={unreadCount}
           onMarkSeen={onMarkSeen}
@@ -131,18 +144,6 @@ export function SessionView({
             data-testid="connection-banner"
           >
             Connection lost. Reconnect before sending.
-          </div>
-        )}
-        {composerBlocked && pendingPermissionInThisSession && (
-          <div className="bg-warning-subtle text-warning mb-2 flex items-center justify-between gap-2 rounded-md px-3 py-2 text-sm">
-            <span>Permission required before Claude can continue.</span>
-            <Button
-              onClick={() => onOpenPermission(pendingPermissionInThisSession.request_id)}
-              size="sm"
-              variant="secondary"
-            >
-              Review
-            </Button>
           </div>
         )}
         {chatError && (
