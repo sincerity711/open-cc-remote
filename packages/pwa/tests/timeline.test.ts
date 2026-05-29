@@ -8,10 +8,7 @@
  * + results are merged upstream into a single `tag:"tool"` item.
  */
 import { expect, test, describe } from "bun:test";
-import type {
-  PwaPermissionRequest,
-  PwaPermissionResolved,
-} from "@cc-remote/proto";
+import type { PwaPermissionResolved } from "@cc-remote/proto";
 import { EventType } from "@cc-remote/proto";
 import { mergeTimeline } from "../src/lib/timeline";
 import type { BufferedEvent } from "../src/hooks/useHub";
@@ -26,18 +23,6 @@ function be(
   ts = 1_700_000_000_000,
 ): BufferedEvent {
   return { daemon_id: D, session_id: S, jsonl_offset, event_index, ts, event };
-}
-
-function pending(request_id: string, expires_at: number): PwaPermissionRequest {
-  return {
-    type: "permission_request",
-    daemon_id: D,
-    session_id: S,
-    request_id,
-    tool: "Bash",
-    args_summary: "rm -rf /tmp/foo",
-    expires_at,
-  };
 }
 
 function resolved(
@@ -55,7 +40,7 @@ function resolved(
 }
 
 test("empty inputs produce empty timeline", () => {
-  expect(mergeTimeline({ events: [], pending: [], resolved: [] })).toEqual([]);
+  expect(mergeTimeline({ events: [], resolved: [] })).toEqual([]);
 });
 
 test("BufferedEvents emit 'agui' RenderItems", () => {
@@ -64,7 +49,6 @@ test("BufferedEvents emit 'agui' RenderItems", () => {
       be(10, 0, { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "m1", role: "assistant", delta: "hello" }),
       be(20, 0, { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "m2", role: "assistant", delta: "world" }),
     ],
-    pending: [],
     resolved: [],
   });
   expect(items).toHaveLength(2);
@@ -78,7 +62,6 @@ test("TOOL_CALL_CHUNK + TOOL_CALL_RESULT collapse into a single 'tool' RenderIte
       be(10, 0, { type: EventType.TOOL_CALL_CHUNK, toolCallId: "t1", toolCallName: "Bash", delta: '{"command":"ls"}' }),
       be(20, 0, { type: EventType.TOOL_CALL_RESULT, messageId: "m1", toolCallId: "t1", content: "ok" } as any),
     ],
-    pending: [],
     resolved: [],
   });
   expect(items).toHaveLength(1);
@@ -94,6 +77,7 @@ describe("RAW event filtering", () => {
     "ai-title",
     "last-prompt",
     "permission-mode",
+    "mode",
     "pr-link",
   ];
   for (const type of hiddenTypes) {
@@ -102,7 +86,6 @@ describe("RAW event filtering", () => {
         events: [
           be(10, 0, { type: EventType.RAW, source: "claude-code-jsonl", event: { type } } as any),
         ],
-        pending: [],
         resolved: [],
       });
       expect(items).toHaveLength(0);
@@ -114,7 +97,6 @@ describe("RAW event filtering", () => {
       events: [
         be(10, 0, { type: EventType.RAW, source: "claude-code-jsonl", event: { type: "session_start" } } as any),
       ],
-      pending: [],
       resolved: [],
     });
     expect(items).toHaveLength(1);
@@ -122,23 +104,9 @@ describe("RAW event filtering", () => {
   });
 });
 
-test("pending permissions emit 'permission-inline' items", () => {
-  const items = mergeTimeline({
-    events: [],
-    pending: [pending("req-1", 1_700_000_010)],
-    resolved: [],
-  });
-  expect(items).toHaveLength(1);
-  expect(items[0]?.tag).toBe("permission-inline");
-  if (items[0]?.tag === "permission-inline") {
-    expect(items[0].pending.tool).toBe("Bash");
-  }
-});
-
 test("resolved permissions emit 'permission-resolved' items", () => {
   const items = mergeTimeline({
     events: [],
-    pending: [],
     resolved: [
       resolved("req-1", "allow"),
       resolved("req-2", "deny"),
@@ -156,7 +124,6 @@ test("items are sorted by timestamp", () => {
       be(20, 0, { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "m2", role: "user", delta: "b" }, 1_700_000_002_000),
       be(30, 0, { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "m3", role: "assistant", delta: "c" }, 1_700_000_003_000),
     ],
-    pending: [],
     resolved: [],
   });
   expect(items).toHaveLength(3);
@@ -170,7 +137,6 @@ test("ids are stable and deterministic — same input twice produces same ids", 
     events: [
       be(10, 0, { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "m1", role: "assistant", delta: "x" }),
     ],
-    pending: [pending("req-1", 1_700_000_010)],
     resolved: [resolved("req-2", "allow")],
   };
   const a = mergeTimeline(args);
@@ -181,7 +147,6 @@ test("ids are stable and deterministic — same input twice produces same ids", 
 test("agui item id encodes daemon_id, session_id, jsonl_offset, event_index", () => {
   const items = mergeTimeline({
     events: [be(42, 3, { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "m1", role: "assistant", delta: "x" })],
-    pending: [],
     resolved: [],
   });
   expect(items[0]?.id).toBe(`evt:${D}:${S}:42:3`);

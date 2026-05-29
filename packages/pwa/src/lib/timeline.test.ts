@@ -29,31 +29,11 @@ describe("mergeTimeline", () => {
           delta: '{"command":"ls"}',
         }, 2000),
       ],
-      pending: [],
       resolved: [],
     });
     expect(items.length).toBe(2);
     expect(items[0]?.tag).toBe("agui");
     expect(items[1]?.tag).toBe("tool");
-  });
-
-  test("interleaves pending permissions by timestamp", () => {
-    const items = mergeTimeline({
-      events: [],
-      pending: [
-        {
-          request_id: "p1",
-          daemon_id: "d1",
-          session_id: "s1",
-          tool: "Bash",
-          input: { command: "rm -rf /" },
-          ts: 1500,
-        } as any,
-      ],
-      resolved: [],
-    });
-    expect(items.length).toBe(1);
-    expect(items[0]?.tag).toBe("permission-inline");
   });
 
   test("filters RAW events whose underlying JSONL type is in HIDDEN_PAYLOAD_TYPES", () => {
@@ -71,7 +51,6 @@ describe("mergeTimeline", () => {
           delta: "real prose",
         }, 2000),
       ],
-      pending: [],
       resolved: [],
     });
     expect(items.length).toBe(1);
@@ -94,7 +73,6 @@ describe("mergeTimeline", () => {
           content: "file1\nfile2",
         }, 2000),
       ],
-      pending: [],
       resolved: [],
     });
     expect(items.length).toBe(1);
@@ -116,7 +94,6 @@ describe("mergeTimeline", () => {
           delta: '{"command":"ls"}',
         }, 1000),
       ],
-      pending: [],
       resolved: [],
     });
     expect(items.length).toBe(1);
@@ -124,4 +101,3 @@ describe("mergeTimeline", () => {
     if (items[0]?.tag === "tool") expect(items[0].result).toBeUndefined();
   });
 });
-

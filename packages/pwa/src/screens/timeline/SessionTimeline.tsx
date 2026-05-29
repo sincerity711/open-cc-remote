@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../../components/ui/button";
-import { renderTimelineItem, type RenderTimelineItemContext } from "./renderTimelineItem";
+import { renderTimelineItem } from "./renderTimelineItem";
 import type { RenderItem } from "./types";
 
 export interface SessionTimelineProps {
@@ -10,7 +10,6 @@ export interface SessionTimelineProps {
   historyLoading?: boolean;
   historyTimedOut?: boolean;
   onLoadEarlier: () => void;
-  onOpenPermission?: (request_id: string) => void;
   /** Highest jsonl_offset among buffered events (-1 if none). Used to advance
    *  the lastSeen anchor when the user is at the bottom of the timeline. */
   maxOffset?: number;
@@ -28,7 +27,6 @@ export function SessionTimeline({
   historyLoading = false,
   historyTimedOut = false,
   onLoadEarlier,
-  onOpenPermission,
   maxOffset = -1,
   unreadCount = 0,
   onMarkSeen,
@@ -60,7 +58,6 @@ export function SessionTimeline({
     }
   };
 
-  const ctx: RenderTimelineItemContext = { onOpenPermission };
   const showJumpPill = !autoScroll && unreadCount > 0;
 
   return (
@@ -93,7 +90,7 @@ export function SessionTimeline({
             History load not confirmed.
           </div>
         )}
-        {items.map((it) => renderTimelineItem(it, ctx))}
+        {items.map((it) => renderTimelineItem(it))}
         {items.length === 0 && (
           <p className="text-muted-foreground py-12 text-center text-sm">
             {historyLoading ? "Loading history…" : "Send a message to start."}

@@ -1,7 +1,4 @@
-import type {
-  PwaPermissionRequest,
-  PwaPermissionResolved,
-} from "@cc-remote/proto";
+import type { PwaPermissionResolved } from "@cc-remote/proto";
 import {
   EventType,
   type ToolCallChunkEvent,
@@ -12,7 +9,6 @@ import type { RenderItem } from "../screens/timeline/types";
 
 export interface MergeTimelineArgs {
   events: BufferedEvent[];
-  pending: PwaPermissionRequest[];
   resolved: PwaPermissionResolved[];
 }
 
@@ -40,6 +36,7 @@ const HIDDEN_PAYLOAD_TYPES = new Set<string>([
   "ai-title",
   "last-prompt",
   "permission-mode",
+  "mode",
   "pr-link",
 ]);
 
@@ -107,21 +104,6 @@ export function mergeTimeline(args: MergeTimelineArgs): RenderItem[] {
         id: `evt:${be.daemon_id}:${be.session_id}:${be.jsonl_offset}:${be.event_index}`,
         ts: be.ts,
         event: be.event,
-      },
-    });
-  }
-
-  for (const p of args.pending) {
-    const ts = (p as { ts?: number }).ts ?? Date.now();
-    buf.push({
-      tsMs: ts,
-      rank: 2,
-      offset: Number.MAX_SAFE_INTEGER,
-      item: {
-        tag: "permission-inline",
-        id: `perm:${p.request_id}`,
-        ts,
-        pending: p,
       },
     });
   }

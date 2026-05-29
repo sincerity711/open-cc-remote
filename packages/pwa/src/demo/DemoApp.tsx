@@ -42,7 +42,6 @@ import { renderTimelineItem } from "../screens/timeline/renderTimelineItem";
 import type { RenderItem } from "../screens/timeline/types";
 import { EventType } from "@cc-remote/proto";
 import type {
-  PwaPermissionRequest,
   PwaPermissionResolved,
   TextMessageChunkEvent,
   ToolCallChunkEvent,
@@ -1260,23 +1259,6 @@ function CardCatalog({ device }: { device: Device }) {
     } as ToolCallResultEvent,
   };
 
-  // Permission inline (pending) — feeds renderTimelineItem so the catalog
-  // matches the actual live card.
-  const permPending: RenderItem = {
-    tag: "permission-inline",
-    id: "cat-perm-pending",
-    ts,
-    pending: {
-      type: "permission_request",
-      daemon_id: "demo",
-      session_id: "demo",
-      request_id: "req_demo",
-      tool: "Bash",
-      args_summary: "rm -rf node_modules",
-      expires_at: ts + 60_000,
-    } as PwaPermissionRequest,
-  };
-
   const permResolved = (
     decision: PwaPermissionResolved["decision"],
     suffix: string,
@@ -1339,9 +1321,6 @@ function CardCatalog({ device }: { device: Device }) {
           </CatalogTile>
         </CatalogGroup>
         <CatalogGroup device={device}>
-          <CatalogTile number={11} title="Permission Request (Inline)">
-            {renderTimelineItem(permPending)}
-          </CatalogTile>
           <CatalogTile number={12} title="Permission Review (Card)">
             <CatalogPermissionReview />
           </CatalogTile>

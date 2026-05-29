@@ -2,7 +2,6 @@ import {
   ChevronRight,
   type LucideIcon,
   Pencil,
-  ShieldAlert,
   ShieldCheck,
   Terminal,
   FileText,
@@ -27,39 +26,12 @@ import { SessionTimelineItem, type TimelineMarker } from "./SessionTimelineItem"
 import type { RenderItem } from "./types";
 import { toolStatusFromResult, type ToolStatus } from "../../lib/view-helpers";
 
-export interface RenderTimelineItemContext {
-  onOpenPermission?: (request_id: string) => void;
-}
-
 export function renderTimelineItem(
   item: RenderItem,
-  ctx: RenderTimelineItemContext = {},
 ): React.ReactElement {
   const marker = pickMarker(item);
 
   switch (item.tag) {
-    case "permission-inline":
-      return (
-        <SessionTimelineItem key={item.id} marker={marker}>
-          <CatalogCard tone="warning">
-            <CatalogHeader icon={ShieldAlert} title="Permission required" tone="warning" />
-            <div className="mt-3 grid gap-1 text-xs">
-              <p>
-                Tool <span className="ml-6 font-mono">{item.pending.tool}</span>
-              </p>
-            </div>
-            <Button
-              className="mt-3 w-full"
-              size="sm"
-              variant="secondary"
-              onClick={() => ctx.onOpenPermission?.(item.pending.request_id)}
-            >
-              Review
-            </Button>
-          </CatalogCard>
-        </SessionTimelineItem>
-      );
-
     case "permission-resolved":
       return (
         <SessionTimelineItem key={item.id} marker={marker}>
@@ -178,7 +150,6 @@ function renderAgUi(
 }
 
 function pickMarker(item: RenderItem): TimelineMarker {
-  if (item.tag === "permission-inline") return "warning";
   if (item.tag === "permission-resolved") {
     return item.resolved.decision === "deny" || item.resolved.decision === "expired"
       ? "error"

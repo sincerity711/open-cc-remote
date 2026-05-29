@@ -75,7 +75,7 @@ export function useSessionTimeline(
     );
     const resolved: PwaPermissionResolved[] = [];
 
-    const items = mergeTimeline({ events, pending, resolved });
+    const items = mergeTimeline({ events, resolved });
 
     const daemon = hub.daemons.find((d) => d.daemon_id === selected.daemon_id);
     const session = daemon?.sessions.find((s) => s.session_id === selected.session_id);

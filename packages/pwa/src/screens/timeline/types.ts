@@ -1,6 +1,5 @@
 import type {
   AGUIEvent,
-  PwaPermissionRequest,
   PwaPermissionResolved,
   ToolCallChunkEvent,
   ToolCallResultEvent,
@@ -31,5 +30,4 @@ export type RenderItem =
       chunk: ToolCallChunkEvent;
       result?: ToolCallResultEvent;
     }
-  | { tag: "permission-inline"; id: string; ts: number; pending: PwaPermissionRequest }
   | { tag: "permission-resolved"; id: string; ts: number; resolved: PwaPermissionResolved };
