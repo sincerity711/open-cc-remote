@@ -462,66 +462,6 @@ test("onPwaCommand forwards request_history to addressed daemon", () => {
   }]);
 });
 
-test("daemon offline push fires after delay", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "ccr-offl-"));
-  try {
-    const db = openDb(join(dir, "h.sqlite"));
-    db.prepare("INSERT INTO users (sub, created_at) VALUES (?, ?)").run("u1", 1);
-    pairDaemon(db, "d-1", "u1", "{}", null);
-    const dev = createDevice(db, "u1", "iPhone", null, 60_000);
-    addPushSub(db, dev.device_id, "https://x", "p", "a");
-    setSubscription(db, dev.device_id, "offline", "", true);
-
-    const sentTo: Array<{ subs: unknown[]; payload: any }> = [];
-    const push = {
-      async sendTo(subs: unknown[], payload: any) { sentTo.push({ subs, payload }); },
-    };
-    const dreg = new DaemonRegistry<unknown>();
-    const preg = new PwaRegistry<unknown>();
-    const router = new Router(dreg, preg, db, push, { offline_push_delay_ms: 50 });
-
-    router.onDaemonFrame("d-1", { type: "hello", daemon_id: "d-1", epoch: 1,
-      hostname: "Carls-Mac", agent_version: "0", sessions: [] });
-    router.onDaemonDisconnect("d-1");
-
-    await new Promise((r) => setTimeout(r, 100));
-    expect(sentTo).toHaveLength(1);
-    expect(sentTo[0]!.payload.kind).toBe("offline");
-    expect(sentTo[0]!.payload.daemon_id).toBe("d-1");
-    expect(sentTo[0]!.payload.body).toContain("Carls-Mac");
-    db.close();
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-});
-
-test("daemon offline push is cancelled on reconnect", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "ccr-cxl-"));
-  try {
-    const db = openDb(join(dir, "h.sqlite"));
-    db.prepare("INSERT INTO users (sub, created_at) VALUES (?, ?)").run("u1", 1);
-    pairDaemon(db, "d-2", "u1", "{}", null);
-    const dev = createDevice(db, "u1", "iPhone", null, 60_000);
-    addPushSub(db, dev.device_id, "https://x", "p", "a");
-    setSubscription(db, dev.device_id, "offline", "", true);
-
-    const sentTo: unknown[] = [];
-    const push = { async sendTo(subs: unknown[], payload: unknown) { sentTo.push({ subs, payload }); } };
-    const dreg = new DaemonRegistry<unknown>();
-    const preg = new PwaRegistry<unknown>();
-    const router = new Router(dreg, preg, db, push, { offline_push_delay_ms: 80 });
-
-    router.onDaemonFrame("d-2", { type: "hello", daemon_id: "d-2", epoch: 1,
-      hostname: "h", agent_version: "0", sessions: [] });
-    router.onDaemonDisconnect("d-2");
-    // Reconnect within the window.
-    await new Promise((r) => setTimeout(r, 30));
-    router.onDaemonFrame("d-2", { type: "hello", daemon_id: "d-2", epoch: 2,
-      hostname: "h", agent_version: "0", sessions: [] });
-    await new Promise((r) => setTimeout(r, 100));
-    expect(sentTo).toHaveLength(0);
-    db.close();
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-});
-
 test("onPwaCommand forwards kill_session to addressed daemon", () => {
   const dreg = new DaemonRegistry<unknown>();
   const preg = new PwaRegistry<unknown>();
@@ -538,31 +478,6 @@ test("onPwaCommand forwards kill_session to addressed daemon", () => {
     type: "kill_session",
     session_id: "s1",
   }]);
-});
-
-test("daemon offline push respects opt-in (default off → no push)", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "ccr-noop-"));
-  try {
-    const db = openDb(join(dir, "h.sqlite"));
-    db.prepare("INSERT INTO users (sub, created_at) VALUES (?, ?)").run("u1", 1);
-    pairDaemon(db, "d-3", "u1", "{}", null);
-    const dev = createDevice(db, "u1", "iPhone", null, 60_000);
-    addPushSub(db, dev.device_id, "https://x", "p", "a");
-    // Default prefs (permission:true, offline not set / false)
-
-    const sentTo: unknown[] = [];
-    const push = { async sendTo(subs: unknown[], payload: unknown) { sentTo.push({ subs, payload }); } };
-    const dreg = new DaemonRegistry<unknown>();
-    const preg = new PwaRegistry<unknown>();
-    const router = new Router(dreg, preg, db, push, { offline_push_delay_ms: 30 });
-
-    router.onDaemonFrame("d-3", { type: "hello", daemon_id: "d-3", epoch: 1,
-      hostname: "h", agent_version: "0", sessions: [] });
-    router.onDaemonDisconnect("d-3");
-    await new Promise((r) => setTimeout(r, 80));
-    expect(sentTo).toHaveLength(0);
-    db.close();
-  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("onPwaCommand forwards start_session to addressed daemon", () => {
@@ -665,54 +580,6 @@ test("task_completed frame fans out to PWAs with daemon_id", () => {
   expect(broadcasts).toEqual([{
     type: "task_completed", daemon_id: "d-1", session_id: "s1", ts: 12345,
   }]);
-});
-
-test("task_completed pushes to subs with prefs.completed === true", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "ccr-tcp-"));
-  try {
-    const db = openDb(join(dir, "h.sqlite"));
-    db.prepare("INSERT INTO users (sub, created_at) VALUES (?, ?)").run("u1", 1);
-    pairDaemon(db, "d-1", "u1", "{}", null);
-    const dev = createDevice(db, "u1", "iPhone", null, 60_000);
-    addPushSub(db, dev.device_id, "https://x", "p", "a");
-    setSubscription(db, dev.device_id, "completed", "", true);
-    const sentTo: Array<{ payload: any }> = [];
-    const push = { async sendTo(subs: unknown[], payload: any) { sentTo.push({ payload }); } };
-    const dreg = new DaemonRegistry<unknown>();
-    const preg = new PwaRegistry<unknown>();
-    const router = new Router(dreg, preg, db, push);
-    router.onDaemonFrame("d-1", { type: "hello", daemon_id: "d-1", epoch: 1,
-      hostname: "h", agent_version: "0", sessions: [] });
-    router.onDaemonFrame("d-1", { type: "task_completed", session_id: "s1", ts: 1 });
-    await new Promise((r) => setTimeout(r, 30));
-    expect(sentTo).toHaveLength(1);
-    expect(sentTo[0]!.payload.kind).toBe("completed");
-    expect(sentTo[0]!.payload.session_id).toBe("s1");
-    db.close();
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-});
-
-test("task_completed does not push when prefs.completed is not set", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "ccr-tcn-"));
-  try {
-    const db = openDb(join(dir, "h.sqlite"));
-    db.prepare("INSERT INTO users (sub, created_at) VALUES (?, ?)").run("u1", 1);
-    pairDaemon(db, "d-1", "u1", "{}", null);
-    const dev = createDevice(db, "u1", "iPhone", null, 60_000);
-    addPushSub(db, dev.device_id, "https://x", "p", "a");
-    // Default prefs: completed not set
-    const sentTo: unknown[] = [];
-    const push = { async sendTo(subs: unknown[], payload: unknown) { sentTo.push({ payload }); } };
-    const dreg = new DaemonRegistry<unknown>();
-    const preg = new PwaRegistry<unknown>();
-    const router = new Router(dreg, preg, db, push);
-    router.onDaemonFrame("d-1", { type: "hello", daemon_id: "d-1", epoch: 1,
-      hostname: "h", agent_version: "0", sessions: [] });
-    router.onDaemonFrame("d-1", { type: "task_completed", session_id: "s1", ts: 1 });
-    await new Promise((r) => setTimeout(r, 30));
-    expect(sentTo).toHaveLength(0);
-    db.close();
-  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("idle frame fans out to PWAs with daemon_id", () => {

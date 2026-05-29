@@ -15,7 +15,6 @@ import { ulid } from "./ulid.ts";
 import { routeFrameSpan } from "./otel.ts";
 
 const RING_BUFFER_SIZE = 200;
-const DEFAULT_OFFLINE_PUSH_DELAY_MS = 30_000;
 
 interface DaemonState {
   daemon_id: string;
@@ -37,25 +36,18 @@ interface DaemonState {
   slashInventory: Map<string, SlashEntry[]>;
 }
 
-export interface RouterOptions {
-  offline_push_delay_ms?: number;
-}
+export interface RouterOptions {}
 
 export class Router {
   private daemons = new Map<string, DaemonState>();
-  private offlineTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  private offlineMeta = new Map<string, { hostname: string; disconnected_at: number }>();
-  private offlinePushDelayMs: number;
 
   constructor(
     private daemonReg: DaemonRegistry<unknown>,
     private pwaReg: PwaRegistry<unknown>,
     private db?: Db,
     private push?: PushHelper,
-    options: RouterOptions = {},
-  ) {
-    this.offlinePushDelayMs = options.offline_push_delay_ms ?? DEFAULT_OFFLINE_PUSH_DELAY_MS;
-  }
+    _options: RouterOptions = {},
+  ) {}
 
   public getConnectedDaemonIds(): Set<string> {
     return new Set(this.daemons.keys());
@@ -72,11 +64,6 @@ export class Router {
   onDaemonFrame(daemon_id: string, frame: DaemonToHub): void {
     switch (frame.type) {
       case "hello": {
-        // Cancel any pending offline-push timer for this daemon.
-        const t = this.offlineTimers.get(daemon_id);
-        if (t) { clearTimeout(t); this.offlineTimers.delete(daemon_id); }
-        this.offlineMeta.delete(daemon_id);
-
         let display_name: string | null = null;
         if (this.db) {
           display_name = findDaemon(this.db, daemon_id)?.display_name ?? null;
@@ -208,9 +195,6 @@ export class Router {
           session_id: frame.session_id,
           ts: frame.ts,
         });
-        if (this.db && this.push) void dispatchTopic(this.db, this.push, getTopic("completed"), daemon_id, {
-          daemon_id, session_id: frame.session_id,
-        });
         return;
       }
       case "idle": {
@@ -306,32 +290,8 @@ export class Router {
   onDaemonDisconnect(daemon_id: string): void {
     const state = this.daemons.get(daemon_id);
     if (!state) return;
-    const hostname = state.hostname;
-    const disconnected_at = Date.now();
-
     this.daemons.delete(daemon_id);
     this.pwaReg.broadcast({ type: "daemon_offline", daemon_id });
-
-    // Schedule offline push if not already scheduled.
-    if (this.offlineTimers.has(daemon_id)) return;
-    this.offlineMeta.set(daemon_id, { hostname, disconnected_at });
-    const timer = setTimeout(() => {
-      this.offlineTimers.delete(daemon_id);
-      const meta = this.offlineMeta.get(daemon_id);
-      this.offlineMeta.delete(daemon_id);
-      if (!meta) return;
-      const since_ms = Date.now() - meta.disconnected_at;
-      if (this.db && this.push) {
-        void dispatchTopic(this.db, this.push, getTopic("offline"), daemon_id, {
-          daemon_id, hostname: meta.hostname, since_ms,
-        });
-      }
-    }, this.offlinePushDelayMs);
-    // Don't keep the event loop alive just for this timer.
-    if (typeof (timer as { unref?: () => void }).unref === "function") {
-      (timer as { unref: () => void }).unref();
-    }
-    this.offlineTimers.set(daemon_id, timer);
   }
 
   onPwaSubscribe(send: (f: HubToPwa) => void): void {
