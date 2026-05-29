@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, ShieldAlert, Trash2, X } from "lucide-react";
+import { Plus, Trash2, X } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { cn } from "../lib/utils";
 import type { DaemonViewModel, SessionRowViewModel } from "../lib/daemonViewModel";
@@ -12,22 +12,12 @@ function daemonLabel(d: { display_name: string | null; hostname: string }): stri
   return d.display_name ?? d.hostname;
 }
 
-export interface TopPendingPreview {
-  daemonHostname: string;
-  sessionName: string;
-  tool: string;
-  commandSummary: string;
-}
-
 export interface HomeScreenProps {
   daemons: DaemonViewModel[];
-  pendingApprovalsCount: number;
-  topPendingPreview?: TopPendingPreview;
   selectedSessionId?: string;
   onSelectSession: (daemon_id: string, session_id: string) => void;
   onStartSession: (daemon_id: string, cwd: string) => void;
   onKillSession: (daemon_id: string, session_id: string) => void;
-  onOpenPermission: () => void;
   /** Per-daemon last start_session_rejected, surfaced inline. */
   startSessionErrors?: Record<string, PwaStartSessionRejected>;
   onDismissStartSessionError?: (daemon_id: string) => void;
@@ -37,13 +27,10 @@ export interface HomeScreenProps {
 
 export function HomeScreen({
   daemons,
-  pendingApprovalsCount,
-  topPendingPreview,
   selectedSessionId,
   onSelectSession,
   onStartSession,
   onKillSession,
-  onOpenPermission,
   startSessionErrors,
   onDismissStartSessionError,
   pendingStartSessionByDaemon,
@@ -66,14 +53,6 @@ export function HomeScreen({
       </div>
 
       <div className="px-4 pb-4">
-        {pendingApprovalsCount > 0 && topPendingPreview && (
-          <PermissionMiniCard
-            count={pendingApprovalsCount}
-            preview={topPendingPreview}
-            onReview={onOpenPermission}
-          />
-        )}
-
       {daemons.length === 0 ? (
         <p className="text-muted-foreground mt-3 text-sm">
           No daemons connected yet. Run <code className="font-mono">cc-remote pair</code> and
@@ -103,41 +82,6 @@ export function HomeScreen({
       )}
       </div>
     </section>
-  );
-}
-
-function PermissionMiniCard({
-  count,
-  preview,
-  onReview,
-}: {
-  count: number;
-  preview: TopPendingPreview;
-  onReview: () => void;
-}) {
-  return (
-    <article
-      className="rounded-card border-warning/35 bg-warning-subtle shadow-card border p-3"
-      data-testid="permission-mini"
-    >
-      <div className="flex items-start gap-3">
-        <ShieldAlert className="text-warning mt-0.5 size-5 shrink-0" />
-        <div className="min-w-0 flex-1">
-          <p className="font-semibold">
-            {count} approval{count === 1 ? "" : "s"} waiting
-          </p>
-          <p className="text-muted-foreground truncate text-sm">
-            {preview.daemonHostname} · {preview.sessionName} · {preview.tool}
-          </p>
-          <code className="bg-muted mt-2 block truncate rounded-sm px-2 py-1 font-mono text-xs">
-            {preview.commandSummary}
-          </code>
-        </div>
-        <Button onClick={onReview} size="sm" variant="secondary">
-          Review
-        </Button>
-      </div>
-    </article>
   );
 }
 
@@ -339,7 +283,9 @@ function SessionRow({
     <div
       className={cn(
         "bg-surface shadow-card min-w-0 rounded-md border p-3",
-        session.state === "waiting" ? "border-warning/45" : "border-border",
+        session.state === "waiting"
+          ? "border-warning/45 border-l-2 border-l-warning"
+          : "border-border",
         selected && "ring-primary/40 ring-2",
       )}
     >
@@ -353,12 +299,25 @@ function SessionRow({
             <span className="truncate font-semibold">{session.name}</span>
             <StatusChip label={stateLabel(session.state)} tone={session.state} />
           </span>
-          <span className="text-muted-foreground mt-1 block truncate font-mono text-xs">
-            {session.model} · {session.cwd}
-          </span>
-          <span className="text-muted-foreground mt-1 block text-xs">
-            unread {session.unread} · tasks {session.tasks} · {session.activity}
-          </span>
+          {session.state === "waiting" ? (
+            <>
+              <span className="text-warning mt-1 block truncate text-xs font-semibold">
+                {session.activity}
+              </span>
+              <span className="text-muted-foreground mt-1 block truncate font-mono text-xs">
+                {session.model} · {session.cwd}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="text-muted-foreground mt-1 block truncate font-mono text-xs">
+                {session.model} · {session.cwd}
+              </span>
+              <span className="text-muted-foreground mt-1 block text-xs">
+                unread {session.unread} · tasks {session.tasks} · {session.activity}
+              </span>
+            </>
+          )}
         </span>
       </button>
       {killing ? (

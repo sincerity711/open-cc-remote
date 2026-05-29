@@ -41,25 +41,15 @@ const offlineDaemon: DaemonViewModel = {
   ],
 };
 
-test("HomeScreen renders mini card, online daemon, and offline daemon", () => {
+test("HomeScreen renders online + offline daemons with their session lists", () => {
   const markup = renderToStaticMarkup(
     <HomeScreen
       daemons={[onlineDaemon, offlineDaemon]}
-      pendingApprovalsCount={1}
-      topPendingPreview={{
-        daemonHostname: "mbp.local",
-        sessionName: "s1",
-        tool: "Bash",
-        commandSummary: "rm -rf node_modules",
-      }}
       onSelectSession={() => {}}
       onStartSession={() => {}}
       onKillSession={() => {}}
-      onOpenPermission={() => {}}
     />,
   );
-  expect(markup).toContain("1 approval waiting");
-  expect(markup).toContain("rm -rf node_modules");
   expect(markup).toContain("mbp.local");
   expect(markup).toContain("vm-eu");
   expect(markup).toContain("Waiting");
@@ -68,29 +58,44 @@ test("HomeScreen renders mini card, online daemon, and offline daemon", () => {
   expect(markup).toContain('data-testid="sessions-d1"');
 });
 
-test("HomeScreen omits mini card when no approvals are pending", () => {
+test("HomeScreen no longer renders permission-mini regardless of pending state", () => {
   const markup = renderToStaticMarkup(
     <HomeScreen
       daemons={[onlineDaemon]}
-      pendingApprovalsCount={0}
       onSelectSession={() => {}}
       onStartSession={() => {}}
       onKillSession={() => {}}
-      onOpenPermission={() => {}}
     />,
   );
   expect(markup).not.toContain("permission-mini");
+  expect(markup).not.toContain("approval waiting");
+});
+
+test("HomeScreen waiting-state SessionRow promotes activity above cwd and uses border-l-2", () => {
+  const markup = renderToStaticMarkup(
+    <HomeScreen
+      daemons={[onlineDaemon]}
+      onSelectSession={() => {}}
+      onStartSession={() => {}}
+      onKillSession={() => {}}
+    />,
+  );
+  // border-l-2 on the row container in waiting state
+  expect(markup).toMatch(/border-l-2/);
+  // activity text appears in the markup before the model · cwd line for the waiting session
+  const idxActivity = markup.indexOf("permission needed (Bash)");
+  const idxCwd = markup.indexOf("/work/repo");
+  expect(idxActivity).toBeGreaterThan(0);
+  expect(idxCwd).toBeGreaterThan(idxActivity);
 });
 
 test("HomeScreen shows the empty-state hint when no daemons are connected", () => {
   const markup = renderToStaticMarkup(
     <HomeScreen
       daemons={[]}
-      pendingApprovalsCount={0}
       onSelectSession={() => {}}
       onStartSession={() => {}}
       onKillSession={() => {}}
-      onOpenPermission={() => {}}
     />,
   );
   expect(markup).toContain("No daemons connected yet.");
@@ -103,11 +108,9 @@ test("HomeScreen shows 'Starting session...' while pending", () => {
       daemons={[{
         daemon_id: "d", hostname: "host-1", online: true, sessions: [],
       }]}
-      pendingApprovalsCount={0}
       onSelectSession={() => {}}
       onStartSession={() => {}}
       onKillSession={() => {}}
-      onOpenPermission={() => {}}
       pendingStartSessionByDaemon={{
         d: { id: "rs-1", kind: "start_session", daemon_id: "d",
              started_at: 0, status: "pending" },
@@ -126,11 +129,9 @@ test("HomeScreen shows timeout copy when start_session timed_out", () => {
       daemons={[{
         daemon_id: "d", hostname: "host-1", online: true, sessions: [],
       }]}
-      pendingApprovalsCount={0}
       onSelectSession={() => {}}
       onStartSession={() => {}}
       onKillSession={() => {}}
-      onOpenPermission={() => {}}
       pendingStartSessionByDaemon={{
         d: { id: "rs-1", kind: "start_session", daemon_id: "d",
              started_at: 0, status: "timed_out" },
@@ -154,11 +155,9 @@ test("HomeScreen shows 'Killing session...' while a kill is pending", () => {
         daemon_id: "d", hostname: "host-1", online: true,
         sessions: [sessionVm],
       }]}
-      pendingApprovalsCount={0}
       onSelectSession={() => {}}
       onStartSession={() => {}}
       onKillSession={() => {}}
-      onOpenPermission={() => {}}
       pendingStartSessionByDaemon={{}}
       pendingKillByKey={{
         "d::s1": { id: "kill-d-s1", kind: "kill_session",
@@ -175,11 +174,9 @@ test("HomeScreen renders inline start-session error for the affected daemon", ()
   const markup = renderToStaticMarkup(
     <HomeScreen
       daemons={[onlineDaemon]}
-      pendingApprovalsCount={0}
       onSelectSession={() => {}}
       onStartSession={() => {}}
       onKillSession={() => {}}
-      onOpenPermission={() => {}}
       startSessionErrors={{
         d1: {
           type: "start_session_rejected",
@@ -211,11 +208,9 @@ test("HomeScreen shows 'Kill not confirmed. Try again.' on kill timeout", () => 
         daemon_id: "d", hostname: "host-1", online: true,
         sessions: [sessionVm],
       }]}
-      pendingApprovalsCount={0}
       onSelectSession={() => {}}
       onStartSession={() => {}}
       onKillSession={() => {}}
-      onOpenPermission={() => {}}
       pendingStartSessionByDaemon={{}}
       pendingKillByKey={{
         "d::s1": { id: "kill-d-s1", kind: "kill_session",
