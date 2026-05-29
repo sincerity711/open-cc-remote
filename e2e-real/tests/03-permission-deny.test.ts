@@ -92,31 +92,37 @@ test("permission deny: PWA denies → surface closes, session remains healthy", 
       await session.page.getByTestId("session-view").waitFor({ timeout: 5_000 });
     });
 
-    await sc.step("permission-mini-card", async () => {
-      const mini = session.page.getByTestId("permission-mini");
+    await sc.step("inline-permission-card", async () => {
+      const card = session.page.getByTestId("inline-permission-card");
       try {
-        await mini.waitFor({ timeout: 60_000 });
+        await card.waitFor({ timeout: 60_000 });
       } catch {
+        // tmux'd Claude can boot slowly on cold caches; nudging the page often
+        // unsticks a stalled SSE connection. Re-navigate to home and back into
+        // the session, then re-wait.
         await session.page.goto("/");
-        await mini.waitFor({ timeout: 30_000 });
+        await session.page.getByTestId(`machine-card-${daemon_id}`).waitFor({ timeout: 30_000 });
+        const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
+        await sessionsList.locator(".bg-surface").first().click();
+        await card.waitFor({ timeout: 30_000 });
       }
     });
 
-    await sc.step("permission-surface-open", async () => {
-      await session.page.getByRole("button", { name: "Review" }).first().click();
-      await session.page.getByTestId("permission-surface").waitFor({ timeout: 5_000 });
-    });
-
     await sc.step("permission-denied", async () => {
-      await session.page.getByRole("button", { name: /^Deny$/ }).click();
-      await expect(session.page.getByTestId("permission-surface")).toHaveCount(0, { timeout: 10_000 });
+      await session.page
+        .getByTestId("inline-permission-card")
+        .getByRole("button", { name: /^Deny$/ })
+        .click();
+      // Card unmounts after Deny is acked.
+      await expect(session.page.getByTestId("inline-permission-card")).toHaveCount(0, {
+        timeout: 10_000,
+      });
     });
 
-    await sc.step("tool-failure-rendered", async () => {
-      // Surface gone, mini gone (no more pending), and the timeline still
-      // renders — i.e. the session remains healthy after the deny path.
-      await expect(session.page.getByTestId("permission-surface")).toHaveCount(0);
-      await expect(session.page.getByTestId("permission-mini")).toHaveCount(0, { timeout: 10_000 });
+    await sc.step("session-still-healthy", async () => {
+      // After Deny: card gone, no other PermissionSurface modal exists, and the
+      // session timeline still renders.
+      await expect(session.page.getByTestId("inline-permission-card")).toHaveCount(0);
       await session.page.getByTestId("timeline").waitFor({ timeout: 30_000 });
     });
   } finally {
