@@ -17,7 +17,6 @@ import {
   type RawEvent,
   type TextMessageChunkEvent,
 } from "@cc-remote/proto";
-import { Button } from "../../components/ui/button";
 import { CatalogCard, type CatalogCardTone } from "./cards/CatalogCard";
 import { CatalogHeader } from "./cards/CatalogHeader";
 import { AssistantBubbleLive } from "./cards/AssistantBubble";
@@ -207,7 +206,7 @@ function ToolCard({
 
   const status: ToolStatus | "active" = result ? toolStatusFromResult(result) : "active";
   const cardTone: CatalogCardTone =
-    status === "failure" ? "danger" : "default";
+    status === "failure" ? "danger" : status === "active" ? "active" : "default";
 
   const out = result?.content ?? "";
   const lines = out ? out.split("\n") : [];
@@ -222,41 +221,53 @@ function ToolCard({
         tone={status === "failure" ? "danger" : status === "success" ? "success" : undefined}
         status={
           <span
-            className={`shrink-0 rounded-md border px-2 py-0.5 text-xs font-medium ${
+            className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium cc-transition-state ${
               status === "success"
                 ? "bg-success-subtle text-success border-success/30"
                 : status === "failure"
                   ? "bg-danger-subtle text-danger border-danger/30"
-                  : "bg-muted text-muted-foreground"
+                  : "bg-primary-subtle text-primary border-primary/30"
             }`}
           >
-            {status === "success" ? "Success" : status === "failure" ? "Failed" : "Active"}
+            {status === "active" ? (
+              <>
+                <span className="cc-pulse-working size-1.5 rounded-full bg-current" />
+                Running
+              </>
+            ) : status === "success" ? (
+              "Success"
+            ) : (
+              "Failed"
+            )}
           </span>
         }
       />
       {args && (
-        <pre className="bg-muted mt-2 max-h-32 overflow-auto rounded-md p-2 font-mono text-xs leading-5 whitespace-pre-wrap break-all">
+        <pre className="bg-muted text-muted-foreground border-border/60 mt-2 max-h-32 overflow-auto rounded-md border-l-2 border-l-border/80 p-2.5 font-mono text-[13px] leading-[1.55] whitespace-pre-wrap break-all">
           <code>{args}</code>
         </pre>
       )}
       {result && isShort && (
-        <p className="text-muted-foreground mt-2 font-mono text-xs whitespace-pre-wrap">{out}</p>
+        <p className="text-muted-foreground mt-2 font-mono text-[13px] leading-[1.55] whitespace-pre-wrap">
+          {out}
+        </p>
       )}
       {result && showExpand && (
         <>
-          <Button
-            className="mt-2 w-full justify-between"
-            size="sm"
-            variant="ghost"
+          <button
+            type="button"
+            className="text-muted-foreground hover:text-foreground hover:bg-muted mt-2 -mx-1 inline-flex h-8 w-full items-center justify-between rounded-md px-3 text-xs font-medium cc-transition-state"
             onClick={() => setExpanded((v) => !v)}
           >
-            <span>{expanded ? "Hide output" : `View output (${lines.length} lines)`}</span>
+            <span>
+              {expanded ? "Hide output" : `View output (${lines.length} lines)`}
+            </span>
             <ChevronRight
               className={`size-4 transition-transform ${expanded ? "rotate-90" : ""}`}
             />
-          </Button>
+          </button>
           {expanded && (
-            <pre className="bg-muted mt-2 max-h-60 overflow-auto rounded-md p-2 font-mono text-xs leading-5 whitespace-pre-wrap">
+            <pre className="bg-muted text-muted-foreground border-l-2 border-l-border/80 mt-2 max-h-60 overflow-auto rounded-md p-2.5 font-mono text-[13px] leading-[1.55] whitespace-pre-wrap">
               {out}
             </pre>
           )}

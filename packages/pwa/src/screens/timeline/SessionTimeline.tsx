@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../../components/ui/button";
-import { renderTimelineItem } from "./renderTimelineItem";
+import { groupTimelineItems } from "./groupTimelineItems";
+import { renderTimelineGroup } from "./renderTimelineGroup";
 import type { RenderItem } from "./types";
 
 export interface SessionTimelineProps {
@@ -33,6 +34,11 @@ export function SessionTimeline({
 }: SessionTimelineProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+
+  // Collapse runs of tool events into a single ToolGroup so the chat
+  // surface reads as a conversation rather than a wall of cards. Single
+  // tools still get the same collapsed-by-default treatment.
+  const groups = groupTimelineItems(items);
 
   useEffect(() => {
     if (!autoScroll || !scrollRef.current) return;
@@ -67,10 +73,12 @@ export function SessionTimeline({
       data-testid="timeline"
       className="bg-background relative flex-1 overflow-y-auto"
     >
-      <div className="relative px-4 py-4 pl-12">
-        <div className="bg-border absolute top-2 bottom-2 left-7 w-px" />
+      {/* No vertical rail — chat-first surfaces use inline avatars instead.
+         The flex column here just owns row gaps so each group / message
+         breathes consistently. */}
+      <div className="flex flex-col gap-4 px-4 py-4">
         {hasMoreEarlier && items.length > 0 && (
-          <div className="mb-3 flex justify-center">
+          <div className="flex justify-center">
             <Button
               onClick={onLoadEarlier}
               size="sm"
@@ -83,14 +91,14 @@ export function SessionTimeline({
         )}
         {historyTimedOut && (
           <div
-            className="text-danger mb-3 text-center text-xs"
+            className="text-danger text-center text-xs"
             role="alert"
             data-testid="history-timeout"
           >
             History load not confirmed.
           </div>
         )}
-        {items.map((it) => renderTimelineItem(it))}
+        {groups.map((g) => renderTimelineGroup(g))}
         {items.length === 0 && (
           <p className="text-muted-foreground py-12 text-center text-sm">
             {historyLoading ? "Loading history…" : "Send a message to start."}
