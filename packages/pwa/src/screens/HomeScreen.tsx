@@ -208,7 +208,12 @@ function DaemonCard({
           <li className="text-muted-foreground text-sm">No active sessions.</li>
         ) : (
           daemon.sessions.map((s) => (
-            <li key={s.session_id} className="min-w-0">
+            <li
+              key={s.session_id}
+              className="min-w-0"
+              data-testid="session-row"
+              data-session-id={s.session_id}
+            >
               <SessionRow
                 session={s}
                 selected={selectedSessionId === s.session_id}
