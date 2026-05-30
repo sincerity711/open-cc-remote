@@ -101,7 +101,7 @@ export function SessionTimeline({
         {groups.map((g) => renderTimelineGroup(g))}
         {items.length === 0 && (
           <p className="text-muted-foreground py-12 text-center text-sm">
-            {historyLoading ? "Loading history…" : "Send a message to start."}
+            {historyLoading ? "Loading history…" : "No events yet — send a message to start."}
           </p>
         )}
       </div>

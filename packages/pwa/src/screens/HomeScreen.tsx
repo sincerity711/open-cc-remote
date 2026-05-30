@@ -5,6 +5,7 @@ import { cn } from "../lib/utils";
 import type { DaemonViewModel, SessionRowViewModel } from "../lib/daemonViewModel";
 import { StatusChip } from "./primitives/StatusChip";
 import { StatusIcon } from "./primitives/StatusIcon";
+import { Spinner } from "./primitives/TypingIndicator";
 import type { PwaStartSessionRejected, PwaFsListResult } from "@cc-remote/proto";
 import type { PendingCommand } from "../hooks/pendingCommands";
 import { PathAutocomplete } from "./primitives/PathAutocomplete";
@@ -179,7 +180,9 @@ function DaemonCard({
         )}
         <Button aria-label="Start session" disabled={!cwd.trim() || starting} size="icon" type="submit">
           {starting ? (
-            <span className="animate-spin" data-testid="start-spinner">…</span>
+            <span data-testid="start-spinner" className="inline-flex">
+              <Spinner />
+            </span>
           ) : (
             <Plus className="size-4" />
           )}
@@ -318,12 +321,17 @@ function SessionRow({
     <div
       className={cn(
         // Nested row inside the daemon card — no shadow, lighter bg so the
-        // outer L1 card stays the elevation anchor. Borders alone carry
-        // state (waiting / selected).
+        // outer L1 card stays the elevation anchor. Borders + bg-tint carry
+        // FSM state so the user can scan the home screen and see at a glance
+        // which session Claude is currently active on.
         "bg-muted/40 min-w-0 rounded-md border p-3 cc-transition-state",
-        session.state === "waiting"
-          ? "border-warning/45 border-l-2 border-l-warning bg-warning-subtle/40"
-          : "border-border",
+        session.state === "waiting" &&
+          "border-warning/45 border-l-2 border-l-warning bg-warning-subtle/40",
+        session.state === "working" && "border-primary/25 bg-primary-subtle/30",
+        session.state === "idle" && "border-border",
+        session.state === "offline" && "border-border bg-muted/30 opacity-70",
+        // Selection ring goes on top of state chrome — selected always
+        // outranks state for the eye-attention.
         selected && "ring-primary/40 bg-primary-subtle/40 ring-2",
       )}
     >
@@ -360,10 +368,10 @@ function SessionRow({
       </button>
       {killing ? (
         <div
-          className="bg-warning-subtle text-warning mt-2 flex items-center gap-2 rounded-md p-2 text-sm"
+          className="bg-warning-subtle text-warning mt-2 flex items-center gap-2 rounded-md p-2 text-sm cc-enter"
           data-testid={`kill-pending-${session.session_id}`}
         >
-          <span className="animate-pulse">●</span>
+          <Spinner className="text-warning" />
           <span>Killing session…</span>
         </div>
       ) : killTimedOut ? (
@@ -375,7 +383,7 @@ function SessionRow({
           Kill not confirmed. Try again.
         </div>
       ) : confirming ? (
-        <div className="bg-danger-subtle mt-2 flex items-center justify-between gap-2 rounded-md p-2 text-sm">
+        <div className="bg-danger-subtle mt-2 flex items-center justify-between gap-2 rounded-md p-2 text-sm cc-enter">
           <span className="text-danger font-semibold">Kill session?</span>
           <span className="flex gap-2">
             <Button onClick={() => setKillConfirm(null)} size="sm" variant="secondary">

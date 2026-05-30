@@ -178,6 +178,7 @@ export function RealApp() {
                 model: selectedSession?.model ?? null,
                 cwd: selectedSession?.cwd ?? "",
                 online: sessionTimeline.online,
+                state: selectedSession?.state,
               }}
               items={sessionTimeline.items}
               composerBlocked={sessionTimeline.composerBlocked}

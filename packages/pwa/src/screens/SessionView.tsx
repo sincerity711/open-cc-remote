@@ -1,8 +1,10 @@
 import { useRef, useState } from "react";
 import { ArrowLeft, Send, X } from "lucide-react";
-import type { PwaPermissionRequest, SlashEntry, PwaFsListResult } from "@cc-remote/proto";
+import type { PwaPermissionRequest, SlashEntry, PwaFsListResult, SessionState as WireSessionState } from "@cc-remote/proto";
 import { Button } from "../components/ui/button";
 import { StatusChip } from "./primitives/StatusChip";
+import { ClaudeAvatar } from "./primitives/ClaudeAvatar";
+import { TypingIndicator } from "./primitives/TypingIndicator";
 import { SessionTimeline } from "./timeline/SessionTimeline";
 import type { RenderItem } from "./timeline/types";
 import type { PendingCommand } from "../hooks/pendingCommands";
@@ -18,7 +20,14 @@ type FsListSender = (
 ) => () => void;
 
 export interface SessionViewProps {
-  header: { name: string; model: string | null; cwd: string; online: boolean };
+  header: {
+    name: string;
+    model: string | null;
+    cwd: string;
+    online: boolean;
+    /** Daemon FSM state (working|waiting|idle). Absent = legacy / not yet known. */
+    state?: WireSessionState;
+  };
   items: RenderItem[];
   composerBlocked: boolean;
   pendingPermissionInThisSession?: PwaPermissionRequest;
@@ -142,10 +151,17 @@ export function SessionView({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <StatusChip
-            label={header.online ? "Online" : "Offline"}
-            tone={header.online ? "online" : "offline"}
-          />
+          {!header.online ? (
+            <StatusChip label="Offline" tone="offline" />
+          ) : header.state === "working" ? (
+            <StatusChip label="Working" tone="working" />
+          ) : header.state === "waiting" ? (
+            <StatusChip label="Waiting" tone="waiting" />
+          ) : header.state === "idle" ? (
+            <StatusChip label="Idle" tone="idle" />
+          ) : (
+            <StatusChip label="Online" tone="online" />
+          )}
           <Button aria-label="Close" onClick={onBack} size="icon" variant="ghost">
             <X className="size-4" />
           </Button>
@@ -173,6 +189,18 @@ export function SessionView({
           unreadCount={unreadCount}
           onMarkSeen={onMarkSeen}
         />
+        {header.state === "working" && (
+          <div
+            className="flex items-center gap-2.5 px-3 pb-2 cc-enter"
+            data-testid="thinking-row"
+          >
+            <ClaudeAvatar size="sm" />
+            <span className="text-muted-foreground text-[13px] italic">
+              Claude is thinking
+            </span>
+            <TypingIndicator className="text-muted-foreground" />
+          </div>
+        )}
       </div>
 
       <div className="border-border bg-surface border-t p-3 pb-[calc(12px+env(safe-area-inset-bottom))]">
@@ -229,6 +257,12 @@ export function SessionView({
               setDraft(head);
               setCursor(head.length);
             }}
+            onDismiss={() => {
+              // Wipe the leading "/" so the menu actually closes — otherwise
+              // it re-derives `filtered` from `draft` and reappears.
+              setDraft("");
+              setCursor(0);
+            }}
           />
           {mentionEligible && daemonId && fsListSender && (
             <MentionAutocomplete
@@ -264,9 +298,11 @@ export function SessionView({
             placeholder={
               composerBlocked
                 ? "Waiting for permission"
-                : header.online
-                  ? "Message Claude…"
-                  : "session offline"
+                : !header.online
+                  ? "session offline"
+                  : sending
+                    ? "Sending…"
+                    : "Message Claude…"
             }
             value={draft}
           />
@@ -277,7 +313,9 @@ export function SessionView({
             aria-label="Send"
           >
             {sending ? (
-              <span className="animate-spin" data-testid="send-spinner">…</span>
+              <span data-testid="send-spinner" className="inline-flex">
+                <TypingIndicator />
+              </span>
             ) : (
               <Send className="size-4" />
             )}

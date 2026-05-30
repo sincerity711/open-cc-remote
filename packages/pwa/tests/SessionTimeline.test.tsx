@@ -13,7 +13,7 @@ test("SessionTimeline shows 'Loading history...' on empty + history pending", ()
     />,
   );
   expect(markup).toContain("Loading history");
-  expect(markup).not.toContain("Send a message to start");
+  expect(markup).not.toContain("send a message to start");
 });
 
 test("SessionTimeline shows 'Loading earlier events...' button label while loading", () => {
@@ -46,7 +46,7 @@ test("SessionTimeline shows timeout copy when historyTimedOut", () => {
   expect(markup).toContain("History load not confirmed");
 });
 
-test("SessionTimeline shows 'Send a message to start.' when not loading", () => {
+test("SessionTimeline shows the 'send a message to start' empty state when not loading", () => {
   const markup = renderToStaticMarkup(
     <SessionTimeline
       items={[]}
@@ -55,5 +55,5 @@ test("SessionTimeline shows 'Send a message to start.' when not loading", () => 
       onLoadEarlier={() => {}}
     />,
   );
-  expect(markup).toContain("Send a message to start");
+  expect(markup).toContain("send a message to start");
 });
