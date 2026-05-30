@@ -248,7 +248,7 @@ function OfflineDaemonCard({ daemon }: { daemon: DaemonViewModel }) {
             <li key={s.session_id} className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <p className="truncate font-semibold">{s.name}</p>
-                <p className="text-muted-foreground truncate font-mono text-xs">{s.cwd}</p>
+                <p className="text-tertiary-foreground truncate font-mono text-[13px]">{s.cwd}</p>
               </div>
               <StatusChip label="Offline" tone="offline" />
             </li>
@@ -282,11 +282,14 @@ function SessionRow({
   return (
     <div
       className={cn(
-        "bg-surface shadow-card min-w-0 rounded-md border p-3",
+        // Nested row inside the daemon card — no shadow, lighter bg so the
+        // outer L1 card stays the elevation anchor. Borders alone carry
+        // state (waiting / selected).
+        "bg-muted/40 min-w-0 rounded-md border p-3 cc-transition-state",
         session.state === "waiting"
-          ? "border-warning/45 border-l-2 border-l-warning"
+          ? "border-warning/45 border-l-2 border-l-warning bg-warning-subtle/40"
           : "border-border",
-        selected && "ring-primary/40 ring-2",
+        selected && "ring-primary/40 bg-primary-subtle/40 ring-2",
       )}
     >
       <button
@@ -304,13 +307,13 @@ function SessionRow({
               <span className="text-warning mt-1 block truncate text-xs font-semibold">
                 {session.activity}
               </span>
-              <span className="text-muted-foreground mt-1 block truncate font-mono text-xs">
+              <span className="text-tertiary-foreground mt-1 block truncate font-mono text-[13px]">
                 {session.model} · {session.cwd}
               </span>
             </>
           ) : (
             <>
-              <span className="text-muted-foreground mt-1 block truncate font-mono text-xs">
+              <span className="text-tertiary-foreground mt-1 block truncate font-mono text-[13px]">
                 {session.model} · {session.cwd}
               </span>
               <span className="text-muted-foreground mt-1 block text-xs">

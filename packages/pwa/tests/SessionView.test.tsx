@@ -84,7 +84,10 @@ test("SessionView renders InlinePermissionCard inside the timeline when this ses
   );
 
   expect(markup).toContain('data-testid="inline-permission-card"');
-  expect(markup).toContain("rm -rf /");
+  // The command body is tokenized for risk-highlighting (each word becomes a
+  // span), so we strip tags and check visible text instead of raw markup.
+  const visible = markup.replace(/<[^>]+>/g, "").replace(/\s+/g, " ");
+  expect(visible).toContain("rm -rf /");
   expect(markup).toContain("Bash");
   // composer placeholder still says "Waiting for permission" while blocked
   expect(markup).toContain("Waiting for permission");
@@ -121,7 +124,11 @@ test("SessionView reflects pendingPermissionReply spinner state on the inline ca
     />,
   );
 
-  expect(markup).toContain("Sending decision");
+  // While the reply is pending, both action buttons are disabled and the
+  // clicked button shows a spinner+label *inside* the button (not as a
+  // separate "Sending decision…" row anymore — that double-feedback was
+  // dropped during the inline-card polish pass).
+  expect(markup).toMatch(/<button[^>]*disabled[^>]*>/);
   expect(markup).toMatch(/<button[^>]*disabled[^>]*>\s*Allow once/);
 });
 

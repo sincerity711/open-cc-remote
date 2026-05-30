@@ -97,7 +97,7 @@ export function SessionView({
           </Button>
           <div className="min-w-0">
             <h2 className="truncate text-base font-semibold">{header.name}</h2>
-            <p className="text-muted-foreground truncate font-mono text-xs">
+            <p className="text-tertiary-foreground truncate font-mono text-[13px]">
               {header.cwd}
               {header.model ? ` · ${header.model}` : ""}
             </p>

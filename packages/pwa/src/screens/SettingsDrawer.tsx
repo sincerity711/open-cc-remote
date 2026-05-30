@@ -178,7 +178,7 @@ function DaemonRow({
   const [draft, setDraft] = useState(daemon.display_name ?? "");
 
   return (
-    <div className="rounded-card border-border bg-surface mb-2 border p-3">
+    <div className="rounded-card border-border bg-surface shadow-card mb-2 border p-3">
       {editing ? (
         <div className="flex gap-2">
           <input
@@ -201,7 +201,7 @@ function DaemonRow({
               <StatusDot connected={daemon.connected} />
               {daemon.display_name ?? "(unnamed)"}
             </p>
-            <p className="text-muted-foreground truncate font-mono text-xs">
+            <p className="text-tertiary-foreground truncate font-mono text-[13px]">
               {daemon.daemon_id}
               {daemon.hostname ? ` @ ${daemon.hostname}` : ""}
             </p>
@@ -315,7 +315,7 @@ function ToggleRow({
 }) {
   return (
     <button
-      className="rounded-card border-border bg-surface mb-2 flex w-full items-center justify-between border p-3 text-left"
+      className="rounded-card border-border bg-surface shadow-card mb-2 flex w-full items-center justify-between border p-3 text-left"
       onClick={onToggle}
       type="button"
     >
@@ -349,7 +349,7 @@ function DndBlock({ dnd, onSave }: { dnd: DndSettings; onSave: (d: DndSettings) 
   const tz = draft.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   return (
-    <div className="rounded-card border-border bg-surface mb-3 border p-3">
+    <div className="rounded-card border-border bg-surface shadow-card mb-3 border p-3">
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium">Do not disturb</span>
         <button
@@ -467,7 +467,7 @@ function DaemonOverrideRow({
   const hasOverrides = state.subscriptions.some((s) => s.daemon_id === daemon.daemon_id);
 
   return (
-    <div className="rounded-card border-border bg-surface mb-2 border p-3">
+    <div className="rounded-card border-border bg-surface shadow-card mb-2 border p-3">
       <div className="flex items-center justify-between">
         <span className="truncate text-sm font-medium">{daemon.display_name ?? daemon.daemon_id}</span>
         <Button size="sm" variant="secondary" onClick={() => setExpanded((v) => !v)}>
