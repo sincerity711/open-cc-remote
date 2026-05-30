@@ -20,9 +20,48 @@ export function filterEntries(entries: SlashEntry[], draft: string): SlashEntry[
   // is for picking a command name only.
   if (draft.length > head.length + 1) return [];
   const q = head.toLowerCase();
-  return entries
-    .filter((e) => e.name.slice(1).toLowerCase().startsWith(q))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  if (q === "") {
+    return [...entries].sort((a, b) => a.name.localeCompare(b.name));
+  }
+  // Fuzzy ranking: a query matches if its lowercased chars appear in
+  // order inside the lowercased command name (subsequence match) OR if
+  // it's a substring. Score:
+  //   3 = prefix match  (`/co`  → /commit, /code-review)
+  //   2 = word-start anywhere (`/rev`  → /code-review, hits `r` after `-`)
+  //   1 = any subsequence/substring (`/scrl` → /security-rule)
+  // Higher score wins; tie-broken by command-name length, then alpha.
+  type Scored = { e: SlashEntry; score: number };
+  const scored: Scored[] = [];
+  for (const e of entries) {
+    const name = e.name.slice(1).toLowerCase();
+    let score = 0;
+    if (name.startsWith(q)) {
+      score = 3;
+    } else {
+      // word-start: q matches at index 0 of any segment split by - or _
+      const segs = name.split(/[-_]/);
+      if (segs.some((s) => s.startsWith(q))) score = 2;
+      else if (name.includes(q)) score = 1;
+      else if (isSubsequence(q, name)) score = 1;
+    }
+    if (score > 0) scored.push({ e, score });
+  }
+  return scored
+    .sort((a, b) => {
+      if (a.score !== b.score) return b.score - a.score;
+      if (a.e.name.length !== b.e.name.length) return a.e.name.length - b.e.name.length;
+      return a.e.name.localeCompare(b.e.name);
+    })
+    .map((s) => s.e);
+}
+
+/** True when every char of `q` appears in `name` in order (gaps allowed). */
+function isSubsequence(q: string, name: string): boolean {
+  let i = 0;
+  for (let j = 0; j < name.length && i < q.length; j++) {
+    if (name[j] === q[i]) i++;
+  }
+  return i === q.length;
 }
 
 export function nextActiveIndex(active: number, len: number, dir: 1 | -1): number {

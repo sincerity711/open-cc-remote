@@ -189,9 +189,11 @@ export function MentionAutocomplete(props: MentionAutocompleteProps): JSX.Elemen
   }, [token, filtered, active, draft, onChange, suppressed]);
 
   if (!token || suppressed) return null;
-  // mode="all" — but hide when there's nothing to show *and* we're not
-  // still loading. Showing an empty popover hampers slash + free-typing.
-  if (filtered.length === 0 && status !== "loading") return null;
+  // Used to bail when there were no matches *and* we weren't loading. That
+  // collapsed the popover the moment a user accepted an empty directory,
+  // which was confusing — the popover would just disappear with no feedback
+  // even though the daemon confirmed the listing was empty. Now we keep the
+  // popover open and render an empty-state row; the user can ↑/Esc out.
 
   const accept = (e: FsListEntry) => {
     const newToken = nextTokenText(token.text, e);
@@ -222,6 +224,14 @@ export function MentionAutocomplete(props: MentionAutocompleteProps): JSX.Elemen
         </span>
       </div>
       <ul className="py-1">
+        {filtered.length === 0 && status !== "loading" && (
+          <li
+            data-testid="mention-empty"
+            className="text-tertiary-foreground px-3 py-2 text-[12px] italic"
+          >
+            {status === "error" ? "directory listing failed" : "empty directory"}
+          </li>
+        )}
         {filtered.map((e, i) => {
           const isActive = i === active;
           return (
