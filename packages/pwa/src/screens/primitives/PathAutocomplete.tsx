@@ -31,7 +31,10 @@ export interface PathAutocompleteProps {
 
 /**
  * Split `value` into a parent directory (with trailing slash) and a
- * basename prefix. Empty value yields `parent="/"`, `prefix=""`.
+ * basename prefix. Empty value yields `parent="/"`, `prefix=""` — but
+ * callers that want the popover to seed at a different default
+ * directory (e.g. `~/`) pass the directory in via `baseHint` and the
+ * caller of splitPath() should fall through to it.
  *
  * Pure helper — exposed for tests.
  */
@@ -47,6 +50,10 @@ export function splitPath(value: string): { parent: string; prefix: string } {
  *  - case-insensitive prefix match against `prefix`
  *  - dirs first, then by name
  *  - in mode="dirs", files are excluded
+ *  - dotfiles are hidden unless the user is explicitly typing one
+ *    (`prefix` starts with "."); $HOME on macOS holds dozens of
+ *    `.cache` / `.config` / `.claude`-style folders that would
+ *    otherwise drown out the actual project dirs.
  */
 export function filterFsEntries(
   entries: FsListEntry[],
@@ -54,8 +61,10 @@ export function filterFsEntries(
   mode: PathAutocompleteMode,
 ): FsListEntry[] {
   const q = prefix.toLowerCase();
+  const showDotfiles = prefix.startsWith(".");
   const filtered = entries.filter((e) => {
     if (mode === "dirs" && !e.is_dir) return false;
+    if (!showDotfiles && e.name.startsWith(".")) return false;
     return e.name.toLowerCase().startsWith(q);
   });
   filtered.sort((a, b) => {
@@ -86,7 +95,7 @@ export function PathAutocomplete({
   onChange,
   daemonId,
   mode,
-  baseHint: _baseHint,
+  baseHint,
   inputProps,
   sender,
 }: PathAutocompleteProps): JSX.Element {
@@ -96,7 +105,17 @@ export function PathAutocomplete({
   // would otherwise reopen it on the next render. Cleared on next keystroke.
   const [suppress, setSuppress] = useState(false);
 
-  const { parent, prefix } = useMemo(() => splitPath(value), [value]);
+  // Split value normally; when value is empty, fall through to baseHint
+  // so the popover seeds with that directory's contents instead of `/`
+  // (which is typically outside the daemon's whitelist).
+  const { parent, prefix } = useMemo(() => {
+    if (value) return splitPath(value);
+    if (baseHint) {
+      const hint = baseHint.endsWith("/") ? baseHint : baseHint + "/";
+      return { parent: hint, prefix: "" };
+    }
+    return { parent: "/", prefix: "" };
+  }, [value, baseHint]);
   const fsParent = normalizeParent(parent);
 
   const { entries: rawEntries, status } = useFsList(daemonId, fsParent, sender);

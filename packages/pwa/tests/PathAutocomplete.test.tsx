@@ -70,6 +70,28 @@ test("filterFsEntries: mode='dirs' filters out files", () => {
   expect(out.every((e) => e.is_dir)).toBe(true);
 });
 
+test("filterFsEntries: dotfiles hidden by default", () => {
+  const withDots: FsListEntry[] = [
+    ...ENTRIES,
+    { name: ".cache", is_dir: true },
+    { name: ".config", is_dir: true },
+    { name: ".gitignore", is_dir: false },
+  ];
+  const out = filterFsEntries(withDots, "", "all");
+  expect(out.map((e) => e.name)).not.toContain(".cache");
+  expect(out.map((e) => e.name)).not.toContain(".gitignore");
+});
+
+test("filterFsEntries: dotfiles appear when prefix starts with '.'", () => {
+  const withDots: FsListEntry[] = [
+    ...ENTRIES,
+    { name: ".cache", is_dir: true },
+    { name: ".config", is_dir: true },
+  ];
+  const out = filterFsEntries(withDots, ".c", "dirs");
+  expect(out.map((e) => e.name)).toEqual([".cache", ".config"]);
+});
+
 test("filterFsEntries: prefix Sap matches SAPDevelop (case-insensitive)", () => {
   const out = filterFsEntries(
     [{ name: "SAPDevelop", is_dir: true }, { name: "Library", is_dir: true }],

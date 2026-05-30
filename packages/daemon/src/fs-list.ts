@@ -70,7 +70,11 @@ function expandTilde(input: string): string {
 }
 
 function isUnderRoot(resolved: string, root: string): boolean {
-  return resolved === root || resolved.startsWith(root + path.sep);
+  if (resolved === root) return true;
+  // When root is "/" we mustn't append another sep — startsWith("//") would
+  // never match a real absolute path. Every absolute path is under "/".
+  if (root === path.sep) return resolved.startsWith(path.sep);
+  return resolved.startsWith(root + path.sep);
 }
 
 function classifyReaddirError(err: unknown): FsListErrorCode {

@@ -130,6 +130,7 @@ EOF
 
 _step "starting daemon..."
 CC_REMOTE_STATE_DIR="$DEMO_STATE_DIR" \
+  CC_REMOTE_FS_ROOTS="/" \
   bun run packages/daemon/src/index.ts \
   > "$DAEMON_LOG" 2>&1 &
 echo $! > "${DEMO_STATE_DIR}/daemon.pid"
@@ -159,6 +160,7 @@ _step "restarting daemon (paired identity)..."
 pkill -F "${DEMO_STATE_DIR}/daemon.pid" 2>/dev/null || true
 sleep 1
 CC_REMOTE_STATE_DIR="$DEMO_STATE_DIR" \
+  CC_REMOTE_FS_ROOTS="/" \
   bun run packages/daemon/src/index.ts \
   > "$DAEMON_LOG" 2>&1 &
 echo $! > "${DEMO_STATE_DIR}/daemon.pid"

@@ -120,3 +120,20 @@ test("CC_REMOTE_FS_ROOTS adds a root and lets paths under it through", async () 
   expect(after.ok).toBe(true);
   expect(after.path).toBe(realpathSync(child));
 });
+
+test("root '/' lets every absolute path through (no double-slash bug)", async () => {
+  // Earlier `isUnderRoot` did `resolved.startsWith(root + path.sep)`, which
+  // for root === "/" became startsWith("//") and matched nothing. Lock that
+  // in by listing tmpRoot (which is absolute and under "/" by definition)
+  // with root = "/". Only meaningful on POSIX-like systems where path.sep="/"
+  // — which is every platform we run the daemon on.
+  if (path.sep !== "/") return;
+  const child = path.join(tmpRoot, "rooted");
+  mkdirSync(child);
+  const r = await handleFsList(
+    { request_id: "r7", path: child },
+    { roots: ["/"] },
+  );
+  expect(r.ok).toBe(true);
+  expect(r.path).toBe(realpathSync(child));
+});

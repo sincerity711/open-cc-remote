@@ -159,7 +159,7 @@ function DaemonCard({
             onChange={setCwd}
             daemonId={daemon.daemon_id}
             mode="dirs"
-            baseHint="/"
+            baseHint="~/"
             sender={fsListSender}
             inputProps={{
               "aria-label": `Working directory for ${daemonLabel(daemon)}`,
