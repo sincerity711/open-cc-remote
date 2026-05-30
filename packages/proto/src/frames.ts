@@ -142,7 +142,8 @@ export type DaemonToHub =
   | DaemonAskUserQuestionRequest
   | DaemonAskUserQuestionResolved
   | DaemonSlashInventory
-  | DaemonSessionRebound;
+  | DaemonSessionRebound
+  | DaemonFsListResult;
 
 export type HubToDaemon =
   | { type: "ping"; ts: number }
@@ -152,7 +153,8 @@ export type HubToDaemon =
   | HubToDaemonStartSession
   | HubToDaemonChatSend
   | HubAskUserQuestionAnswer
-  | HubToDaemonCliCommand;
+  | HubToDaemonCliCommand
+  | HubToDaemonFsList;
 
 // ─── hub ↔ PWA (WSS) ──────────────────────────────────────────────────
 
@@ -184,7 +186,8 @@ export type HubToPwa =
   | PwaAskUserQuestionRequest
   | PwaAskUserQuestionResolved
   | PwaSlashInventory
-  | PwaSessionRebound;
+  | PwaSessionRebound
+  | PwaFsListResult;
 
 export type PwaToHub =
   | { type: "subscribe" }  // Plan 1 PWA only subscribes; commands come in Plan 4
@@ -194,7 +197,8 @@ export type PwaToHub =
   | PwaToHubStartSession
   | PwaToHubChatSend
   | PwaToHubAskUserQuestionAnswer
-  | PwaToHubCliCommand;
+  | PwaToHubCliCommand
+  | PwaToHubFsList;
 
 // ─── kill_session (dangerous action) ──────────────────────────────────
 
@@ -649,4 +653,59 @@ export interface HubAskUserQuestionAnswer {
   session_id: string;
   request_id: string;
   answers: (string | null)[];
+}
+
+// ─── filesystem listing (folder/path autocomplete) ───────────────────
+//
+// PWA path-autocomplete UIs (cwd picker on the home screen, @-mention
+// popover in the chat composer) need to discover the daemon host's
+// directory tree on demand. The daemon enforces a whitelist
+// ($HOME ∪ CC_REMOTE_FS_ROOTS) so the PWA — and anyone able to send
+// frames at the hub — can never list arbitrary host paths.
+//
+// `request_id` is round-tripped end-to-end so multiple inflight
+// completions (e.g. user typing fast across two parents) can be
+// disambiguated on the PWA side.
+
+export interface PwaToHubFsList {
+  type: "fs_list";
+  daemon_id: string;
+  request_id: string;
+  /** Absolute path to list. `~/...` and trailing-slash forms allowed; daemon resolves. */
+  path: string;
+  trace?: TraceCtx;
+}
+
+export interface HubToDaemonFsList {
+  type: "fs_list";
+  request_id: string;
+  path: string;
+  trace?: TraceCtx;
+}
+
+export interface FsListEntry {
+  name: string;
+  is_dir: boolean;
+}
+
+export type FsListErrorCode = "forbidden" | "not_found" | "io";
+
+export interface DaemonFsListResult {
+  type: "fs_list_result";
+  request_id: string;
+  ok: boolean;
+  /** Resolved absolute path actually listed (post `~` / `..` normalisation). */
+  path?: string;
+  entries?: FsListEntry[];
+  error?: FsListErrorCode;
+}
+
+export interface PwaFsListResult {
+  type: "fs_list_result";
+  daemon_id: string;
+  request_id: string;
+  ok: boolean;
+  path?: string;
+  entries?: FsListEntry[];
+  error?: FsListErrorCode;
 }
