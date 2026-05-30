@@ -471,24 +471,29 @@ function startSessionWatcher(s: SessionSnapshot, claudeId: string): void {
         const existing = idleTimers.get(s.session_id);
         if (existing) { clearTimeout(existing); idleTimers.delete(s.session_id); }
       };
-      if (p.type === "user") {
+      const armIdle = () => {
         cancelIdle();
-      } else if (p.type === "assistant") {
-        if (p.message?.stop_reason === "end_turn") {
-          cancelIdle();
-          hub.send({ type: "task_completed", session_id: s.session_id, ts: Date.now() });
-          // Round-trip done — close the OTel root span before idle timer.
-          endRoundTrip(s.session_id);
-          const t = setTimeout(() => {
-            idleTimers.delete(s.session_id);
-            hub.send({ type: "idle", session_id: s.session_id, ts: Date.now() });
-            fsm.onIdleTimer(s.session_id);
-          }, cfg.idle_window_ms);
-          t.unref();
-          idleTimers.set(s.session_id, t);
-        } else {
-          cancelIdle();
-        }
+        const t = setTimeout(() => {
+          idleTimers.delete(s.session_id);
+          hub.send({ type: "idle", session_id: s.session_id, ts: Date.now() });
+          fsm.onIdleTimer(s.session_id);
+        }, cfg.idle_window_ms);
+        t.unref();
+        idleTimers.set(s.session_id, t);
+      };
+      // Idle is "no jsonl activity for `idle_window_ms`". Every line —
+      // user, assistant, system metadata, tool-result — re-arms the timer.
+      // The previous design only armed on `assistant` end_turn, so any
+      // round-trip that ended on tool_use/permission/system metadata (or
+      // a `user` tool_result with no follow-up assistant) left the FSM
+      // pinned to `working` indefinitely. Round-trip lifecycle stays
+      // separate: `end_turn` still emits task_completed + closes the OTel
+      // root span, and `permission_request` / `permission_resolved` still
+      // drive the waiting-state transitions through the FSM.
+      armIdle();
+      if (p.type === "assistant" && p.message?.stop_reason === "end_turn") {
+        hub.send({ type: "task_completed", session_id: s.session_id, ts: Date.now() });
+        endRoundTrip(s.session_id);
       }
     },
     onError: (e: Error) => process.stderr.write(`daemon: watcher error for ${s.session_id}: ${e.message}\n`),
