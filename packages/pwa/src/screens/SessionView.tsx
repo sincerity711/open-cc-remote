@@ -19,6 +19,40 @@ type FsListSender = (
   onResult: (frame: PwaFsListResult) => void,
 ) => () => void;
 
+/**
+ * The "Claude is thinking…" row sits below the timeline whenever the FSM
+ * says we're working. But once Claude has actually started replying —
+ * whether with reasoning, a tool call, or assistant text — the indicator
+ * stops adding information; the new content IS the feedback. So we only
+ * show it while there's no Claude-side activity yet AFTER the user's last
+ * message. Concretely: walk back from the most recent timeline item; if we
+ * hit anything that came from Claude before we hit a user TEXT_MESSAGE
+ * (or run out of items), suppress the indicator.
+ */
+export function shouldShowThinking(items: RenderItem[]): boolean {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i]!;
+    if (it.tag === "tool" || it.tag === "permission-resolved") return false;
+    if (it.tag === "agui") {
+      const ev = it.event as { type?: string; role?: string };
+      // Any user-side text marks the boundary — items before this don't
+      // matter for "is Claude actively responding".
+      if (ev.type === "TEXT_MESSAGE_CHUNK" && ev.role === "user") return true;
+      // Reasoning / assistant text / tool calls all imply Claude is now
+      // actively responding; the streaming content speaks for itself.
+      if (ev.type === "TEXT_MESSAGE_CHUNK" && ev.role === "assistant") return false;
+      if (ev.type === "TEXT_MESSAGE_START" || ev.type === "TEXT_MESSAGE_END") return false;
+      if (ev.type === "REASONING_MESSAGE_CHUNK") return false;
+      if (ev.type === "TOOL_CALL_CHUNK" || ev.type === "TOOL_CALL_RESULT") return false;
+      // Other event types (raw, lifecycle, …) are uninformative for the
+      // boundary; keep walking.
+    }
+  }
+  // Empty timeline (or only uninformative items) → user just opened the
+  // session or nothing has happened yet. Show the indicator if working.
+  return true;
+}
+
 export interface SessionViewProps {
   header: {
     name: string;
@@ -189,7 +223,7 @@ export function SessionView({
           unreadCount={unreadCount}
           onMarkSeen={onMarkSeen}
         />
-        {header.state === "working" && (
+        {header.state === "working" && shouldShowThinking(items) && (
           <div
             className="flex items-center gap-2.5 px-3 pb-2 cc-enter"
             data-testid="thinking-row"

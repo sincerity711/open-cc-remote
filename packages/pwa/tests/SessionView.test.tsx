@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { SessionView } from "../src/screens/SessionView";
+import { SessionView, shouldShowThinking } from "../src/screens/SessionView";
 import type { RenderItem } from "../src/screens/timeline/types";
 import { EventType } from "@cc-remote/proto";
 
@@ -294,4 +294,56 @@ test("SessionView disables composer when disconnected", () => {
     />,
   );
   expect(markup).toMatch(/data-testid="chat-input"[^>]*disabled/);
+});
+
+test("shouldShowThinking: empty timeline → show", () => {
+  expect(shouldShowThinking([])).toBe(true);
+});
+
+test("shouldShowThinking: last item is user message → show (waiting on Claude)", () => {
+  const items: RenderItem[] = [
+    {
+      tag: "agui",
+      id: "u1",
+      ts: 1,
+      event: { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "u1", role: "user", delta: "hi" } as never,
+    },
+  ];
+  expect(shouldShowThinking(items)).toBe(true);
+});
+
+test("shouldShowThinking: assistant has started replying → hide", () => {
+  const items: RenderItem[] = [
+    {
+      tag: "agui",
+      id: "u1",
+      ts: 1,
+      event: { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "u1", role: "user", delta: "hi" } as never,
+    },
+    {
+      tag: "agui",
+      id: "a1",
+      ts: 2,
+      event: { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "a1", role: "assistant", delta: "h" } as never,
+    },
+  ];
+  expect(shouldShowThinking(items)).toBe(false);
+});
+
+test("shouldShowThinking: tool call after user message → hide", () => {
+  const items: RenderItem[] = [
+    {
+      tag: "agui",
+      id: "u1",
+      ts: 1,
+      event: { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "u1", role: "user", delta: "hi" } as never,
+    },
+    {
+      tag: "tool",
+      id: "t1",
+      ts: 2,
+      chunk: { type: EventType.TOOL_CALL_CHUNK, toolCallId: "t1", toolCallName: "Bash" } as never,
+    },
+  ];
+  expect(shouldShowThinking(items)).toBe(false);
 });
