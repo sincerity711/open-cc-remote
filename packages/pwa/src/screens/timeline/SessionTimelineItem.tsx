@@ -1,28 +1,18 @@
-import {
-  AlertCircle,
-  AlertTriangle,
-  CheckCircle2,
-  Circle,
-  User,
-  Wrench,
-} from "lucide-react";
 import type React from "react";
-import { cn } from "../../lib/utils";
-import { ClaudeCodeMark } from "../primitives/ClaudeCodeMark";
 
 /**
- * Per docs/design/light-timeline.png the rail icon is a *small glyph* whose
- * sole job is to scan event type / status.
+ * Marker types are still tracked because some callers (catalog tiles in
+ * the demo, RenderItem dispatch) still classify by them. But we **no
+ * longer render a vertical rail** — chat-style timelines (Slack,
+ * Claude.ai, ChatGPT, iMessage) use inline avatars next to the message,
+ * not a vertical spine. The rail conflated "audit log" with
+ * "conversation" and made the layout half-this, half-that.
  *
- *   user       → person glyph (only shown when align="start"; chat user bubbles
- *                use align="end" and omit the glyph entirely so the bubble
- *                reads like a chat message rather than a workflow event)
- *   claude     → Claude mark
- *   tool       → wrench (generic)
- *   success    → green check
- *   warning    → amber triangle (permission needed / open caveat)
- *   error      → red alert
- *   idle       → empty circle (low-noise system events)
+ * Identity now lives in:
+ *   - assistant bubbles → inline ClaudeAvatar to the left of the bubble
+ *   - user bubbles      → right-alignment + primary tint
+ *   - tool cards        → strong icon in the card header
+ *   - status events     → tone on the card (success/danger/warning)
  */
 export type TimelineMarker =
   | "user"
@@ -35,35 +25,23 @@ export type TimelineMarker =
 
 export type TimelineAlign = "start" | "end";
 
+/**
+ * Thin spacing wrapper. The marker prop is accepted but no longer drawn —
+ * kept on the type so existing call sites compile. Spacing is owned by
+ * the parent timeline list (gap-y).
+ */
 export function SessionTimelineItem({
   align = "start",
   children,
-  marker,
 }: {
   align?: TimelineAlign;
   children: React.ReactNode;
-  marker: TimelineMarker;
+  /** Accepted but unused — see file docstring. */
+  marker?: TimelineMarker;
 }) {
   return (
-    <div className="relative mb-4">
-      {align === "start" && (
-        <span
-          className={cn(
-            "absolute -left-7 top-2 z-10 flex size-5 items-center justify-center",
-          )}
-        >
-          {marker === "user" && <User className="text-primary size-3.5" />}
-          {marker === "claude" && <ClaudeCodeMark className="rounded-full" size="sm" />}
-          {marker === "tool" && <Wrench className="text-muted-foreground size-3.5" />}
-          {marker === "success" && <CheckCircle2 className="text-success size-3.5" />}
-          {marker === "warning" && <AlertTriangle className="text-warning size-3.5" />}
-          {marker === "error" && <AlertCircle className="text-danger size-3.5" />}
-          {marker === "idle" && (
-            <Circle className="text-muted-foreground size-2.5" strokeWidth={2} />
-          )}
-        </span>
-      )}
-      <div className="min-w-0 space-y-2">{children}</div>
+    <div className={align === "end" ? "flex justify-end" : "min-w-0"}>
+      <div className="min-w-0 max-w-full">{children}</div>
     </div>
   );
 }
