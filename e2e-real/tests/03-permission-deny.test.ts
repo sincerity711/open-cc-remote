@@ -86,7 +86,7 @@ test("permission deny: PWA denies → surface closes, session remains healthy", 
 
     await sc.step("session-opened", async () => {
       const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
-      const sessionRow = sessionsList.locator(".bg-surface").first();
+      const sessionRow = sessionsList.getByTestId("session-row").first();
       await sessionRow.waitFor({ timeout: 60_000 });
       await sessionRow.click();
       await session.page.getByTestId("session-view").waitFor({ timeout: 5_000 });
@@ -103,7 +103,7 @@ test("permission deny: PWA denies → surface closes, session remains healthy", 
         await session.page.goto("/");
         await session.page.getByTestId(`machine-card-${daemon_id}`).waitFor({ timeout: 30_000 });
         const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
-        await sessionsList.locator(".bg-surface").first().click();
+        await sessionsList.getByTestId("session-row").first().click();
         await card.waitFor({ timeout: 30_000 });
       }
     });

@@ -119,12 +119,12 @@ test("permission relay: PWA approve → tool runs → task_completed", async ({ 
 
     await sc.step("session-row-appears", async () => {
       const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
-      await sessionsList.locator(".bg-surface").first().waitFor({ timeout: 30_000 });
+      await sessionsList.getByTestId("session-row").first().waitFor({ timeout: 30_000 });
     });
 
     await sc.step("session-opened", async () => {
       const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
-      await sessionsList.locator(".bg-surface").first().click();
+      await sessionsList.getByTestId("session-row").first().click();
       await session.page.getByTestId("session-view").waitFor({ timeout: 5_000 });
     });
 
@@ -154,9 +154,18 @@ test("permission relay: PWA approve → tool runs → task_completed", async ({ 
       // tool card with a Success/Failed/Running status pill renders.
       await session.page.getByTestId("timeline").waitFor({ timeout: 30_000 });
       await replayJsonlTape({ jsonlPath, tapePath, lineDelayMs: 80 });
+      // Polished timeline folds consecutive tool calls into a collapsible
+      // group; the inner status pill is hidden until expanded. Click into
+      // the group first if there is one.
+      const group = session.page.getByTestId("tool-group").first();
+      if (await group.isVisible({ timeout: 15_000 }).catch(() => false)) {
+        if ((await group.getAttribute("data-expanded")) !== "true") {
+          await group.locator("button[aria-expanded]").first().click();
+        }
+      }
       const statusPill = session.page
         .locator("article")
-        .locator("text=/^(Success|Failed|Running…)$/")
+        .locator("text=/^(Success|Failed|Running)$/")
         .first();
       await statusPill.waitFor({ timeout: 30_000 });
     });

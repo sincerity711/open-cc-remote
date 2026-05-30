@@ -6,7 +6,7 @@ import { test, expect } from "@playwright/test";
 import { upCompose, downCompose } from "../helpers/compose.ts";
 import { openPwa, installCorsBridge } from "../helpers/pwa-browser.ts";
 import { startPreview, type PreviewHandle } from "../helpers/preview-server.ts";
-import { startDaemon, pairDaemon, mkStateDir, rmStateDir } from "../helpers/daemon.ts";
+import { startDaemon, pairDaemon, mkStateDir, rmStateDir, type DaemonHandle } from "../helpers/daemon.ts";
 import { makeScenarioContext } from "../helpers/scenario.ts";
 import { preflightOrThrow } from "../helpers/preflight.ts";
 import { syncIfPassed } from "../helpers/sync-screenshots.ts";
@@ -50,7 +50,7 @@ test("pair a daemon end-to-end via the PWA Settings UI", async ({ page }, testIn
 
   const daemon_id = `pwa-pair-${Date.now()}`;
   const state_dir = mkStateDir(daemon_id);
-  let daemonHandle: { stop: () => Promise<void> } | null = null;
+  let daemonHandle: DaemonHandle | null = null;
 
   try {
     await sc.step("settings-opened", async () => {
@@ -97,7 +97,11 @@ test("pair a daemon end-to-end via the PWA Settings UI", async ({ page }, testIn
       await expect(drawer.getByText(daemon_id, { exact: false })).toHaveCount(0, { timeout: 30_000 });
     });
   } finally {
-    if (daemonHandle) await daemonHandle.stop();
+    // Cast back to non-null type — narrow flow analysis through async
+    // try-step blocks above sometimes loses the `daemonHandle` widening
+    // and infers `never` here. Casting matches what the runtime sees.
+    const handle = daemonHandle as DaemonHandle | null;
+    if (handle) await handle.stop();
     rmStateDir(state_dir);
     await session.close();
   }

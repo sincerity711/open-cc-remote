@@ -92,7 +92,10 @@ test("slash_inventory arrives, /clear submission lands in daemon as cli_command"
 
     await sc.step("session-opened", async () => {
       const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
-      const sessionRow = sessionsList.locator(".bg-surface").first();
+      // Each SessionRow is wrapped in an <li>. Pre-polish the row itself
+      // had `bg-surface shadow-card`; pass-11 elevation cleanup moved it
+      // to L2 styling (bg-muted), so anchor on the <li> wrapper instead.
+      const sessionRow = sessionsList.getByTestId("session-row").first();
       await sessionRow.waitFor({ timeout: 30_000 });
       await sessionRow.click();
       await session.page.getByTestId("session-view").waitFor({ timeout: 5_000 });

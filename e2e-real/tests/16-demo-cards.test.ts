@@ -1,14 +1,14 @@
 // Scenario 16 — /demo route visual baseline.
 //
 // Pure UI navigation against vite preview: no daemon, no docker, no claude
-// process, no network. Drives the guided demo (DemoApp) into the Cards step
-// and asserts the catalog tile signatures the unit test
-// (packages/pwa/tests/cards.test.tsx) already covers, taking a screenshot
-// per step as a visual baseline.
+// process, no network. Switches the demo into the Catalog view and asserts
+// the four-level card system surfaces (L0/L1/L2/L3) plus a few tile bodies
+// to catch regressions in the catalog page itself.
 //
-// Navigation note: the default step is "home" with device="mobile", which
-// means DesktopNav (the icon rail with aria-label="Cards") is NOT rendered.
-// We click the GuideRail step button which has the visible label "Cards".
+// History: pre-polish this scenario drove the old "guided rail" demo into a
+// "Cards" step that no longer exists. The polish pass replaced the rail with
+// a Live ↔ Catalog toggle and made the catalog its own surface; this test
+// follows that shape.
 
 import { test, chromium } from "@playwright/test";
 import { startPreview, type PreviewHandle } from "../helpers/preview-server.ts";
@@ -23,7 +23,7 @@ test.afterEach(async ({}, testInfo) => {
   await syncIfPassed(testInfo, "16-demo-cards");
 });
 
-test("/demo cards step renders the full catalog", async ({}, testInfo) => {
+test("/demo catalog view renders all four elevation levels", async ({}, testInfo) => {
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ baseURL: preview.baseURL });
   const page = await context.newPage();
@@ -35,36 +35,53 @@ test("/demo cards step renders the full catalog", async ({}, testInfo) => {
       projectName: testInfo.project.name,
     });
 
-    await sc.step("home-step", async () => {
+    await sc.step("live-view-default", async () => {
       await page.goto("/demo");
-      // Initial step is "Home"; the GuideRail has a step button with that
-      // label and the right pane shows the "Machines" heading.
+      // Default view is Live — the app shell is mounted with a Machines pane.
       await page.getByRole("heading", { name: "Machines" }).first().waitFor({ timeout: 10_000 });
     });
 
-    await sc.step("cards-step", async () => {
-      // GuideRail button — the aside on the left lists each step's label;
-      // the accessible name is the concatenation of the index span ("4")
-      // plus label ("Cards") plus the description note. Match by the
-      // "Card anatomy" note text since that's unique to the Cards step.
-      await page.getByRole("button", { name: /Card anatomy/ }).click();
-      await page.getByText("Session Timeline Card System").waitFor({ timeout: 5_000 });
+    await sc.step("switch-to-catalog", async () => {
+      await page.getByRole("tab", { name: /^Catalog$/ }).click();
+      await page.getByRole("heading", { name: /Every card variant/ }).waitFor({ timeout: 5_000 });
     });
 
-    // Catalog tile signatures — these match what the bun:test card unit test
-    // already verifies as the visual contract.
-    await sc.step("catalog-tile-user-bubble", async () => {
-      await page.getByText("Please add password reset flow").first().waitFor();
+    // Section headers — one per elevation level. These are the spine of the
+    // catalog: if any drop out the page is no longer fulfilling its purpose.
+    await sc.step("section-l1-surface", async () => {
+      await page.getByRole("heading", { name: "Surface cards" }).waitFor();
     });
-    await sc.step("catalog-tile-permission-required", async () => {
-      await page.getByText("Permission required").first().waitFor();
+    await sc.step("section-l1-conversation", async () => {
+      await page.getByRole("heading", { name: "Conversation cards" }).waitFor();
     });
-    await sc.step("catalog-tile-assistant-bubble", async () => {
-      // AG-UI catalog renders AssistantBubbleLive with the markdown reset-flow plan.
-      await page.getByText("I'll add the reset flow in three steps").first().waitFor();
+    await sc.step("section-l2-rows", async () => {
+      await page.getByRole("heading", { name: "Nested rows" }).waitFor();
     });
-    await sc.step("catalog-tile-bash", async () => {
-      await page.getByText("pnpm test auth").first().waitFor();
+    await sc.step("section-l3-chips", async () => {
+      await page.getByRole("heading", { name: "Inline chips & badges" }).waitFor();
+    });
+    await sc.step("section-l0-sheets", async () => {
+      await page.getByRole("heading", { name: "Sheets & overlays" }).waitFor();
+    });
+
+    // Tile-body samples — verify the catalog is composing the real primitives,
+    // not stub markup. If these break the catalog has lost its "always in
+    // sync with production" property.
+    await sc.step("tile-permission-inline", async () => {
+      // InlinePermissionCard renders a tokenized rm -rf node_modules + Risk row.
+      await page.getByText("recursive delete").first().waitFor();
+    });
+    await sc.step("tile-assistant-bubble", async () => {
+      await page.getByText(/Issue a hashed token/).first().waitFor();
+    });
+    await sc.step("tile-tool-group-many", async () => {
+      // The "Ran 4 commands" group header proves grouping is wired in catalog.
+      await page.getByText(/Ran 4 commands/).first().waitFor();
+    });
+    await sc.step("tile-status-chip-row", async () => {
+      // L3 chips row exposes every StatusChip tone — Working has the
+      // breathing dot; the label itself is plain text we can wait on.
+      await page.getByText(/^Working$/).first().waitFor();
     });
   } finally {
     await context.close();

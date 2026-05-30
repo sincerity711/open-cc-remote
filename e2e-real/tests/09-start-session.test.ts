@@ -133,7 +133,7 @@ test("start session: cwd input → Start button → row appears", async ({ page 
       // renders under the daemon card. Real claude boot under the test
       // runner can take a while; budget 90s.
       const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
-      await expect(sessionsList.locator(".bg-surface").first()).toBeVisible({ timeout: 120_000 });
+      await expect(sessionsList.getByTestId("session-row").first()).toBeVisible({ timeout: 120_000 });
     });
   } finally {
     // Clean up the spawned tmux session.

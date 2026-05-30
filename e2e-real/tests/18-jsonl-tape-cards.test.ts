@@ -27,11 +27,32 @@ import { pairAndStartDaemon, makeScenarioContext } from "../helpers/scenario.ts"
 import { preflightOrThrow } from "../helpers/preflight.ts";
 import { syncIfPassed } from "../helpers/sync-screenshots.ts";
 import { replayJsonlTape } from "../helpers/replay-jsonl.ts";
+import type { Page } from "@playwright/test";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..");
 const fakeClaudeBin = resolve(repoRoot, "tools", "fake-claude", "fake-claude.ts");
 const tapesDir = resolve(__dirname, "..", "fixtures", "jsonl-tapes");
+
+/**
+ * Post-polish, consecutive tool calls fold into a collapsible
+ * `tool-group` whose content is hidden until the user expands it. When a
+ * test wants to assert on per-tool card chrome (Bash/Edit/Read article,
+ * Success/Failed pill, View output button), it must expand the group
+ * first — that's what the user would do. Idempotent: if the group is
+ * already open or there is no group, no-op.
+ */
+async function expandFirstToolGroup(page: Page) {
+  const group = page.getByTestId("timeline").getByTestId("tool-group").first();
+  // Wait a beat so a freshly-replayed tape has time to land in the
+  // timeline reducer; if no group ever appears, fall through silently —
+  // the caller's assertion will fail with its own meaningful timeout.
+  if (await group.isVisible({ timeout: 15_000 }).catch(() => false)) {
+    if ((await group.getAttribute("data-expanded")) !== "true") {
+      await group.locator("button[aria-expanded]").first().click();
+    }
+  }
+}
 
 let preview: PreviewHandle;
 
@@ -174,20 +195,22 @@ test("scenario 18 — JSONL tape cards (mock-driven)", async ({ page }, testInfo
 
     await sc.step("session-row-appears", async () => {
       const list = session.page.getByTestId(`sessions-${daemon_id}`);
-      await list.locator(".bg-surface").first().waitFor({ timeout: 30_000 });
+      await list.getByTestId("session-row").first().waitFor({ timeout: 30_000 });
     });
 
     await sc.step("session-opened", async () => {
       const list = session.page.getByTestId(`sessions-${daemon_id}`);
-      await list.locator(".bg-surface").first().click();
+      await list.getByTestId("session-row").first().click();
       await session.page.getByTestId("session-view").waitFor({ timeout: 5_000 });
     });
 
     await sc.step("bash-command-card", async () => {
       await replayJsonlTape({ jsonlPath: bashSuccess.jsonlPath, tapePath: bashSuccess.tapePath, lineDelayMs: 80 });
-      // Wait for a Bash command card to render.
       const timeline = session.page.getByTestId("timeline");
       await expect(timeline).toBeVisible();
+      // Tool calls fold into a collapsible group post-polish — expand
+      // before asserting on per-tool article chrome.
+      await expandFirstToolGroup(session.page);
       await expect(timeline.locator("article", { hasText: "Bash" }).first()).toBeVisible({ timeout: 15_000 });
       await expect(timeline.locator("code", { hasText: "ls -F /tmp" }).first()).toBeVisible({ timeout: 15_000 });
       // Success pill.
@@ -214,6 +237,7 @@ test("scenario 18 — JSONL tape cards (mock-driven)", async ({ page }, testInfo
       await failureRow.click();
       await replayJsonlTape({ jsonlPath: bashFail.jsonlPath, tapePath: bashFail.tapePath, lineDelayMs: 80 });
       const timeline = session.page.getByTestId("timeline");
+      await expandFirstToolGroup(session.page);
       await expect(
         timeline.locator("article").locator("text=/^Failed$/").first(),
       ).toBeVisible({ timeout: 15_000 });
@@ -236,6 +260,7 @@ test("scenario 18 — JSONL tape cards (mock-driven)", async ({ page }, testInfo
       await reRow.click();
       await replayJsonlTape({ jsonlPath: readEdit.jsonlPath, tapePath: readEdit.tapePath, lineDelayMs: 80 });
       const timeline = session.page.getByTestId("timeline");
+      await expandFirstToolGroup(session.page);
       await expect(timeline.locator("article", { hasText: "Read" }).first()).toBeVisible({ timeout: 15_000 });
       await expect(timeline.locator("article", { hasText: "Edit" }).first()).toBeVisible({ timeout: 15_000 });
       await expect(timeline.locator("code", { hasText: "/tmp/notes.md" }).first()).toBeVisible({ timeout: 15_000 });
@@ -278,6 +303,7 @@ test("scenario 18 — JSONL tape cards (mock-driven)", async ({ page }, testInfo
       await loRow.click();
       await replayJsonlTape({ jsonlPath: longOut.jsonlPath, tapePath: longOut.tapePath, lineDelayMs: 80 });
       const timeline = session.page.getByTestId("timeline");
+      await expandFirstToolGroup(session.page);
       await expect(
         timeline.locator("article").locator("text=/View output \\(\\d+ lines\\)/").first(),
       ).toBeVisible({ timeout: 15_000 });

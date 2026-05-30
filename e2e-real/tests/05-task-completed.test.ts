@@ -90,14 +90,14 @@ test("task_completed: PWA badge increments after real Claude turn", async ({ pag
 
     await sc.step("session-row-visible", async () => {
       const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
-      await sessionsList.locator(".bg-surface").first().waitFor({ timeout: 90_000 });
+      await sessionsList.getByTestId("session-row").first().waitFor({ timeout: 90_000 });
     });
 
     await sc.step("task-completed-badge-incremented", async () => {
       // After Claude finishes its turn, the daemon emits task_completed; the
       // PWA's per-session badge "tasks N" advances from 0 to ≥1.
       const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
-      const sessionRow = sessionsList.locator(".bg-surface").first();
+      const sessionRow = sessionsList.getByTestId("session-row").first();
       // Match "tasks 1", "tasks 2", … (NOT "tasks 0").
       await expect(sessionRow).toContainText(/tasks\s+[1-9]\d*/, { timeout: 120_000 });
     });
@@ -107,7 +107,7 @@ test("task_completed: PWA badge increments after real Claude turn", async ({ pag
       // idle_window_ms (3s here). The session_state frame flips the home
       // row's StatusChip to "Idle". Folded in from the old scenario 06.
       const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
-      const sessionRow = sessionsList.locator(".bg-surface").first();
+      const sessionRow = sessionsList.getByTestId("session-row").first();
       await expect(sessionRow.locator("text=/^Idle$/").first()).toBeVisible({ timeout: 30_000 });
     });
   } finally {

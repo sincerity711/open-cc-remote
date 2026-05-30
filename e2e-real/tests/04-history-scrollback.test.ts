@@ -92,7 +92,7 @@ test("history scrollback: Load earlier events button triggers backfill", async (
 
     await sc.step("session-opened", async () => {
       const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
-      const sessionRow = sessionsList.locator(".bg-surface").first();
+      const sessionRow = sessionsList.getByTestId("session-row").first();
       await sessionRow.waitFor({ timeout: 90_000 });
       await sessionRow.click();
       await session.page.getByTestId("session-view").waitFor({ timeout: 5_000 });

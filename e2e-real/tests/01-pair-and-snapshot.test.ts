@@ -124,7 +124,7 @@ test("pair-and-snapshot: sign-in screen → home with daemon card after real cla
       // daemon's session at protocol level. The browser equivalent is the
       // session row appearing under the daemon card.
       const sessionsList = sessionPage.getByTestId(`sessions-${daemon_id}`);
-      const sessionRow = sessionsList.locator(".bg-surface").first();
+      const sessionRow = sessionsList.getByTestId("session-row").first();
       await sessionRow.waitFor({ timeout: 60_000 });
     });
   } finally {

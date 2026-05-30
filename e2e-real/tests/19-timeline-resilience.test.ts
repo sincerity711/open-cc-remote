@@ -118,8 +118,8 @@ test("timeline survives page reload — request_history rebuilds the same cards"
 
     await sc.step("session-opened", async () => {
       const list = session.page.getByTestId(`sessions-${daemon_id}`);
-      await list.locator(".bg-surface").first().waitFor({ timeout: 30_000 });
-      await list.locator(".bg-surface").first().click();
+      await list.getByTestId("session-row").first().waitFor({ timeout: 30_000 });
+      await list.getByTestId("session-row").first().click();
       await session.page.getByTestId("session-view").waitFor({ timeout: 5_000 });
     });
 
@@ -140,8 +140,8 @@ test("timeline survives page reload — request_history rebuilds the same cards"
 
     await sc.step("session-reopened", async () => {
       const list = session.page.getByTestId(`sessions-${daemon_id}`);
-      await list.locator(".bg-surface").first().waitFor({ timeout: 30_000 });
-      await list.locator(".bg-surface").first().click();
+      await list.getByTestId("session-row").first().waitFor({ timeout: 30_000 });
+      await list.getByTestId("session-row").first().click();
       await session.page.getByTestId("session-view").waitFor({ timeout: 5_000 });
     });
 
@@ -214,8 +214,8 @@ test("channel-injected user line written before bind still surfaces as a user bu
 
     await sc.step("session-row-appears", async () => {
       const list = session.page.getByTestId(`sessions-${daemon_id}`);
-      await list.locator(".bg-surface").first().waitFor({ timeout: 30_000 });
-      await list.locator(".bg-surface").first().click();
+      await list.getByTestId("session-row").first().waitFor({ timeout: 30_000 });
+      await list.getByTestId("session-row").first().click();
       await session.page.getByTestId("session-view").waitFor({ timeout: 5_000 });
     });
 

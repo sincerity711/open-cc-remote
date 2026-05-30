@@ -144,7 +144,7 @@ test("ask-user-question relay: hook → daemon → PWA → answer round-trip", a
 
     await sc.step("session-row-appears", async () => {
       const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
-      await sessionsList.locator(".bg-surface").first().waitFor({ timeout: 30_000 });
+      await sessionsList.getByTestId("session-row").first().waitFor({ timeout: 30_000 });
     });
 
     await sc.step("hook-fires", async () => {

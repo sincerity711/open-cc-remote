@@ -77,7 +77,7 @@ test("kill session: trash icon → confirm → row removed", async ({ page }, te
 
     await sc.step("session-row-visible", async () => {
       const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
-      await sessionsList.locator(".bg-surface").first().waitFor({ timeout: 90_000 });
+      await sessionsList.getByTestId("session-row").first().waitFor({ timeout: 90_000 });
     });
 
     await sc.step("trash-icon-clicked", async () => {
@@ -95,7 +95,7 @@ test("kill session: trash icon → confirm → row removed", async ({ page }, te
       // the row. The sessions list either disappears (no sessions) or shows
       // "No active sessions." Wait for the bg-surface row to be gone.
       const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
-      await expect(sessionsList.locator(".bg-surface")).toHaveCount(0, { timeout: 30_000 });
+      await expect(sessionsList.getByTestId("session-row")).toHaveCount(0, { timeout: 30_000 });
     });
   } finally {
     claude?.stop();
