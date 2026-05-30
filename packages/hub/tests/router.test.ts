@@ -937,3 +937,150 @@ test("onPwaCliCommand for unknown daemon is silently dropped", () => {
     ),
   ).not.toThrow();
 });
+
+// ─── fs_list routing ───────────────────────────────────────────────────
+
+test("onPwaFsList forwards to online daemon as HubToDaemonFsList — daemon_id stripped, request_id and trace preserved", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+
+  const sentToDaemon: unknown[] = [];
+  dreg.add("d-1", {}, (f) => sentToDaemon.push(f));
+
+  // PWA must be registered so we have a real pwa_id to pin the request to.
+  const senderSent: unknown[] = [];
+  const pwa_id = preg.add({}, (f) => senderSent.push(f));
+
+  const trace = { traceparent: "00-aaa-bbb-01" };
+  router.onPwaFsList(
+    { type: "fs_list", daemon_id: "d-1", request_id: "r-1", path: "~/proj", trace },
+    pwa_id,
+    (f) => senderSent.push(f),
+  );
+
+  expect(sentToDaemon).toEqual([{
+    type: "fs_list",
+    request_id: "r-1",
+    path: "~/proj",
+    trace: { traceparent: "00-aaa-bbb-01" },
+  }]);
+  // No reply yet, sender must not have received anything.
+  expect(senderSent).toEqual([]);
+});
+
+test("onPwaFsList for offline daemon replies directly to originating PWA with error: io", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+
+  // No daemon added. Other PWAs should NOT see this reply.
+  const otherPwaSent: unknown[] = [];
+  preg.add({}, (f) => otherPwaSent.push(f));
+
+  const senderSent: unknown[] = [];
+  const pwa_id = preg.add({}, (f) => senderSent.push(f));
+
+  router.onPwaFsList(
+    { type: "fs_list", daemon_id: "d-missing", request_id: "r-2", path: "/x" },
+    pwa_id,
+    (f) => senderSent.push(f),
+  );
+
+  expect(senderSent).toEqual([{
+    type: "fs_list_result",
+    daemon_id: "d-missing",
+    request_id: "r-2",
+    ok: false,
+    error: "io",
+  }]);
+  expect(otherPwaSent).toEqual([]);
+});
+
+test("daemon fs_list_result is routed back to the originating PWA only — request_id correlated, daemon_id filled in", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+
+  router.onDaemonFrame("d-1", { type: "hello", daemon_id: "d-1", epoch: 1,
+    hostname: "h", agent_version: "0", sessions: [] });
+
+  const sentToDaemon: unknown[] = [];
+  dreg.add("d-1", {}, (f) => sentToDaemon.push(f));
+
+  // Two PWAs; only the one that sent the request must see the reply.
+  const otherPwaSent: unknown[] = [];
+  preg.add({}, (f) => otherPwaSent.push(f));
+
+  const senderSent: unknown[] = [];
+  const sender_pwa_id = preg.add({}, (f) => senderSent.push(f));
+
+  router.onPwaFsList(
+    { type: "fs_list", daemon_id: "d-1", request_id: "r-3", path: "/home/me" },
+    sender_pwa_id,
+    (f) => senderSent.push(f),
+  );
+
+  // Daemon answers.
+  router.onDaemonFrame("d-1", {
+    type: "fs_list_result",
+    request_id: "r-3",
+    ok: true,
+    path: "/home/me",
+    entries: [
+      { name: "src", is_dir: true },
+      { name: "README.md", is_dir: false },
+    ],
+  });
+
+  expect(senderSent).toEqual([{
+    type: "fs_list_result",
+    daemon_id: "d-1",
+    request_id: "r-3",
+    ok: true,
+    path: "/home/me",
+    entries: [
+      { name: "src", is_dir: true },
+      { name: "README.md", is_dir: false },
+    ],
+  }]);
+  // The other PWA (not the originator) must not have received a copy.
+  expect(otherPwaSent).toEqual([]);
+});
+
+test("fs_list_result whose originating PWA disconnected before the reply is dropped without crashing", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+
+  router.onDaemonFrame("d-1", { type: "hello", daemon_id: "d-1", epoch: 1,
+    hostname: "h", agent_version: "0", sessions: [] });
+
+  const sentToDaemon: unknown[] = [];
+  dreg.add("d-1", {}, (f) => sentToDaemon.push(f));
+
+  const senderSent: unknown[] = [];
+  const sender_pwa_id = preg.add({}, (f) => senderSent.push(f));
+  router.onPwaFsList(
+    { type: "fs_list", daemon_id: "d-1", request_id: "r-4", path: "/x" },
+    sender_pwa_id,
+    (f) => senderSent.push(f),
+  );
+
+  // Originating PWA disconnects — routes.ts notifies the router so
+  // pendingFsList is pruned. After that, even if a reply arrives, no
+  // delivery attempt is made and nothing throws.
+  preg.remove(sender_pwa_id);
+  router.onPwaDisconnect(sender_pwa_id);
+
+  expect(() =>
+    router.onDaemonFrame("d-1", {
+      type: "fs_list_result",
+      request_id: "r-4",
+      ok: true,
+      path: "/x",
+      entries: [],
+    }),
+  ).not.toThrow();
+  expect(senderSent).toEqual([]); // no reply sneaks through
+});

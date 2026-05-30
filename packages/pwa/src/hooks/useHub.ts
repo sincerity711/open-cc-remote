@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import type {
   HubToPwa, PwaToHub, DaemonView, EventFrameForPwa, PwaPermissionRequest,
   PwaChatBroadcast, PwaStartSessionRejected, SessionState, AGUIEvent, SlashEntry,
-  PwaAskUserQuestionRequest,
+  PwaAskUserQuestionRequest, PwaFsListResult,
 } from "@cc-remote/proto";
 import {
   createPending, confirmPending, failPending, timeoutPending, dismissPending, findPending,
@@ -549,6 +549,12 @@ export function reducer(state: HubState, action: HubAction): HubState {
             slashInventory: { ...prev.slashInventory, [k]: frame.entries },
           };
         }
+        case "fs_list_result": {
+          // Out-of-band: useFsList listens via its own callback registry on
+          // the hub hook. The reducer has no state for this frame type, but
+          // the case is needed for exhaustiveness over HubToPwa.
+          return prev;
+        }
       }
       return prev;
     }
@@ -563,6 +569,19 @@ export interface UseHubResult extends HubState {
   startSession: (daemon_id: string, cwd: string, name?: string) => void;
   sendChat: (daemon_id: string, session_id: string, content: string, reply_to?: string) => void;
   sendCliCommand: (daemon_id: string, session_id: string, text: string) => void;
+  /**
+   * Send an `fs_list` request and register `onResult` to be called with the
+   * matching `fs_list_result` frame. Returns a disposer that unregisters
+   * the callback (call it on unmount / supersession). If the websocket
+   * isn't open the request is dropped silently and `onResult` is never
+   * invoked — the caller should keep its own timeout.
+   */
+  sendFsList: (
+    daemon_id: string,
+    parent: string,
+    request_id: string,
+    onResult: (frame: PwaFsListResult) => void,
+  ) => () => void;
   clearStartSessionError: (daemon_id: string) => void;
   pendingChatSendFor: (daemon_id: string, session_id: string) => PendingCommand | undefined;
   pendingStartSessionFor: (daemon_id: string) => PendingCommand | undefined;
@@ -582,6 +601,9 @@ export function useHub(
   useEffect(() => { stateRef.current = state; }, [state]);
   const wsRef = useRef<WebSocket | null>(null);
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  // request_id → callback. fs_list responses are looked up here BEFORE
+  // hitting the reducer (the reducer no-ops on fs_list_result).
+  const fsListListenersRef = useRef<Map<string, (f: PwaFsListResult) => void>>(new Map());
 
   const clearTimer = useCallback((id: string) => {
     const handle = timersRef.current.get(id);
@@ -650,7 +672,19 @@ export function useHub(
         if (wsRef.current !== ws) return;   // stale frame from an orphan ws
         receivedAnyFrame = true;
         framelessOpens = 0;
-        try { apply(JSON.parse(ev.data) as HubToPwa); } catch {}
+        try {
+          const frame = JSON.parse(ev.data) as HubToPwa;
+          // fs_list_result is delivered out-of-band — useFsList registers
+          // its own listener via sendFsList() rather than reducing into
+          // hub state. Look up + invoke the listener, then DON'T forward
+          // to the reducer (which only no-ops anyway).
+          if (frame.type === "fs_list_result") {
+            const cb = fsListListenersRef.current.get(frame.request_id);
+            if (cb) cb(frame);
+            return;
+          }
+          apply(frame);
+        } catch {}
       };
       const reconnect = () => {
         // Only clear wsRef if THIS ws is still the active one. A newer ws
@@ -867,6 +901,28 @@ export function useHub(
     [],
   );
 
+  const sendFsList = useCallback(
+    (
+      daemon_id: string,
+      parent: string,
+      request_id: string,
+      onResult: (frame: PwaFsListResult) => void,
+    ): (() => void) => {
+      fsListListenersRef.current.set(request_id, onResult);
+      const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        const msg: PwaToHub = { type: "fs_list", daemon_id, path: parent, request_id };
+        ws.send(JSON.stringify(msg));
+      }
+      // The disposer is idempotent — caller can call it on unmount as well
+      // as after a result fires (so a late-arriving duplicate is ignored).
+      return () => {
+        fsListListenersRef.current.delete(request_id);
+      };
+    },
+    [],
+  );
+
   const pendingChatSendFor = useCallback(
     (daemon_id: string, session_id: string): PendingCommand | undefined => {
       return findPending(state.pendingCommands, (cmd) =>
@@ -923,6 +979,7 @@ export function useHub(
   return {
     ...state,
     sendPermissionReply, sendAskAnswer, requestHistory, killSession, startSession, sendChat, sendCliCommand,
+    sendFsList,
     clearStartSessionError, pendingChatSendFor, pendingStartSessionFor, pendingHistoryFor,
     pendingPermissionReplyFor, pendingKillFor, dismissPendingCommand,
   };

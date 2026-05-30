@@ -4,6 +4,7 @@ import type {
   PwaToHubCliCommand, HubToDaemonCliCommand,
   PwaAskUserQuestionRequest,
   PwaSlashInventory, SlashEntry,
+  PwaToHubFsList, HubToDaemonFsList, PwaFsListResult,
 } from "@cc-remote/proto";
 import type { DaemonRegistry, PwaRegistry } from "./connections.ts";
 import type { Db } from "./db.ts";
@@ -40,6 +41,12 @@ export interface RouterOptions {}
 
 export class Router {
   private daemons = new Map<string, DaemonState>();
+  // request_id → pwa_id for in-flight PWA→daemon fs_list RPCs. Populated
+  // when a PWA sends fs_list, consumed when the matching fs_list_result
+  // arrives from the daemon. Entries for disconnected PWAs are pruned by
+  // onPwaDisconnect; an entry whose PWA has gone away will also fail at
+  // pwaReg.send time and we simply drop the reply (debug-log only).
+  private pendingFsList = new Map<string, string>();
 
   constructor(
     private daemonReg: DaemonRegistry<unknown>,
@@ -284,6 +291,31 @@ export class Router {
         });
         return;
       }
+      case "fs_list_result": {
+        const state = this.daemons.get(daemon_id);
+        if (!state) return;
+        const pwa_id = this.pendingFsList.get(frame.request_id);
+        if (pwa_id === undefined) {
+          // No record — either we never saw the request, or the
+          // originating PWA disconnected and pruned its entry. Drop.
+          return;
+        }
+        this.pendingFsList.delete(frame.request_id);
+        const out: PwaFsListResult = {
+          type: "fs_list_result",
+          daemon_id,
+          request_id: frame.request_id,
+          ok: frame.ok,
+          ...(frame.path !== undefined ? { path: frame.path } : {}),
+          ...(frame.entries !== undefined ? { entries: frame.entries } : {}),
+          ...(frame.error !== undefined ? { error: frame.error } : {}),
+        };
+        // pwaReg.send returns false if the PWA has disconnected since
+        // sending the request. In that case we silently drop the reply
+        // (no retry, no persistence — folder autocomplete is best-effort).
+        this.pwaReg.send(pwa_id, out);
+        return;
+      }
     }
   }
 
@@ -419,6 +451,51 @@ export class Router {
       user: auth.user,
     };
     this.daemonReg.send(frame.daemon_id, out);
+  }
+
+  /**
+   * Handle a PWA-issued fs_list (folder autocomplete). If the addressed
+   * daemon is online, forward as HubToDaemonFsList (drop daemon_id; preserve
+   * request_id and trace verbatim) and remember the originating PWA so the
+   * matching fs_list_result can be routed back. If the daemon is offline,
+   * reply directly to the originating PWA with `{ ok: false, error: "io" }`.
+   */
+  onPwaFsList(
+    frame: PwaToHubFsList,
+    pwa_id: string,
+    senderSend: (f: HubToPwa) => void,
+  ): void {
+    if (!this.daemonReg.has(frame.daemon_id)) {
+      const reply: PwaFsListResult = {
+        type: "fs_list_result",
+        daemon_id: frame.daemon_id,
+        request_id: frame.request_id,
+        ok: false,
+        error: "io",
+      };
+      senderSend(reply);
+      return;
+    }
+    this.pendingFsList.set(frame.request_id, pwa_id);
+    const out: HubToDaemonFsList = {
+      type: "fs_list",
+      request_id: frame.request_id,
+      path: frame.path,
+      ...(frame.trace !== undefined ? { trace: frame.trace } : {}),
+    };
+    this.daemonReg.send(frame.daemon_id, out);
+  }
+
+  /**
+   * Called by routes.ts on PWA ws close, so we can prune any in-flight
+   * fs_list requests still pinned to this PWA. Without this, a daemon
+   * reply that arrives after the PWA disconnected would still consume an
+   * entry and try a no-op send; it works but bloats the map.
+   */
+  onPwaDisconnect(pwa_id: string): void {
+    for (const [request_id, owner] of this.pendingFsList) {
+      if (owner === pwa_id) this.pendingFsList.delete(request_id);
+    }
   }
 
   snapshot(): DaemonView[] {

@@ -58,7 +58,7 @@ export function RealApp() {
       setAuthNotice("Session expired, please sign in again.");
     },
   });
-  const { connected, daemons, events, pendingPermissions, pendingQuestions, sendPermissionReply, sendAskAnswer, completedCounts, chatErrors, startSessionErrors, clearStartSessionError, pendingChatSendFor, dismissPendingCommand, pendingPermissionReplyFor } = hub;
+  const { connected, daemons, events, pendingPermissions, pendingQuestions, sendPermissionReply, sendAskAnswer, completedCounts, chatErrors, startSessionErrors, clearStartSessionError, pendingChatSendFor, dismissPendingCommand, pendingPermissionReplyFor, sendFsList } = hub;
   const { lastSeenOffsets, markSeen } = useLastSeen();
   const selectedKey = selected ? eventKey(selected.daemon_id, selected.session_id) : null;
   const sessionTimeline = useSessionTimeline(
@@ -167,6 +167,7 @@ export function RealApp() {
             onDismissStartSessionError={clearStartSessionError}
             pendingStartSessionByDaemon={pendingStartSessionByDaemon}
             pendingKillByKey={pendingKillByKey}
+            fsListSender={sendFsList}
           />
         }
         session={
@@ -197,6 +198,8 @@ export function RealApp() {
               unreadCount={sessionTimeline.unreadCount}
               pendingChatSend={pendingChatSend}
               slashEntries={selected ? selectSlashInventory(hub, selected.daemon_id, selected.session_id) : []}
+              daemonId={selected.daemon_id}
+              fsListSender={sendFsList}
               onMarkSeen={(offset) => markSeen(selected.daemon_id, selected.session_id, offset)}
               onLoadEarlier={sessionTimeline.loadEarlier}
               onSendChat={(content) => hub.sendChat(selected.daemon_id, selected.session_id, content)}

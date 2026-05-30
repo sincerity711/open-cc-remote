@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ArrowLeft, Send, X } from "lucide-react";
-import type { PwaPermissionRequest, SlashEntry } from "@cc-remote/proto";
+import type { PwaPermissionRequest, SlashEntry, PwaFsListResult } from "@cc-remote/proto";
 import { Button } from "../components/ui/button";
 import { StatusChip } from "./primitives/StatusChip";
 import { SessionTimeline } from "./timeline/SessionTimeline";
@@ -8,6 +8,14 @@ import type { RenderItem } from "./timeline/types";
 import type { PendingCommand } from "../hooks/pendingCommands";
 import { SlashMenu } from "./primitives/SlashMenu";
 import { InlinePermissionCard } from "./primitives/InlinePermissionCard";
+import { MentionAutocomplete, findMentionAtCursor } from "./primitives/MentionAutocomplete";
+
+type FsListSender = (
+  daemon_id: string,
+  parent: string,
+  request_id: string,
+  onResult: (frame: PwaFsListResult) => void,
+) => () => void;
 
 export interface SessionViewProps {
   header: { name: string; model: string | null; cwd: string; online: boolean };
@@ -26,6 +34,10 @@ export interface SessionViewProps {
   unreadCount?: number;
   pendingChatSend?: PendingCommand;
   slashEntries?: SlashEntry[];
+  /** Daemon owning this session — passed to MentionAutocomplete for fs_list. */
+  daemonId?: string;
+  /** Hub fs_list sender — when provided alongside daemonId, enables @-mention path completion. */
+  fsListSender?: FsListSender;
   onMarkSeen?: (offset: number) => void;
   onLoadEarlier: () => void;
   onSendChat: (content: string) => void;
@@ -52,6 +64,8 @@ export function SessionView({
   unreadCount,
   pendingChatSend,
   slashEntries = [],
+  daemonId,
+  fsListSender,
   onMarkSeen,
   onLoadEarlier,
   onSendChat,
@@ -61,6 +75,29 @@ export function SessionView({
   onDismissPendingCommand,
 }: SessionViewProps) {
   const [draft, setDraft] = useState("");
+  const [cursor, setCursor] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const setDraftAndCursor = (next: string, nextCursor: number) => {
+    setDraft(next);
+    setCursor(nextCursor);
+    // Restore caret position after React re-renders the controlled input.
+    queueMicrotask(() => {
+      const el = inputRef.current;
+      if (el) {
+        el.focus();
+        try { el.setSelectionRange(nextCursor, nextCursor); } catch {}
+      }
+    });
+  };
+
+  // Show mention popover only when we have a daemon + sender and the
+  // composer isn't being driven by a leading-slash command. Spec
+  // requires SlashMenu and MentionAutocomplete never coexist.
+  const slashActive = draft.startsWith("/");
+  const mentionEligible =
+    !!daemonId && !!fsListSender && !slashActive &&
+    findMentionAtCursor(draft, cursor) !== null;
 
   const isSlashSubmit = (text: string): boolean => {
     if (!text.startsWith("/")) return false;
@@ -78,6 +115,7 @@ export function SessionView({
       onSendChat(t);
     }
     setDraft("");
+    setCursor(0);
   };
 
   const sending = pendingChatSend?.status === "pending";
@@ -189,13 +227,40 @@ export function SessionView({
             onSelect={(entry) => {
               const head = entry.name + " ";
               setDraft(head);
+              setCursor(head.length);
             }}
           />
+          {mentionEligible && daemonId && fsListSender && (
+            <MentionAutocomplete
+              draft={draft}
+              cursor={cursor}
+              onChange={setDraftAndCursor}
+              daemonId={daemonId}
+              cwd={header.cwd}
+              sender={fsListSender}
+            />
+          )}
           <input
+            ref={inputRef}
             className="border-border bg-muted focus:border-ring focus:ring-ring/30 disabled:text-disabled h-11 min-w-0 flex-1 rounded-md border px-3 text-base outline-none focus:ring-2"
             data-testid="chat-input"
             disabled={composerDisabled}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              setCursor(e.target.selectionStart ?? e.target.value.length);
+            }}
+            onSelect={(e) => {
+              const tgt = e.currentTarget;
+              setCursor(tgt.selectionStart ?? tgt.value.length);
+            }}
+            onKeyUp={(e) => {
+              const tgt = e.currentTarget;
+              setCursor(tgt.selectionStart ?? tgt.value.length);
+            }}
+            onClick={(e) => {
+              const tgt = e.currentTarget;
+              setCursor(tgt.selectionStart ?? tgt.value.length);
+            }}
             placeholder={
               composerBlocked
                 ? "Waiting for permission"

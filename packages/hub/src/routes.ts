@@ -432,6 +432,12 @@ export function makeServer(opts: MakeServerOpts = {}) {
             pf,
             { user: ws.data.user ?? "anonymous", user_id: ws.data.user_id ?? "anonymous" },
           );
+        } else if (pf.type === "fs_list") {
+          router.onPwaFsList(
+            pf,
+            ws.data.key,
+            (f) => ws.send(JSON.stringify(f)),
+          );
         }
       }
     },
@@ -441,6 +447,7 @@ export function makeServer(opts: MakeServerOpts = {}) {
         router.onDaemonDisconnect(ws.data.key);
       } else {
         pwaReg.remove(ws.data.key);
+        router.onPwaDisconnect(ws.data.key);
       }
     },
   };

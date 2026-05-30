@@ -5,8 +5,16 @@ import { cn } from "../lib/utils";
 import type { DaemonViewModel, SessionRowViewModel } from "../lib/daemonViewModel";
 import { StatusChip } from "./primitives/StatusChip";
 import { StatusIcon } from "./primitives/StatusIcon";
-import type { PwaStartSessionRejected } from "@cc-remote/proto";
+import type { PwaStartSessionRejected, PwaFsListResult } from "@cc-remote/proto";
 import type { PendingCommand } from "../hooks/pendingCommands";
+import { PathAutocomplete } from "./primitives/PathAutocomplete";
+
+type FsListSender = (
+  daemon_id: string,
+  parent: string,
+  request_id: string,
+  onResult: (frame: PwaFsListResult) => void,
+) => () => void;
 
 function daemonLabel(d: { display_name: string | null; hostname: string }): string {
   return d.display_name ?? d.hostname;
@@ -23,6 +31,8 @@ export interface HomeScreenProps {
   onDismissStartSessionError?: (daemon_id: string) => void;
   pendingStartSessionByDaemon?: Record<string, PendingCommand>;
   pendingKillByKey?: Record<string, PendingCommand>;  // key: `${daemon_id}::${session_id}`
+  /** Hub fs_list sender — wired through PathAutocomplete in the cwd field. Optional so test renders that don't care can omit it. */
+  fsListSender?: FsListSender;
 }
 
 export function HomeScreen({
@@ -35,6 +45,7 @@ export function HomeScreen({
   onDismissStartSessionError,
   pendingStartSessionByDaemon,
   pendingKillByKey,
+  fsListSender,
 }: HomeScreenProps) {
   const [killConfirm, setKillConfirm] = useState<string | null>(null);
 
@@ -74,6 +85,7 @@ export function HomeScreen({
               onDismissStartSessionError={onDismissStartSessionError}
               pendingStart={pendingStartSessionByDaemon?.[d.daemon_id]}
               pendingKillByKey={pendingKillByKey}
+              fsListSender={fsListSender}
             />
           ) : (
             <OfflineDaemonCard key={d.daemon_id} daemon={d} />
@@ -97,6 +109,7 @@ function DaemonCard({
   onDismissStartSessionError,
   pendingStart,
   pendingKillByKey,
+  fsListSender,
 }: {
   daemon: DaemonViewModel;
   killConfirm: string | null;
@@ -109,6 +122,7 @@ function DaemonCard({
   onDismissStartSessionError?: (daemon_id: string) => void;
   pendingStart?: PendingCommand;
   pendingKillByKey?: Record<string, PendingCommand>;
+  fsListSender?: FsListSender;
 }) {
   const [cwd, setCwd] = useState("");
 
@@ -139,14 +153,30 @@ function DaemonCard({
       </div>
 
       <form className="mt-3 flex gap-2" onSubmit={submit}>
-        <input
-          aria-label={`Working directory for ${daemonLabel(daemon)}`}
-          className="border-border bg-muted text-foreground focus:border-ring focus:ring-ring/30 h-11 min-w-0 flex-1 rounded-md border px-3 font-mono text-sm outline-none focus:ring-2"
-          disabled={starting}
-          onChange={(e) => setCwd(e.target.value)}
-          placeholder="/path/to/project"
-          value={cwd}
-        />
+        {fsListSender ? (
+          <PathAutocomplete
+            value={cwd}
+            onChange={setCwd}
+            daemonId={daemon.daemon_id}
+            mode="dirs"
+            baseHint="/"
+            sender={fsListSender}
+            inputProps={{
+              "aria-label": `Working directory for ${daemonLabel(daemon)}`,
+              placeholder: "/path/to/project",
+              disabled: starting,
+            }}
+          />
+        ) : (
+          <input
+            aria-label={`Working directory for ${daemonLabel(daemon)}`}
+            className="border-border bg-muted text-foreground focus:border-ring focus:ring-ring/30 h-11 min-w-0 flex-1 rounded-md border px-3 font-mono text-sm outline-none focus:ring-2"
+            disabled={starting}
+            onChange={(e) => setCwd(e.target.value)}
+            placeholder="/path/to/project"
+            value={cwd}
+          />
+        )}
         <Button aria-label="Start session" disabled={!cwd.trim() || starting} size="icon" type="submit">
           {starting ? (
             <span className="animate-spin" data-testid="start-spinner">…</span>

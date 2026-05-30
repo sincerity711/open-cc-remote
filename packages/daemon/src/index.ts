@@ -21,6 +21,7 @@ import { openDb } from "./db.ts";
 import { recordRequest, resolveRequest } from "./repos/permissions.ts";
 import { handleHubChatSend, handlePluginChatOut } from "./chat.ts";
 import { SessionFsm } from "./session-fsm.ts";
+import { handleFsList } from "./fs-list.ts";
 import { ClaudeCodeAdapter } from "./adapters/claude-code.ts";
 import { precheckStartSession } from "./start-session.ts";
 import { ensureMcpConfig } from "./mcp-config.ts";
@@ -397,6 +398,21 @@ const hub = startHubClient({
         },
         spawn: (cmd, args) => { childSpawn(cmd, args, { stdio: "ignore" }); },
         log: (m) => { process.stderr.write(`daemon: ${m}\n`); },
+      });
+    }
+    else if (frame.type === "fs_list") {
+      // Folder autocomplete fires on every PWA keystroke. Stay quiet at info
+      // level; whitelist + readdir errors are surfaced via the reply frame.
+      handleFsList(frame).then((reply) => {
+        hub.send(reply);
+      }).catch((e) => {
+        process.stderr.write(`daemon: fs_list unexpected error: ${(e as Error).message}\n`);
+        hub.send({
+          type: "fs_list_result",
+          request_id: frame.request_id,
+          ok: false,
+          error: "io",
+        });
       });
     }
   },
