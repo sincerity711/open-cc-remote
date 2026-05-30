@@ -145,6 +145,14 @@ test("ask-user-question relay: hook → daemon → PWA → answer round-trip", a
     await sc.step("session-row-appears", async () => {
       const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
       await sessionsList.getByTestId("session-row").first().waitFor({ timeout: 30_000 });
+      // Open the session BEFORE the hook fires. Since commit 7114777
+      // (May 28), the PWA only renders AskQuestionSurface for the
+      // currently-selected session — the right drawer no longer pops on
+      // the daemons-list view. So the test must open the matching
+      // session first; otherwise pendingQuestions never resolves into a
+      // visible surface and we time out on `ask-question-surface`.
+      await sessionsList.getByTestId("session-row").first().click();
+      await session.page.getByTestId("session-view").waitFor({ timeout: 5_000 });
     });
 
     await sc.step("hook-fires", async () => {

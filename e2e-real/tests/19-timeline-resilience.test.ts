@@ -31,6 +31,7 @@ import { pairAndStartDaemon, makeScenarioContext } from "../helpers/scenario.ts"
 import { preflightOrThrow } from "../helpers/preflight.ts";
 import { syncIfPassed } from "../helpers/sync-screenshots.ts";
 import { replayJsonlTape } from "../helpers/replay-jsonl.ts";
+import { expandFirstToolGroup } from "../helpers/timeline.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..");
@@ -126,6 +127,9 @@ test("timeline survives page reload — request_history rebuilds the same cards"
     await sc.step("tape-replayed", async () => {
       await replayJsonlTape({ jsonlPath, tapePath, lineDelayMs: 80 });
       const timeline = session.page.getByTestId("timeline");
+      // Tool calls fold into a collapsible group post-polish — expand
+      // before asserting on per-tool article chrome.
+      await expandFirstToolGroup(session.page);
       await expect(timeline.locator("article", { hasText: "Bash" }).first()).toBeVisible({ timeout: 15_000 });
       await expect(timeline.locator("code", { hasText: "ls -F /tmp" }).first()).toBeVisible({ timeout: 15_000 });
     });
@@ -150,6 +154,9 @@ test("timeline survives page reload — request_history rebuilds the same cards"
       // that can populate the timeline now is request_history → daemon
       // readHistory of the JSONL file.
       const timeline = session.page.getByTestId("timeline");
+      // History rebuild also lands tool events that fold into a group;
+      // expand again on this fresh tab.
+      await expandFirstToolGroup(session.page);
       await expect(timeline.locator("article", { hasText: "Bash" }).first()).toBeVisible({ timeout: 15_000 });
       await expect(timeline.locator("code", { hasText: "ls -F /tmp" }).first()).toBeVisible({ timeout: 15_000 });
       await expect(

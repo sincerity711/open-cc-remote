@@ -27,32 +27,12 @@ import { pairAndStartDaemon, makeScenarioContext } from "../helpers/scenario.ts"
 import { preflightOrThrow } from "../helpers/preflight.ts";
 import { syncIfPassed } from "../helpers/sync-screenshots.ts";
 import { replayJsonlTape } from "../helpers/replay-jsonl.ts";
-import type { Page } from "@playwright/test";
+import { expandFirstToolGroup } from "../helpers/timeline.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..");
 const fakeClaudeBin = resolve(repoRoot, "tools", "fake-claude", "fake-claude.ts");
 const tapesDir = resolve(__dirname, "..", "fixtures", "jsonl-tapes");
-
-/**
- * Post-polish, consecutive tool calls fold into a collapsible
- * `tool-group` whose content is hidden until the user expands it. When a
- * test wants to assert on per-tool card chrome (Bash/Edit/Read article,
- * Success/Failed pill, View output button), it must expand the group
- * first — that's what the user would do. Idempotent: if the group is
- * already open or there is no group, no-op.
- */
-async function expandFirstToolGroup(page: Page) {
-  const group = page.getByTestId("timeline").getByTestId("tool-group").first();
-  // Wait a beat so a freshly-replayed tape has time to land in the
-  // timeline reducer; if no group ever appears, fall through silently —
-  // the caller's assertion will fail with its own meaningful timeout.
-  if (await group.isVisible({ timeout: 15_000 }).catch(() => false)) {
-    if ((await group.getAttribute("data-expanded")) !== "true") {
-      await group.locator("button[aria-expanded]").first().click();
-    }
-  }
-}
 
 let preview: PreviewHandle;
 

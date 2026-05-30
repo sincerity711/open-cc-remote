@@ -7,26 +7,28 @@
 // auto-scroll (the autoScroll effect then advances the anchor and the pill
 // dismisses).
 //
-// Approach:
-//   1. Boot real claude with the chat-priming prompt so we get a session
-//      and the channel-reply tool wiring.
-//   2. Open the session and send a first chat so the timeline has at least
-//      one user bubble + assistant card. While at the bottom the lastSeen
-//      anchor advances to the latest jsonl_offset.
-//   3. Force the timeline scroll position to the top via evaluate() — this
-//      flips `autoScroll` to `false` via the existing onScroll handler. We
-//      do this even when content is shorter than the viewport (the onScroll
-//      handler still fires from a programmatic scrollTop change).
-//   4. Send a second chat. The round-tripped event has offset > lastSeen →
-//      unreadCount > 0; while scrolled up the pill must appear.
-//   5. Click the pill: it must scroll to bottom; the autoScroll effect
-//      advances lastSeen, unreadCount returns to 0, and the pill dismisses.
+// Pre-polish this scenario booted real claude and round-tripped two chat
+// messages. That worked when claude replied via plain TEXT_MESSAGE chunks,
+// but real claude now reaches for `mcp__cc-remote__reply` (the plugin's
+// reply tool) — which fires a PreToolUse permission gate the moment claude
+// answers the first chat. The PWA composer then locks ("Waiting for
+// permission") and the second chat never lands in JSONL → unreadCount = 0
+// → pill never shows. The race is unrelated to the pill behavior we
+// actually want to test.
+//
+// Switched to the same mock-driven shape as 12-chat-roundtrip:
+// fake-claude with --jsonl-mirror writes the user + assistant lines into
+// the daemon's JSONL directly. No plugin, no permission gate, deterministic
+// timing. We get a clean "first event lands → user scrolls up → second
+// event lands → pill appears" cycle.
 
 import { test, expect } from "@playwright/test";
-import { resolve, dirname } from "node:path";
+import { spawn, type ChildProcess } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { upCompose, downCompose } from "../helpers/compose.ts";
-import { startClaudeTmux } from "../helpers/claude-tmux.ts";
 import { openPwa } from "../helpers/pwa-browser.ts";
 import { startPreview, type PreviewHandle } from "../helpers/preview-server.ts";
 import { pairAndStartDaemon, makeScenarioContext } from "../helpers/scenario.ts";
@@ -35,7 +37,7 @@ import { syncIfPassed } from "../helpers/sync-screenshots.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..", "..");
-const pluginEntry = resolve(repoRoot, "packages", "plugin", "src", "index.ts");
+const fakeClaudeBin = resolve(repoRoot, "tools", "fake-claude", "fake-claude.ts");
 
 let preview: PreviewHandle;
 
@@ -55,13 +57,18 @@ test.afterEach(async ({}, testInfo) => {
 });
 
 test("new events pill: appears while scrolled up, scrolls and dismisses on click", async ({ page }, testInfo) => {
-  test.setTimeout(240_000);
+  test.setTimeout(180_000);
 
   const daemon_id = `pill-${Date.now()}`;
+  const projectsRoot = mkdtempSync(join(tmpdir(), "ccr-pill-projects-"));
+  const sessionCwd = "/private/tmp/cc-remote-mock-pill";
+  const sessionId = "mock-pill-session";
+
   const handle = await pairAndStartDaemon({
     daemon_id,
     hub_url: "ws://localhost:7745",
     hub_http: "http://localhost:7745",
+    extra_env: { CLAUDE_PROJECTS_DIR: projectsRoot },
   });
 
   await page.close();
@@ -79,38 +86,46 @@ test("new events pill: appears while scrolled up, scrolls and dismisses on click
     projectName: testInfo.project.name,
   });
 
-  let claude: { stop: () => void } | undefined;
+  let fakeClaude: ChildProcess | undefined;
   try {
     await sc.step("home-after-login", async () => {
       await session.page.getByTestId("home-screen").waitFor({ timeout: 30_000 });
     });
 
-    claude = await startClaudeTmux({
-      cwd: "/tmp",
-      prompt: "Acknowledge with the single word: ready.",
-      sendPrompt: true,
-      sessionName: `ccr-pill-${daemon_id}`,
-      socketPath: handle.socket_path,
-      mcpConfigPath: `${handle.state_dir}/cc-remote-mcp.json`,
-      pluginEntryPath: pluginEntry,
-    });
+    // fake-claude --auto-reply + --jsonl-mirror: every chat_in lands as a
+    // <channel> user line + a canned assistant line in the JSONL the
+    // daemon is watching. No real model, no permission gate.
+    fakeClaude = spawn(
+      "bun",
+      [
+        fakeClaudeBin,
+        "--session-id", sessionId,
+        "--claude-session-id", sessionId,
+        "--cwd", sessionCwd,
+        "--socket", handle.socket_path,
+        "--auto-reply", "ok",
+        "--jsonl-mirror", "true",
+      ],
+      { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, CLAUDE_PROJECTS_DIR: projectsRoot } },
+    );
 
     await sc.step("session-opened", async () => {
       const sessionsList = session.page.getByTestId(`sessions-${daemon_id}`);
       const sessionRow = sessionsList.getByTestId("session-row").first();
-      await sessionRow.waitFor({ timeout: 90_000 });
+      await sessionRow.waitFor({ timeout: 60_000 });
       await sessionRow.click();
       await session.page.getByTestId("session-view").waitFor({ timeout: 5_000 });
     });
 
-    // Send a first chat so the timeline has content. We don't actually need
-    // claude to reply — a single user bubble plus the channel-broadcast
-    // event suffices for the timeline to be rendered with items.
+    // Send a first chat so the timeline has content. While at the bottom
+    // the lastSeen anchor advances to the resulting jsonl_offset.
     await sc.step("first-chat-sent", async () => {
       await session.page.getByTestId("chat-input").fill("hi");
       await session.page.getByTestId("chat-input").press("Enter");
-      // The user bubble must appear in the timeline.
       await expect(session.page.getByTestId("timeline")).toContainText("hi", { timeout: 10_000 });
+      // Wait for the auto-reply too — once it lands, lastSeen is fully
+      // caught up and we know any future event will increment unreadCount.
+      await expect(session.page.getByTestId("timeline")).toContainText("ok", { timeout: 10_000 });
     });
 
     await sc.step("force-scrolled-up", async () => {
@@ -122,7 +137,6 @@ test("new events pill: appears while scrolled up, scrolls and dismisses on click
       await session.page.evaluate(() => {
         const tl = document.querySelector('[data-testid="timeline"]') as HTMLElement | null;
         if (!tl) throw new Error("no [data-testid=timeline]");
-        // Add inline padding to force scrollable overflow.
         const inner = tl.firstElementChild as HTMLElement | null;
         if (inner) inner.style.minHeight = (tl.clientHeight + 2000) + "px";
         tl.scrollTop = 0;
@@ -131,17 +145,14 @@ test("new events pill: appears while scrolled up, scrolls and dismisses on click
     });
 
     await sc.step("pill-appears-on-new-event", async () => {
-      // While scrolled up, send a second chat. The round-tripped event has
-      // jsonl_offset > the frozen lastSeen anchor → unreadCount > 0 → pill.
-      // 60s timeout — real claude might still be mid-reply to "hi" when this
-      // chat lands; the channel notification queues until claude's next
-      // turn boundary, so the JSONL write that drives the pill can take
-      // 15-30s in the worst case (vs. ~2s when idle). Mirrors the pattern
-      // in scenario 12 (chat round-trip) which uses 30s for assistant reply.
+      // While scrolled up, send a second chat. Both the user line and the
+      // auto-reply will land via JSONL — both have offset > the frozen
+      // lastSeen anchor → unreadCount > 0; while scrolled up the pill
+      // must appear.
       const SECOND = `MSG-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
       await session.page.getByTestId("chat-input").fill(SECOND);
       await session.page.getByTestId("chat-input").press("Enter");
-      await session.page.getByTestId("timeline-jump-new").waitFor({ timeout: 60_000 });
+      await session.page.getByTestId("timeline-jump-new").waitFor({ timeout: 30_000 });
       await expect(session.page.getByTestId("timeline-jump-new")).toBeVisible();
     });
 
@@ -155,8 +166,11 @@ test("new events pill: appears while scrolled up, scrolls and dismisses on click
       });
     });
   } finally {
-    claude?.stop();
+    if (fakeClaude && fakeClaude.exitCode === null) {
+      try { fakeClaude.kill("SIGTERM"); } catch {}
+    }
     await session.close();
     await handle.cleanup();
+    try { rmSync(projectsRoot, { recursive: true, force: true }); } catch {}
   }
 });
