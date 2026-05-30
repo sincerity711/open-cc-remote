@@ -25,7 +25,10 @@ export function ChatBubble({
     <div className={cn("flex", align === "end" ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "rounded-bubble max-w-[86%] px-3.5 py-3 text-[15px] leading-snug",
+          // px-4 + relaxed leading reads more like a chat message.
+          // Earlier `leading-snug` (1.375) felt cramped for multi-line
+          // markdown — ~1.6 lets paragraphs breathe.
+          "rounded-bubble max-w-[86%] px-4 py-3 text-[15px] leading-relaxed cc-transition-state",
           tone === "primary" && "bg-primary-subtle text-foreground",
           tone === "neutral" && "bg-surface border-border shadow-card border",
         )}
