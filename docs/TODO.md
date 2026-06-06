@@ -70,6 +70,25 @@ These are deferred follow-ups beyond what the 16 plans + rework + real-e2e + cha
 4. ~~**Real push notification chain**~~ — **PARTIAL** (Web Push end-to-end shipped via `plan-push-topics-04-deploy`; native APNs/FCM SDKs deliberately skipped, browsers bridge to them).
 5. **Security audit** — IAS device pairing, WS auth, and the channel-permission protocol have not been threat-modeled end-to-end.
 
+## AionUi 借鉴 6 项 (surfaced 2026-06-06)
+
+调研背景见 `docs/research/aionui-comparison.md`。已确认决策：**不走 ACP**，但抄 6 条值得借鉴的工程做法。逐项串行做，按下面顺序。
+
+**Phase 1 — 健壮性地基**
+
+1. **WebSocket 心跳 (#6)** — IN PROGRESS. PWA 主动 ping、hub 回 pong。当前 `useHub.ts:650-728` 有指数退避 + frameless-open 鉴权检测，但 `grep ping|heartbeat|setInterval` 在 PWA 和 hub 双向均 0 命中。Spec 起草中。
+2. **进程残留兜底 (#4)** — daemon 当前 `start_session` spawn 完 `r.unref()` 就走，**完全没有** PID / process group registry。崩溃后留下的 tmux session 现在靠用户手动 `tmux kill-session` 清。抄 AionUi `web-host/src/agent-process-registry.ts` 模式：`runtime/agent-process-registry.json` + 启动遍历清理。
+
+**Phase 2 — Proto 改造（一次性）**
+
+3. **AgentHandshake 4 块元数据 (#3)** — `slash-inventory.ts` 有 `available_commands` 雏形，`agent_capabilities / available_modes / available_models` 都没有。需要 daemon 探测 (先实验 `claude --capabilities` 是否存在，否则 sniff `~/.claude/settings.json`) + 新 frame `agent_handshake` + PWA 新 hook `useAgentCapabilities`。
+
+**Phase 3 — UX 抛光**
+
+4. **Thinking 折叠 + elapsed (#1)** — `renderTimelineItem.tsx:90-100` 当前 11 行裸文本渲染 Reasoning。抄 AionUi `MessageThinking.tsx` 95 行的折叠 + elapsed 计时 + done 三态。
+5. **Permission/Ask 答完回执 (#5)** — `InlinePermissionCard` 已超过 AionUi（tokenized command + risk detection），但答完直接消失没回执。补 AionUi 的"绿色 ✓ banner"或 fade-out 反馈。`AskQuestionSurface` 维持 modal 形态（小屏 PWA 聚焦更好），不抄 inline。
+6. **流式合并审计 (#2)** — `mergeTimeline` 已经按 `toolCallId` 覆盖（实质做了）。最后一项是审计 `TextMessageChunk` / `ReasoningMessageChunk` 是不是也按 `messageId` 累计而非 append。预期是已经做好的，零行到半天的代码量。
+
 ## Plan completed (2026-05-26)
 
 - `docs/superpowers/specs/2026-05-25-push-topics-design.md` + plans 01–04 — push topic registry, per-daemon mute, DND, PWA manifest, e2e scenario 21. Tagged `plan-push-topics-01-foundation` … `plan-push-topics-04-deploy`. Hub: migration v3 (`topic_subscriptions` + `dnd_settings`), `push-topics.ts` registry, `topic-subscriptions` repo with 3-level resolution, `dnd.ts` + repo, `dispatchTopic` central function, router refactored to delete 4 private dispatchers, new HTTP API (`GET /push/topics`, `PUT/DELETE /push/topics/subscriptions`, `PUT /push/dnd`), legacy `/push/preferences` shim translates to topic_subscriptions, sw.js renders server-built body/tag. PWA: `usePushTopics` hook (replaces `usePushPrefs`), data-driven `SettingsDrawer` Notifications section (DND + Defaults + Per-daemon overrides), `manifest.webmanifest` + maskable icons + apple-touch-icon. Ops: `docs/operations/push-deployment.md`. Tests: 430 unit (was 293; +137 new) + e2e scenario 21 green.
