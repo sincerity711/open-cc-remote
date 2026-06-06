@@ -21,12 +21,15 @@ import { CatalogCard, type CatalogCardTone } from "./cards/CatalogCard";
 import { CatalogHeader } from "./cards/CatalogHeader";
 import { AssistantBubbleLive } from "./cards/AssistantBubble";
 import { UserBubbleLive } from "./cards/UserBubble";
+import { ReasoningCard } from "./ReasoningCard";
 import { SessionTimelineItem, type TimelineMarker } from "./SessionTimelineItem";
 import type { RenderItem } from "./types";
 import { toolStatusFromResult, type ToolStatus } from "../../lib/view-helpers";
+import type { ReasoningStatus } from "../../lib/reasoning-status";
 
 export function renderTimelineItem(
   item: RenderItem,
+  reasoningStatus?: Map<string, ReasoningStatus>,
 ): React.ReactElement {
   const marker = pickMarker(item);
 
@@ -59,8 +62,10 @@ export function renderTimelineItem(
         </SessionTimelineItem>
       );
 
-    case "agui":
-      return renderAgUi(item.id, item.event, item.ts, marker);
+    case "agui": {
+      const status = reasoningStatus?.get(item.id) ?? "active";
+      return renderAgUi(item.id, item.event, item.ts, marker, status);
+    }
   }
 }
 
@@ -69,6 +74,7 @@ function renderAgUi(
   event: AGUIEvent,
   ts: number,
   marker: TimelineMarker,
+  reasoningStatus: ReasoningStatus,
 ): React.ReactElement {
   switch (event.type) {
     case EventType.TEXT_MESSAGE_CHUNK: {
@@ -91,12 +97,12 @@ function renderAgUi(
       const ev = event as ReasoningMessageChunkEvent;
       return (
         <SessionTimelineItem key={id} marker={marker}>
-          <CatalogCard>
-            <CatalogHeader title="Reasoning" />
-            <p className="mt-2 text-sm leading-5 whitespace-pre-wrap">
-              {ev.delta ?? "(no reasoning text)"}
-            </p>
-          </CatalogCard>
+          <ReasoningCard
+            event={ev}
+            ts={ts}
+            status={reasoningStatus}
+            startedAt={ts}
+          />
         </SessionTimelineItem>
       );
     }
