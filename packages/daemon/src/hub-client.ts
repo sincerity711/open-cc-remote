@@ -6,7 +6,7 @@ export interface HubClientOptions {
   hub_url: string;
   daemon_id: string;
   hello: () => DaemonToHub;
-  onFrame: (frame: HubToDaemon) => void;
+  onFrame: (frame: HubToDaemon) => void | Promise<void>;
   /**
    * Optional: invoked after every successful (re)connect, *after* hello has
    * been sent. Returns frames to re-send to the hub — used to replay

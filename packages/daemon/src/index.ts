@@ -26,6 +26,7 @@ import { ClaudeCodeAdapter } from "./adapters/claude-code.ts";
 import { precheckStartSession } from "./start-session.ts";
 import { ensureMcpConfig } from "./mcp-config.ts";
 import { createPendingStarts } from "./pending-starts.ts";
+import { createProcessRegistry } from "./process-registry.ts";
 import { initOtel, shutdownOtel } from "@cc-remote/observability";
 import { beginRoundTrip, withSessionChildSpan, endRoundTrip } from "./otel.ts";
 
@@ -179,6 +180,20 @@ const askToClient = new Map<string, AskPending>();
 const slashInventoryBySession = new Map<string, import("@cc-remote/proto").SlashEntry[]>();
 const pendingStarts = createPendingStarts({ ttlMs: 60_000 });
 
+// Process registry — reconcile-only on boot. Spec at
+// docs/superpowers/specs/2026-06-07-process-registry-design.md. We must run
+// reconcile BEFORE startHubClient so the hub never sees a session list that
+// includes already-dead tmuxes (and so a freshly-connected PWA cannot race
+// us with kill_session against an entry we're about to drop).
+const registry = createProcessRegistry({
+  stateDir: cfg.state_dir,
+  log: (m) => process.stderr.write(`daemon: ${m}\n`),
+});
+{
+  const { kept, dropped } = await registry.reconcile();
+  process.stderr.write(`daemon: tmux registry reconciled (kept=${kept} dropped=${dropped})\n`);
+}
+
 const hub = startHubClient({
   hub_url: cfg.hub_url,
   daemon_id: cfg.daemon_id,
@@ -215,7 +230,7 @@ const hub = startHubClient({
     }
     return out;
   },
-  onFrame: (frame: HubToDaemon) => {
+  onFrame: async (frame: HubToDaemon) => {
     if (frame.type === "permission_reply") {
       const ok = resolveRequest(db, frame.request_id, frame.decision, "pwa");
       if (!ok) return; // already resolved
@@ -302,13 +317,30 @@ const hub = startHubClient({
         process.stderr.write(`daemon: kill_session ignored (allow_kill=false in config)\n`);
         return;
       }
+      // Resolve tmux name via the LiveSessions snapshot — populated from the
+      // plugin's TMUX_SESSION env at registration time (plugin/src/session.ts).
+      // A non-tmux session has tmux_session=null; we still tear the plugin
+      // socket down but skip the tmux kill (correct: nothing to kill).
+      const session = sessions.get(frame.session_id);
+      const tmuxName = session?.tmux_session ?? null;
       const client = sessionToClient.get(frame.session_id);
-      if (!client) {
+      if (!session && !client) {
         process.stderr.write(`daemon: kill_session for unknown session ${frame.session_id}\n`);
         return;
       }
-      process.stderr.write(`daemon: killing session ${frame.session_id}\n`);
-      try { client.destroy(); } catch {}
+      process.stderr.write(`daemon: killing session ${frame.session_id} tmux=${tmuxName ?? "<unknown>"}\n`);
+      if (tmuxName) {
+        // Best-effort: tmux exits non-zero if the session vanished — fine,
+        // already-gone is the desired terminal state.
+        childSpawn("tmux", ["kill-session", "-t", tmuxName], { stdio: "ignore" })
+          .on("error", () => {});
+        // Fire-and-forget: file write is non-critical for correctness; next
+        // boot's reconcile drops it if this happens to fail. Kill latency
+        // stays under one tick.
+        void registry.remove(tmuxName);
+      }
+      // Last so the plugin gets EOF after the tmux kill is in flight.
+      try { client?.destroy(); } catch {}
     }
     else if (frame.type === "start_session") {
       const requestId = frame.request_id ?? null;
@@ -353,6 +385,17 @@ const hub = startHubClient({
         r.unref();
         process.stderr.write(`daemon: spawned tmux session ${tmuxName} in ${cwd}\n`);
         pendingStarts.add(requestId ?? undefined, cwd);
+        // Record in the on-disk registry BEFORE proceeding so a racing
+        // kill_session frame can find the entry. The await adds one fs
+        // round-trip (~1ms), well below human-perceptible.
+        // request_id: HubToDaemonStartSession does not carry one — persist null.
+        await registry.add({
+          tmux_name: tmuxName,
+          cwd,
+          spawn_command: cfg.spawn_command!,
+          created_at_ms: Date.now(),
+          request_id: null,
+        });
         // Best-effort dismissal of Claude Code's interactive dialogs
         // (dev-channels confirmation, workspace-trust). Without this, a
         // PWA-driven new-session sits at the dialog forever — there's nobody
