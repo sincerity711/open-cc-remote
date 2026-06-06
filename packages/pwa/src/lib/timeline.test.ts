@@ -30,6 +30,7 @@ describe("mergeTimeline", () => {
         }, 2000),
       ],
       resolved: [],
+      askResolved: [],
     });
     expect(items.length).toBe(2);
     expect(items[0]?.tag).toBe("agui");
@@ -52,6 +53,7 @@ describe("mergeTimeline", () => {
         }, 2000),
       ],
       resolved: [],
+      askResolved: [],
     });
     expect(items.length).toBe(1);
     expect(items[0]?.tag).toBe("agui");
@@ -74,6 +76,7 @@ describe("mergeTimeline", () => {
         }, 2000),
       ],
       resolved: [],
+      askResolved: [],
     });
     expect(items.length).toBe(1);
     expect(items[0]?.tag).toBe("tool");
@@ -95,9 +98,51 @@ describe("mergeTimeline", () => {
         }, 1000),
       ],
       resolved: [],
+      askResolved: [],
     });
     expect(items.length).toBe(1);
     expect(items[0]?.tag).toBe("tool");
     if (items[0]?.tag === "tool") expect(items[0].result).toBeUndefined();
+  });
+
+  test("emits ask-question-resolved RenderItem from askResolved input", () => {
+    const items = mergeTimeline({
+      events: [],
+      resolved: [],
+      askResolved: [
+        {
+          type: "ask_user_question_resolved",
+          daemon_id: "d", session_id: "s",
+          request_id: "ask-x",
+          resolution: "answered",
+        } as any,
+      ],
+    });
+    expect(items.length).toBe(1);
+    expect(items[0]?.tag).toBe("ask-question-resolved");
+    if (items[0]?.tag === "ask-question-resolved") {
+      expect(items[0].id).toBe("ask-resolved:ask-x");
+      expect(items[0].resolved.resolution).toBe("answered");
+    }
+  });
+
+  test("emits permission-resolved RenderItem from resolved input", () => {
+    const items = mergeTimeline({
+      events: [],
+      resolved: [
+        {
+          type: "permission_resolved",
+          daemon_id: "d", session_id: "s",
+          request_id: "p-x",
+          decision: "allow", decided_via: "pwa",
+        } as any,
+      ],
+      askResolved: [],
+    });
+    expect(items.length).toBe(1);
+    expect(items[0]?.tag).toBe("permission-resolved");
+    if (items[0]?.tag === "permission-resolved") {
+      expect(items[0].id).toBe("perm-resolved:p-x");
+    }
   });
 });

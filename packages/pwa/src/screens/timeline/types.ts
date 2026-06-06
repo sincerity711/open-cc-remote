@@ -1,5 +1,6 @@
 import type {
   AGUIEvent,
+  PwaAskUserQuestionResolved,
   PwaPermissionResolved,
   ToolCallChunkEvent,
   ToolCallResultEvent,
@@ -30,4 +31,5 @@ export type RenderItem =
       chunk: ToolCallChunkEvent;
       result?: ToolCallResultEvent;
     }
-  | { tag: "permission-resolved"; id: string; ts: number; resolved: PwaPermissionResolved };
+  | { tag: "permission-resolved"; id: string; ts: number; resolved: PwaPermissionResolved }
+  | { tag: "ask-question-resolved"; id: string; ts: number; resolved: PwaAskUserQuestionResolved };

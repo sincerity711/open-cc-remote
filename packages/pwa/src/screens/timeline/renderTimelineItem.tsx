@@ -2,7 +2,6 @@ import {
   ChevronRight,
   type LucideIcon,
   Pencil,
-  ShieldCheck,
   Terminal,
   FileText,
 } from "lucide-react";
@@ -11,6 +10,8 @@ import type React from "react";
 import {
   EventType,
   type AGUIEvent,
+  type PwaAskUserQuestionRequest,
+  type PwaPermissionRequest,
   type ToolCallChunkEvent,
   type ToolCallResultEvent,
   type ReasoningMessageChunkEvent,
@@ -22,38 +23,63 @@ import { CatalogHeader } from "./cards/CatalogHeader";
 import { AssistantBubbleLive } from "./cards/AssistantBubble";
 import { UserBubbleLive } from "./cards/UserBubble";
 import { ReasoningCard } from "./ReasoningCard";
+import { ResolvedAskQuestionCard } from "./ResolvedAskQuestionCard";
+import { ResolvedPermissionCard } from "./ResolvedPermissionCard";
 import { SessionTimelineItem, type TimelineMarker } from "./SessionTimelineItem";
 import type { RenderItem } from "./types";
 import { toolStatusFromResult, type ToolStatus } from "../../lib/view-helpers";
 import type { ReasoningStatus } from "../../lib/reasoning-status";
 
+/**
+ * Read-only lookup tables threaded from `useHub` down through `SessionView`,
+ * `SessionTimeline`, and `renderTimelineGroup` so the renderer can resolve
+ * a `*_resolved` frame back to its original request payload + (locally
+ * captured) answers without reaching into hub state. Cross-device path
+ * misses fall through to placeholder bodies in the resolved cards.
+ */
+export interface RenderTimelineCtx {
+  permissionRequestHistory: Record<string, PwaPermissionRequest>;
+  askQuestionRequestHistory: Record<string, PwaAskUserQuestionRequest>;
+  askQuestionAnswerHistory: Record<string, (string | null)[]>;
+  /** Per-item reasoning status (active/done) computed in SessionTimeline. */
+  reasoningStatus?: Map<string, ReasoningStatus>;
+}
+
+const EMPTY_CTX: RenderTimelineCtx = {
+  permissionRequestHistory: {},
+  askQuestionRequestHistory: {},
+  askQuestionAnswerHistory: {},
+};
+
 export function renderTimelineItem(
   item: RenderItem,
-  reasoningStatus?: Map<string, ReasoningStatus>,
+  ctx: RenderTimelineCtx = EMPTY_CTX,
 ): React.ReactElement {
   const marker = pickMarker(item);
 
   switch (item.tag) {
-    case "permission-resolved":
+    case "permission-resolved": {
+      const request = ctx.permissionRequestHistory[item.resolved.request_id] ?? null;
       return (
         <SessionTimelineItem key={item.id} marker={marker}>
-          <CatalogCard
-            tone={item.resolved.decision === "allow" ? "success" : "danger"}
-          >
-            <CatalogHeader
-              icon={ShieldCheck}
-              title={
-                item.resolved.decision === "allow"
-                  ? "Permission granted"
-                  : item.resolved.decision === "deny"
-                    ? "Permission denied"
-                    : "Permission expired"
-              }
-              tone={item.resolved.decision === "allow" ? "success" : "danger"}
-            />
-          </CatalogCard>
+          <ResolvedPermissionCard resolved={item.resolved} request={request} />
         </SessionTimelineItem>
       );
+    }
+
+    case "ask-question-resolved": {
+      const request = ctx.askQuestionRequestHistory[item.resolved.request_id] ?? null;
+      const answers = ctx.askQuestionAnswerHistory[item.resolved.request_id] ?? null;
+      return (
+        <SessionTimelineItem key={item.id} marker={marker}>
+          <ResolvedAskQuestionCard
+            resolved={item.resolved}
+            request={request}
+            answers={answers}
+          />
+        </SessionTimelineItem>
+      );
+    }
 
     case "tool":
       return (
@@ -63,7 +89,7 @@ export function renderTimelineItem(
       );
 
     case "agui": {
-      const status = reasoningStatus?.get(item.id) ?? "active";
+      const status = ctx.reasoningStatus?.get(item.id) ?? "active";
       return renderAgUi(item.id, item.event, item.ts, marker, status);
     }
   }
@@ -161,6 +187,9 @@ function pickMarker(item: RenderItem): TimelineMarker {
       : item.resolved.decision === "terminal"
         ? "error"
         : "success";
+  }
+  if (item.tag === "ask-question-resolved") {
+    return item.resolved.resolution === "answered" ? "success" : "idle";
   }
   if (item.tag === "tool") {
     if (item.result && toolStatusFromResult(item.result) === "failure") return "error";
