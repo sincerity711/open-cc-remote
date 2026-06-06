@@ -6,7 +6,7 @@ export interface HubClientOptions {
   hub_url: string;
   daemon_id: string;
   hello: () => DaemonToHub;
-  onFrame: (frame: HubToDaemon) => void;
+  onFrame: (frame: HubToDaemon) => void | Promise<void>;
   jwt?: string;
   privateJwk?: JWK;
   backoffStartMs?: number;
