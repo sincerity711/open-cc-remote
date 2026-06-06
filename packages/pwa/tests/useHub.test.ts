@@ -529,6 +529,7 @@ test("ask_user_question_request adds to pendingQuestions; resolved clears it", (
   s = reducer(s, {
     type: "outbound_ask_answer",
     daemon_id: "d", session_id: "s", request_id: "ask-1", started_at: 1,
+    answers: ["docs/"],
   });
   expect(s.pendingQuestions["ask-1"]).toBeDefined();
   expect(s.pendingCommands["ask-1"]?.kind).toBe("ask_answer");
@@ -550,6 +551,7 @@ test("ask_user_question_resolved with no local pendingQuestions still clears pen
   let s = reducer(initialHubState(), {
     type: "outbound_ask_answer",
     daemon_id: "d", session_id: "s", request_id: "ask-2", started_at: 1,
+    answers: ["yes"],
   });
   expect(s.pendingCommands["ask-2"]?.kind).toBe("ask_answer");
   s = reducer(s, {
@@ -561,4 +563,119 @@ test("ask_user_question_resolved with no local pendingQuestions still clears pen
     },
   });
   expect(s.pendingCommands["ask-2"]).toBeUndefined();
+});
+
+// ─── Sticky history caches for ResolvedPermissionCard / ResolvedAskQuestionCard
+
+test("permission_request populates permissionRequestHistory (sticky cache)", () => {
+  const s = reducer(initialHubState(), {
+    type: "frame",
+    frame: {
+      type: "permission_request",
+      daemon_id: "d", session_id: "s",
+      request_id: "p-h1",
+      tool: "Bash", args_summary: "rm -rf /tmp",
+      expires_at: 1_700_000_000,
+    },
+  });
+  expect(s.pendingPermissions["p-h1"]).toBeDefined();
+  expect(s.permissionRequestHistory["p-h1"]).toBeDefined();
+  expect(s.permissionRequestHistory["p-h1"]?.args_summary).toBe("rm -rf /tmp");
+});
+
+test("permission_resolved leaves permissionRequestHistory intact (sticky)", () => {
+  let s = reducer(initialHubState(), {
+    type: "frame",
+    frame: {
+      type: "permission_request",
+      daemon_id: "d", session_id: "s",
+      request_id: "p-h2",
+      tool: "Bash", args_summary: "ls",
+      expires_at: 1_700_000_000,
+    },
+  });
+  s = reducer(s, {
+    type: "frame",
+    frame: {
+      type: "permission_resolved",
+      daemon_id: "d", session_id: "s",
+      request_id: "p-h2",
+      decision: "allow", decided_via: "pwa",
+    },
+  });
+  expect(s.pendingPermissions["p-h2"]).toBeUndefined();
+  // History MUST survive resolve so the resolved card can still look up the
+  // original tool/args_summary.
+  expect(s.permissionRequestHistory["p-h2"]?.args_summary).toBe("ls");
+});
+
+test("permission_resolved appends to permissionResolutions (per-session buffer)", () => {
+  let s = reducer(initialHubState(), {
+    type: "frame",
+    frame: {
+      type: "permission_resolved",
+      daemon_id: "d", session_id: "s",
+      request_id: "p-r1",
+      decision: "deny", decided_via: "pwa",
+    },
+  });
+  expect(s.permissionResolutions["d::s"]).toBeDefined();
+  expect(s.permissionResolutions["d::s"]?.length).toBe(1);
+  expect(s.permissionResolutions["d::s"]?.[0]?.request_id).toBe("p-r1");
+});
+
+test("ask_user_question_request populates askQuestionRequestHistory", () => {
+  const s = reducer(initialHubState(), {
+    type: "frame",
+    frame: {
+      type: "ask_user_question_request",
+      daemon_id: "d", session_id: "s",
+      request_id: "ask-h1",
+      questions: [{ question: "Q?", header: "", multiSelect: false, options: [{ label: "yes" }] }],
+      expires_at: 9999,
+    },
+  });
+  expect(s.askQuestionRequestHistory["ask-h1"]?.questions[0]?.question).toBe("Q?");
+});
+
+test("outbound_ask_answer populates askQuestionAnswerHistory", () => {
+  const s = reducer(initialHubState(), {
+    type: "outbound_ask_answer",
+    daemon_id: "d", session_id: "s", request_id: "ask-h2",
+    started_at: 1,
+    answers: ["docs/", null],
+  });
+  expect(s.askQuestionAnswerHistory["ask-h2"]).toEqual(["docs/", null]);
+});
+
+test("ask_user_question_resolved appends to askQuestionResolutions buffer", () => {
+  const s = reducer(initialHubState(), {
+    type: "frame",
+    frame: {
+      type: "ask_user_question_resolved",
+      daemon_id: "d", session_id: "s", request_id: "ask-r1",
+      resolution: "answered",
+    },
+  });
+  expect(s.askQuestionResolutions["d::s"]?.length).toBe(1);
+  expect(s.askQuestionResolutions["d::s"]?.[0]?.resolution).toBe("answered");
+});
+
+test("permissionRequestHistory evicts oldest at LRU bound (64)", () => {
+  let s = initialHubState();
+  for (let i = 0; i < 65; i++) {
+    s = reducer(s, {
+      type: "frame",
+      frame: {
+        type: "permission_request",
+        daemon_id: "d", session_id: "s",
+        request_id: `p${i}`,
+        tool: "Bash", args_summary: `cmd-${i}`,
+        expires_at: 0,
+      },
+    });
+  }
+  expect(Object.keys(s.permissionRequestHistory)).toHaveLength(64);
+  expect(s.permissionRequestHistory["p0"]).toBeUndefined();
+  expect(s.permissionRequestHistory["p64"]).toBeDefined();
 });

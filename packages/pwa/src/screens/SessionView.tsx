@@ -6,6 +6,7 @@ import { StatusChip } from "./primitives/StatusChip";
 import { ClaudeAvatar } from "./primitives/ClaudeAvatar";
 import { TypingIndicator } from "./primitives/TypingIndicator";
 import { SessionTimeline } from "./timeline/SessionTimeline";
+import type { RenderTimelineCtx } from "./timeline/renderTimelineItem";
 import type { RenderItem } from "./timeline/types";
 import type { PendingCommand } from "../hooks/pendingCommands";
 import { SlashMenu } from "./primitives/SlashMenu";
@@ -89,6 +90,8 @@ export interface SessionViewProps {
   onSendPermissionReply?: (decision: "allow" | "deny") => void;
   onBack: () => void;
   onDismissPendingCommand?: (id: string) => void;
+  /** Sticky-history lookups for resolved permission/ask receipt cards. */
+  renderCtx?: RenderTimelineCtx;
 }
 
 export function SessionView({
@@ -116,6 +119,7 @@ export function SessionView({
   onSendPermissionReply,
   onBack,
   onDismissPendingCommand,
+  renderCtx,
 }: SessionViewProps) {
   const [draft, setDraft] = useState("");
   const [cursor, setCursor] = useState(0);
@@ -222,6 +226,7 @@ export function SessionView({
           maxOffset={maxOffset}
           unreadCount={unreadCount}
           onMarkSeen={onMarkSeen}
+          renderCtx={renderCtx}
         />
         {header.state === "working" && shouldShowThinking(items) && (
           <div

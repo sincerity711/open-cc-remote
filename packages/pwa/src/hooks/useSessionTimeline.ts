@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
-import type { PwaPermissionRequest, PwaPermissionResolved } from "@cc-remote/proto";
+import type { PwaPermissionRequest } from "@cc-remote/proto";
 import { mergeTimeline } from "../lib/timeline";
 import type { RenderItem } from "../screens/timeline/types";
 import { eventKey, type UseHubResult } from "./useHub";
@@ -73,9 +73,12 @@ export function useSessionTimeline(
     const pending = Object.values(hub.pendingPermissions).filter(
       (p) => p.daemon_id === selected.daemon_id && p.session_id === selected.session_id,
     );
-    const resolved: PwaPermissionResolved[] = [];
+    // Source resolved frames from the per-session bounded buffers populated
+    // by the reducer on `*_resolved`. Empty for sessions with no resolutions.
+    const resolved = hub.permissionResolutions[k] ?? [];
+    const askResolved = hub.askQuestionResolutions[k] ?? [];
 
-    const items = mergeTimeline({ events, resolved });
+    const items = mergeTimeline({ events, resolved, askResolved });
 
     const daemon = hub.daemons.find((d) => d.daemon_id === selected.daemon_id);
     const session = daemon?.sessions.find((s) => s.session_id === selected.session_id);

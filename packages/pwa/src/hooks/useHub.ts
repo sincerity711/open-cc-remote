@@ -3,11 +3,13 @@ import type {
   HubToPwa, PwaToHub, DaemonView, EventFrameForPwa, PwaPermissionRequest,
   PwaChatBroadcast, PwaStartSessionRejected, SessionState, AGUIEvent, SlashEntry,
   PwaAskUserQuestionRequest, PwaFsListResult,
+  PwaPermissionResolved, PwaAskUserQuestionResolved,
 } from "@cc-remote/proto";
 import {
   createPending, confirmPending, failPending, timeoutPending, dismissPending, findPending,
   type PendingCommand, type PendingCommands,
 } from "./pendingCommands";
+import { insertWithLru } from "../lib/permission-history";
 import { startUserSpan, recordRenderSpan } from "../otel/runtime";
 
 export { type PendingCommand, type PendingCommands };
@@ -36,6 +38,14 @@ function dropStalePending(
 
 const PER_SESSION_BUFFER = 2000;
 const PER_SESSION_CHAT_BUFFER = 500;
+/**
+ * Per-session buffer for resolved permission/ask frames. The hub broadcasts
+ * `*_resolved` once and never resends; we retain a bounded tail so the
+ * timeline can render `ResolvedPermissionCard` / `ResolvedAskQuestionCard`
+ * receipts. 64 ≫ any realistic resolved-card count for a single visible
+ * timeline window.
+ */
+const PER_SESSION_RESOLUTION_BUFFER = 64;
 
 /**
  * Flat record for a single AG-UI event within a JSONL row.
@@ -118,6 +128,33 @@ export interface HubState {
    * keyed by `${daemon_id}::${session_id}`. Used by the composer's `/` menu.
    */
   slashInventory: Record<string, SlashEntry[]>;
+  /**
+   * Sticky LRU cache of permission requests indexed by `request_id`. Populated
+   * on `permission_request`; **never cleared on resolve** so the resolved card
+   * can still recover the original `tool` / `args_summary`. Bounded LRU (64).
+   */
+  permissionRequestHistory: Record<string, PwaPermissionRequest>;
+  /**
+   * Sticky LRU cache of ask requests, same contract as permissionRequestHistory.
+   */
+  askQuestionRequestHistory: Record<string, PwaAskUserQuestionRequest>;
+  /**
+   * Sticky LRU cache of the local PWA's own answers, captured when
+   * `outbound_ask_answer` is dispatched. The over-the-wire `*_resolved` frame
+   * does NOT echo answers, so cross-device PWAs that didn't submit locally
+   * leave this slot empty and the resolved card renders a placeholder.
+   */
+  askQuestionAnswerHistory: Record<string, (string | null)[]>;
+  /**
+   * Per-session bounded tail of permission_resolved frames, keyed by
+   * `eventKey(daemon_id, session_id)`. The timeline merges this in with
+   * AG-UI events to render ResolvedPermissionCard receipts.
+   */
+  permissionResolutions: Record<string, PwaPermissionResolved[]>;
+  /**
+   * Same as permissionResolutions for the ask side.
+   */
+  askQuestionResolutions: Record<string, PwaAskUserQuestionResolved[]>;
 }
 
 export function eventKey(daemon_id: string, session_id: string): string {
@@ -134,6 +171,11 @@ export function initialHubState(): HubState {
     noMoreHistory: {},
     pendingCommands: {},
     slashInventory: {},
+    permissionRequestHistory: {},
+    askQuestionRequestHistory: {},
+    askQuestionAnswerHistory: {},
+    permissionResolutions: {},
+    askQuestionResolutions: {},
   };
 }
 
@@ -151,7 +193,7 @@ export type HubAction =
   | { type: "outbound_start_session"; daemon_id: string; request_id: string; started_at: number }
   | { type: "outbound_request_history"; daemon_id: string; session_id: string; request_id: string; started_at: number }
   | { type: "outbound_permission_reply"; daemon_id: string; session_id: string; request_id: string; decision: "allow" | "deny"; started_at: number }
-  | { type: "outbound_ask_answer"; daemon_id: string; session_id: string; request_id: string; started_at: number }
+  | { type: "outbound_ask_answer"; daemon_id: string; session_id: string; request_id: string; started_at: number; answers: (string | null)[] }
   | { type: "outbound_kill_session"; daemon_id: string; session_id: string; started_at: number }
   | { type: "command_timeout"; id: string }
   | { type: "command_dismiss"; id: string }
@@ -259,7 +301,19 @@ export function reducer(state: HubState, action: HubAction): HubState {
         started_at: action.started_at,
         status: "pending",
       };
-      return { ...state, pendingCommands: createPending(cleaned, cmd) };
+      // Capture the local PWA's chosen answers so the resolved card can
+      // surface them later. The hub's `*_resolved` frame does not echo
+      // them, so this is the only path to the data on this device.
+      const nextAnswerHistory = insertWithLru(
+        state.askQuestionAnswerHistory,
+        action.request_id,
+        action.answers,
+      );
+      return {
+        ...state,
+        pendingCommands: createPending(cleaned, cmd),
+        askQuestionAnswerHistory: nextAnswerHistory,
+      };
     }
 
     case "outbound_kill_session": {
@@ -439,33 +493,84 @@ export function reducer(state: HubState, action: HubAction): HubState {
           return {
             ...prev,
             pendingPermissions: { ...prev.pendingPermissions, [frame.request_id]: frame },
+            // Sticky LRU cache — survives resolve so ResolvedPermissionCard
+            // can recover tool/args_summary after pendingPermissions is cleared.
+            permissionRequestHistory: insertWithLru(
+              prev.permissionRequestHistory,
+              frame.request_id,
+              frame,
+            ),
           };
         case "permission_resolved": {
           const nextPending = confirmPending(prev.pendingCommands, frame.request_id);
+          // Retain the resolved frame in a per-session bounded buffer so the
+          // timeline can render a ResolvedPermissionCard receipt. Bounded
+          // tail; oldest dropped beyond PER_SESSION_RESOLUTION_BUFFER.
+          const k = eventKey(frame.daemon_id, frame.session_id);
+          const existingResolutions = prev.permissionResolutions[k] ?? [];
+          const tsStamped: PwaPermissionResolved & { ts?: number } = {
+            ...frame,
+            ts: Date.now(),
+          };
+          const merged = existingResolutions.concat([tsStamped]);
+          const trimmed = merged.length > PER_SESSION_RESOLUTION_BUFFER
+            ? merged.slice(merged.length - PER_SESSION_RESOLUTION_BUFFER)
+            : merged;
+          const nextResolutions = { ...prev.permissionResolutions, [k]: trimmed };
           if (!prev.pendingPermissions[frame.request_id]) {
             // No local pendingPermissions entry (e.g. cross-device), but still
             // clear pendingCommands if it has an entry for this request_id.
-            if (nextPending === prev.pendingCommands) return prev;
-            return { ...prev, pendingCommands: nextPending };
+            if (nextPending === prev.pendingCommands) {
+              return { ...prev, permissionResolutions: nextResolutions };
+            }
+            return { ...prev, pendingCommands: nextPending, permissionResolutions: nextResolutions };
           }
           const next = { ...prev.pendingPermissions };
           delete next[frame.request_id];
-          return { ...prev, pendingPermissions: next, pendingCommands: nextPending };
+          return {
+            ...prev,
+            pendingPermissions: next,
+            pendingCommands: nextPending,
+            permissionResolutions: nextResolutions,
+          };
         }
         case "ask_user_question_request":
           return {
             ...prev,
             pendingQuestions: { ...prev.pendingQuestions, [frame.request_id]: frame },
+            askQuestionRequestHistory: insertWithLru(
+              prev.askQuestionRequestHistory,
+              frame.request_id,
+              frame,
+            ),
           };
         case "ask_user_question_resolved": {
           const nextPending = confirmPending(prev.pendingCommands, frame.request_id);
+          const k = eventKey(frame.daemon_id, frame.session_id);
+          const existingResolutions = prev.askQuestionResolutions[k] ?? [];
+          const tsStamped: PwaAskUserQuestionResolved & { ts?: number } = {
+            ...frame,
+            ts: Date.now(),
+          };
+          const merged = existingResolutions.concat([tsStamped]);
+          const trimmed = merged.length > PER_SESSION_RESOLUTION_BUFFER
+            ? merged.slice(merged.length - PER_SESSION_RESOLUTION_BUFFER)
+            : merged;
+          const nextResolutions = { ...prev.askQuestionResolutions, [k]: trimmed };
           if (!prev.pendingQuestions[frame.request_id]) {
-            if (nextPending === prev.pendingCommands) return prev;
-            return { ...prev, pendingCommands: nextPending };
+            if (nextPending === prev.pendingCommands) {
+              return { ...prev, askQuestionResolutions: nextResolutions };
+            }
+            return { ...prev, pendingCommands: nextPending, askQuestionResolutions: nextResolutions };
           }
           const next = { ...prev.pendingQuestions };
           delete next[frame.request_id];
-          return { ...prev, pendingQuestions: next, pendingCommands: nextPending };
+          return {
+            ...prev,
+            pendingQuestions: next,
+            pendingCommands: nextPending,
+            askQuestionResolutions: nextResolutions,
+          };
         }
         case "task_completed": {
           const k = eventKey(frame.daemon_id, frame.session_id);
@@ -774,6 +879,7 @@ export function useHub(
         session_id: req.session_id,
         request_id: req.request_id,
         started_at: Date.now(),
+        answers,
       }));
       armTimeout(req.request_id);
     },

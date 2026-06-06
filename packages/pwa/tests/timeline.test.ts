@@ -40,7 +40,7 @@ function resolved(
 }
 
 test("empty inputs produce empty timeline", () => {
-  expect(mergeTimeline({ events: [], resolved: [] })).toEqual([]);
+  expect(mergeTimeline({ events: [], resolved: [], askResolved: [] })).toEqual([]);
 });
 
 test("BufferedEvents emit 'agui' RenderItems", () => {
@@ -50,6 +50,7 @@ test("BufferedEvents emit 'agui' RenderItems", () => {
       be(20, 0, { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "m2", role: "assistant", delta: "world" }),
     ],
     resolved: [],
+    askResolved: [],
   });
   expect(items).toHaveLength(2);
   expect(items[0]?.tag).toBe("agui");
@@ -63,6 +64,7 @@ test("TOOL_CALL_CHUNK + TOOL_CALL_RESULT collapse into a single 'tool' RenderIte
       be(20, 0, { type: EventType.TOOL_CALL_RESULT, messageId: "m1", toolCallId: "t1", content: "ok" } as any),
     ],
     resolved: [],
+    askResolved: [],
   });
   expect(items).toHaveLength(1);
   expect(items[0]?.tag).toBe("tool");
@@ -87,6 +89,7 @@ describe("RAW event filtering", () => {
           be(10, 0, { type: EventType.RAW, source: "claude-code-jsonl", event: { type } } as any),
         ],
         resolved: [],
+    askResolved: [],
       });
       expect(items).toHaveLength(0);
     });
@@ -98,6 +101,7 @@ describe("RAW event filtering", () => {
         be(10, 0, { type: EventType.RAW, source: "claude-code-jsonl", event: { type: "session_start" } } as any),
       ],
       resolved: [],
+    askResolved: [],
     });
     expect(items).toHaveLength(1);
     expect(items[0]?.tag).toBe("agui");
@@ -111,6 +115,7 @@ test("resolved permissions emit 'permission-resolved' items", () => {
       resolved("req-1", "allow"),
       resolved("req-2", "deny"),
     ],
+    askResolved: [],
   });
   expect(items).toHaveLength(2);
   expect(items[0]?.tag).toBe("permission-resolved");
@@ -125,6 +130,7 @@ test("items are sorted by timestamp", () => {
       be(30, 0, { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "m3", role: "assistant", delta: "c" }, 1_700_000_003_000),
     ],
     resolved: [],
+    askResolved: [],
   });
   expect(items).toHaveLength(3);
   expect(items[0]?.ts).toBe(1_700_000_001_000);
@@ -138,6 +144,7 @@ test("ids are stable and deterministic — same input twice produces same ids", 
       be(10, 0, { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "m1", role: "assistant", delta: "x" }),
     ],
     resolved: [resolved("req-2", "allow")],
+    askResolved: [],
   };
   const a = mergeTimeline(args);
   const b = mergeTimeline(args);
@@ -148,6 +155,7 @@ test("agui item id encodes daemon_id, session_id, jsonl_offset, event_index", ()
   const items = mergeTimeline({
     events: [be(42, 3, { type: EventType.TEXT_MESSAGE_CHUNK, messageId: "m1", role: "assistant", delta: "x" })],
     resolved: [],
+    askResolved: [],
   });
   expect(items[0]?.id).toBe(`evt:${D}:${S}:42:3`);
 });

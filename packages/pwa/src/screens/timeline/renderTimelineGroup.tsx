@@ -1,5 +1,5 @@
 import type React from "react";
-import { renderTimelineItem } from "./renderTimelineItem";
+import { renderTimelineItem, type RenderTimelineCtx } from "./renderTimelineItem";
 import { ToolGroup } from "./ToolGroup";
 import type { TimelineGroup } from "./groupTimelineItems";
 
@@ -9,10 +9,13 @@ import type { TimelineGroup } from "./groupTimelineItems";
  *   - tool-group → collapsible ToolGroup card
  *   - single     → existing per-item renderer (chat bubble, permission, …)
  *
- * Keeping ToolGroup off the per-item renderer means the existing dispatch
- * logic (markers, AGUIEvent type switch, permission tone) stays untouched.
+ * `ctx` is forwarded to single-item renders that need to look up sticky
+ * histories (resolved permission/ask cards). Tool groups don't need it.
  */
-export function renderTimelineGroup(group: TimelineGroup): React.ReactElement {
+export function renderTimelineGroup(
+  group: TimelineGroup,
+  ctx?: RenderTimelineCtx,
+): React.ReactElement {
   if (group.kind === "tool-group") {
     return (
       <ToolGroup
@@ -28,5 +31,5 @@ export function renderTimelineGroup(group: TimelineGroup): React.ReactElement {
       />
     );
   }
-  return renderTimelineItem(group.item);
+  return renderTimelineItem(group.item, ctx);
 }

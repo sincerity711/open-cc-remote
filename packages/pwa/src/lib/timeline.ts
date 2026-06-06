@@ -1,4 +1,4 @@
-import type { PwaPermissionResolved } from "@cc-remote/proto";
+import type { PwaAskUserQuestionResolved, PwaPermissionResolved } from "@cc-remote/proto";
 import {
   EventType,
   type ToolCallChunkEvent,
@@ -10,6 +10,7 @@ import type { RenderItem } from "../screens/timeline/types";
 export interface MergeTimelineArgs {
   events: BufferedEvent[];
   resolved: PwaPermissionResolved[];
+  askResolved: PwaAskUserQuestionResolved[];
 }
 
 interface TimedItem {
@@ -117,6 +118,21 @@ export function mergeTimeline(args: MergeTimelineArgs): RenderItem[] {
       item: {
         tag: "permission-resolved",
         id: `perm-resolved:${r.request_id}`,
+        ts,
+        resolved: r,
+      },
+    });
+  }
+
+  for (const r of args.askResolved) {
+    const ts = (r as { ts?: number }).ts ?? Date.now();
+    buf.push({
+      tsMs: ts,
+      rank: 3,
+      offset: Number.MAX_SAFE_INTEGER,
+      item: {
+        tag: "ask-question-resolved",
+        id: `ask-resolved:${r.request_id}`,
         ts,
         resolved: r,
       },

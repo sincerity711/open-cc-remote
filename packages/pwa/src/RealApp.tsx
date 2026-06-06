@@ -207,6 +207,11 @@ export function RealApp() {
               onSendCliCommand={(text) => hub.sendCliCommand(selected.daemon_id, selected.session_id, text)}
               onBack={() => setSelected(null)}
               onDismissPendingCommand={dismissPendingCommand}
+              renderCtx={{
+                permissionRequestHistory: hub.permissionRequestHistory,
+                askQuestionRequestHistory: hub.askQuestionRequestHistory,
+                askQuestionAnswerHistory: hub.askQuestionAnswerHistory,
+              }}
             />
           ) : undefined
         }

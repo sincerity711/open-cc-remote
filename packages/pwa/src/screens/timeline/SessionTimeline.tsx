@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "../../components/ui/button";
 import { groupTimelineItems } from "./groupTimelineItems";
 import { renderTimelineGroup } from "./renderTimelineGroup";
+import type { RenderTimelineCtx } from "./renderTimelineItem";
 import type { RenderItem } from "./types";
 
 export interface SessionTimelineProps {
@@ -20,6 +21,9 @@ export interface SessionTimelineProps {
    *  don't pollute the count. */
   unreadCount?: number;
   onMarkSeen?: (offset: number) => void;
+  /** Sticky-history lookups for resolved permission/ask cards. When omitted,
+   *  the renderer falls back to placeholder bodies. */
+  renderCtx?: RenderTimelineCtx;
 }
 
 export function SessionTimeline({
@@ -31,6 +35,7 @@ export function SessionTimeline({
   maxOffset = -1,
   unreadCount = 0,
   onMarkSeen,
+  renderCtx,
 }: SessionTimelineProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -98,7 +103,7 @@ export function SessionTimeline({
             History load not confirmed.
           </div>
         )}
-        {groups.map((g) => renderTimelineGroup(g))}
+        {groups.map((g) => renderTimelineGroup(g, renderCtx))}
         {items.length === 0 && (
           <p className="text-muted-foreground py-12 text-center text-sm">
             {historyLoading ? "Loading history…" : "No events yet — send a message to start."}
