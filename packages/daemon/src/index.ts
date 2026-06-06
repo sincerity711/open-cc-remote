@@ -15,6 +15,7 @@ import { jsonlPath } from "./jsonl-paths.ts";
 import { bindJsonl } from "./jsonl-bind.ts";
 import { readHistory } from "./jsonl-history.ts";
 import { scanInventory } from "./slash-inventory.ts";
+import { probeAgent } from "./agent-probe.ts";
 import { handleCliCommand } from "./cli-command.ts";
 import { startWatcher, type WatcherHandle } from "./jsonl-watcher.ts";
 import { openDb } from "./db.ts";
@@ -178,6 +179,13 @@ const askToClient = new Map<string, AskPending>();
 // PWA with an empty `/` menu (hub's onPwaSubscribe replays from its own
 // cache once we re-fill it).
 const slashInventoryBySession = new Map<string, import("@cc-remote/proto").SlashEntry[]>();
+// session_id → cached agent_handshake payload (sans envelope keys), so we can
+// replay on hub reconnect alongside slashInventoryBySession. See
+// docs/superpowers/specs/2026-06-07-agent-handshake-design.md.
+const agentHandshakeBySession = new Map<
+  string,
+  Omit<import("@cc-remote/proto").DaemonAgentHandshake, "type" | "session_id">
+>();
 const pendingStarts = createPendingStarts({ ttlMs: 60_000 });
 
 // Process registry — reconcile-only on boot. Spec at
@@ -227,6 +235,11 @@ const hub = startHubClient({
     // cache and any PWA that later subscribes still sees the `/` menu.
     for (const [session_id, entries] of slashInventoryBySession) {
       out.push({ type: "slash_inventory", session_id, entries });
+    }
+    // Replay agent_handshake for each known session so a hub reconnect
+    // doesn't strand the SettingsDrawer Agent card.
+    for (const [session_id, payload] of agentHandshakeBySession) {
+      out.push({ type: "agent_handshake", session_id, ...payload });
     }
     return out;
   },
@@ -684,6 +697,25 @@ sessions.onAdd((s: SessionSnapshot) => {
     .then((entries) => {
       slashInventoryBySession.set(s.session_id, entries);
       hub.send({ type: "slash_inventory", session_id: s.session_id, entries });
+      // Probe runs once at module-level cache scope; the per-session call is
+      // cheap (settings.json read only) so we await right here. A failure
+      // here must not crash the slash-inventory chain, so we wrap.
+      probeAgent({ homeDir: homedir(), cwd: s.cwd })
+        .then((probe) => {
+          const payload = {
+            agent_version: probe.agent_version,
+            available_modes: probe.available_modes,
+            default_mode: probe.default_mode,
+            available_models: probe.available_models,
+            available_commands: entries,
+            capabilities: probe.capabilities,
+          };
+          agentHandshakeBySession.set(s.session_id, payload);
+          hub.send({ type: "agent_handshake", session_id: s.session_id, ...payload });
+        })
+        .catch((e) => {
+          process.stderr.write(`daemon: agent probe failed for ${s.session_id}: ${(e as Error).message}\n`);
+        });
     })
     .catch((e) => {
       process.stderr.write(`daemon: slash inventory scan failed for ${s.session_id}: ${(e as Error).message}\n`);
@@ -743,6 +775,7 @@ sessions.onAdd((s: SessionSnapshot) => {
 sessions.onRemove((session_id: string) => {
   hub.send({ type: "session_close", session_id, reason: "plugin_bye" });
   slashInventoryBySession.delete(session_id);
+  agentHandshakeBySession.delete(session_id);
   fsm.remove(session_id);
   const w = watchers.get(session_id);
   if (w) {

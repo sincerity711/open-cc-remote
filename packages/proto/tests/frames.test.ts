@@ -18,6 +18,8 @@ import type {
   PwaSessionOpenFrame,
   DaemonSlashInventory,
   PwaSlashInventory,
+  DaemonAgentHandshake,
+  PwaAgentHandshake,
   PwaToHubCliCommand,
   HubToDaemonCliCommand,
   SlashEntry,
@@ -337,6 +339,94 @@ test("PwaSlashInventory carries daemon_id", () => {
   expect(parsed.type).toBe("slash_inventory");
   if (parsed.type === "slash_inventory") {
     expect(parsed.daemon_id).toBe("d-1");
+  }
+});
+
+// ─── agent_handshake (Task #3 AionUi-borrow) ──────────────────────────
+
+test("DaemonAgentHandshake round-trips through JSON", () => {
+  const entry: SlashEntry = {
+    id: "builtin:clear",
+    name: "/clear",
+    source: "builtin",
+  };
+  const f: DaemonAgentHandshake = {
+    type: "agent_handshake",
+    session_id: "s1",
+    agent_version: "2.1.165",
+    available_modes: ["acceptEdits", "auto", "bypassPermissions", "default", "dontAsk", "plan"],
+    default_mode: "bypassPermissions",
+    available_models: ["sonnet", "opus", "haiku"],
+    available_commands: [entry],
+    capabilities: {
+      supports_notification_hook: true,
+      supports_ack: true,
+      jsonl_flush_quirk: true,
+      has_mcp: true,
+      has_plugin: true,
+    },
+  };
+  const parsed = JSON.parse(JSON.stringify(f)) as DaemonToHub;
+  expect(parsed.type).toBe("agent_handshake");
+  if (parsed.type === "agent_handshake") {
+    expect(parsed.agent_version).toBe("2.1.165");
+    expect(parsed.available_modes).toHaveLength(6);
+    expect(parsed.default_mode).toBe("bypassPermissions");
+    expect(parsed.available_models).toEqual(["sonnet", "opus", "haiku"]);
+    expect(parsed.available_commands).toHaveLength(1);
+    expect(parsed.capabilities.supports_ack).toBe(true);
+  }
+});
+
+test("PwaAgentHandshake carries daemon_id", () => {
+  const f: PwaAgentHandshake = {
+    type: "agent_handshake",
+    daemon_id: "d-1",
+    session_id: "s1",
+    agent_version: "2.1.165",
+    available_modes: ["default"],
+    default_mode: "default",
+    available_models: ["sonnet", "opus", "haiku"],
+    available_commands: [],
+    capabilities: {
+      supports_notification_hook: true,
+      supports_ack: true,
+      jsonl_flush_quirk: true,
+      has_mcp: true,
+      has_plugin: true,
+    },
+  };
+  const parsed = JSON.parse(JSON.stringify(f)) as HubToPwa;
+  expect(parsed.type).toBe("agent_handshake");
+  if (parsed.type === "agent_handshake") {
+    expect(parsed.daemon_id).toBe("d-1");
+  }
+});
+
+test("DaemonAgentHandshake degraded form (binary missing) round-trips", () => {
+  const f: DaemonAgentHandshake = {
+    type: "agent_handshake",
+    session_id: "s1",
+    agent_version: null,
+    available_modes: [],
+    default_mode: null,
+    available_models: ["sonnet", "opus", "haiku"],
+    available_commands: [],
+    capabilities: {
+      supports_notification_hook: false,
+      supports_ack: false,
+      jsonl_flush_quirk: false,
+      has_mcp: true,
+      has_plugin: true,
+    },
+  };
+  const parsed = JSON.parse(JSON.stringify(f)) as DaemonToHub;
+  expect(parsed.type).toBe("agent_handshake");
+  if (parsed.type === "agent_handshake") {
+    expect(parsed.agent_version).toBeNull();
+    expect(parsed.available_modes).toEqual([]);
+    expect(parsed.default_mode).toBeNull();
+    expect(parsed.capabilities.supports_ack).toBe(false);
   }
 });
 

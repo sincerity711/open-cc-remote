@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import type {
   HubToPwa, PwaToHub, DaemonView, EventFrameForPwa, PwaPermissionRequest,
   PwaChatBroadcast, PwaStartSessionRejected, SessionState, AGUIEvent, SlashEntry,
-  PwaAskUserQuestionRequest, PwaFsListResult,
+  PwaAskUserQuestionRequest, PwaFsListResult, PwaAgentHandshake,
 } from "@cc-remote/proto";
 import {
   createPending, confirmPending, failPending, timeoutPending, dismissPending, findPending,
@@ -118,6 +118,12 @@ export interface HubState {
    * keyed by `${daemon_id}::${session_id}`. Used by the composer's `/` menu.
    */
   slashInventory: Record<string, SlashEntry[]>;
+  /**
+   * Agent capability handshake (version, modes, default mode, models, slash
+   * commands, capability bits). Pushed once per session register and replayed
+   * on PWA subscribe / hub reconnect. Keyed by `${daemon_id}::${session_id}`.
+   */
+  agentHandshakes: Record<string, PwaAgentHandshake>;
 }
 
 export function eventKey(daemon_id: string, session_id: string): string {
@@ -134,6 +140,7 @@ export function initialHubState(): HubState {
     noMoreHistory: {},
     pendingCommands: {},
     slashInventory: {},
+    agentHandshakes: {},
   };
 }
 
@@ -547,6 +554,18 @@ export function reducer(state: HubState, action: HubAction): HubState {
           return {
             ...prev,
             slashInventory: { ...prev.slashInventory, [k]: frame.entries },
+          };
+        }
+        case "agent_handshake": {
+          const k = eventKey(frame.daemon_id, frame.session_id);
+          return {
+            ...prev,
+            agentHandshakes: { ...prev.agentHandshakes, [k]: frame },
+            // Mirror available_commands into the legacy slashInventory slice
+            // so SlashMenu callers don't have to migrate. Once the legacy
+            // `slash_inventory` frame is fully retired, this mirror is the
+            // single source of truth.
+            slashInventory: { ...prev.slashInventory, [k]: frame.available_commands },
           };
         }
         case "fs_list_result": {

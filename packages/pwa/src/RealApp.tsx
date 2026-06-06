@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useHub, eventKey } from "./hooks/useHub";
 import { selectSlashInventory } from "./hooks/useSlashInventory";
+import { selectAgentCapabilities } from "./hooks/useAgentCapabilities";
 import { clearBearer, useAuth } from "./hooks/useAuth";
 import { SessionView } from "./screens/SessionView";
 import { useSessionTimeline } from "./hooks/useSessionTimeline";
@@ -236,6 +237,7 @@ export function RealApp() {
           pairingError={pairingHook.lastError}
           appearance={appearance}
           onSetAppearance={setAppearance}
+          agent={selected ? selectAgentCapabilities(hub, selected.daemon_id, selected.session_id) : null}
           onClose={() => setShowSettings(false)}
         />
       )}
