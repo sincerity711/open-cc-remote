@@ -4,6 +4,7 @@ import type {
   PwaToHubCliCommand, HubToDaemonCliCommand,
   PwaAskUserQuestionRequest,
   PwaSlashInventory, SlashEntry,
+  DaemonAgentHandshake, PwaAgentHandshake,
   PwaToHubFsList, HubToDaemonFsList, PwaFsListResult,
 } from "@cc-remote/proto";
 import type { DaemonRegistry, PwaRegistry } from "./connections.ts";
@@ -35,6 +36,10 @@ interface DaemonState {
   // refreshes) still sees commands. Cleared on session_close / daemon
   // disconnect.
   slashInventory: Map<string, SlashEntry[]>;
+  // Latest agent_handshake per session_id (sans envelope keys). Mirrors the
+  // slashInventory cache for fan-out + replay. See
+  // docs/superpowers/specs/2026-06-07-agent-handshake-design.md.
+  agentHandshake: Map<string, Omit<DaemonAgentHandshake, "type" | "session_id">>;
 }
 
 export interface RouterOptions {}
@@ -85,6 +90,7 @@ export class Router {
           events: [],
           pendingAskQuestions: new Map(),
           slashInventory: new Map(),
+          agentHandshake: new Map(),
         };
         this.daemons.set(daemon_id, state);
         this.pwaReg.broadcast({
@@ -109,6 +115,7 @@ export class Router {
         if (!state) return;
         state.sessions.delete(frame.session_id);
         state.slashInventory.delete(frame.session_id);
+        state.agentHandshake.delete(frame.session_id);
         this.pwaReg.broadcast({ type: "session_close", daemon_id, session_id: frame.session_id, reason: frame.reason });
         return;
       }
@@ -274,6 +281,20 @@ export class Router {
         });
         return;
       }
+      case "agent_handshake": {
+        const state = this.daemons.get(daemon_id);
+        if (!state) return;
+        const { type: _t, session_id, ...rest } = frame;
+        state.agentHandshake.set(session_id, rest);
+        const out: PwaAgentHandshake = {
+          type: "agent_handshake",
+          daemon_id,
+          session_id,
+          ...rest,
+        };
+        this.pwaReg.broadcast(out);
+        return;
+      }
       case "session_rebound": {
         const state = this.daemons.get(daemon_id);
         if (!state) return;
@@ -336,6 +357,15 @@ export class Router {
           daemon_id: d.daemon_id,
           session_id,
           entries,
+        };
+        send(f);
+      }
+      for (const [session_id, rest] of d.agentHandshake) {
+        const f: PwaAgentHandshake = {
+          type: "agent_handshake",
+          daemon_id: d.daemon_id,
+          session_id,
+          ...rest,
         };
         send(f);
       }

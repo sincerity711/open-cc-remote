@@ -8,6 +8,7 @@ import type { DaemonItem } from "../hooks/useDaemons";
 import type { PushTopicsState, DndSettings } from "../hooks/usePushTopics";
 import { resolveSubscription } from "../hooks/usePushTopics";
 import type { PairingState } from "../hooks/usePairing";
+import type { PwaAgentHandshake } from "@cc-remote/proto";
 
 export type Appearance = "system" | "light" | "dark";
 
@@ -29,6 +30,11 @@ export interface SettingsDrawerProps {
   daemonActionError?: string | null;
   pushActionError?: string | null;
   pairingError?: string | null;
+  /**
+   * Capability handshake for the currently selected (daemon, session). When
+   * null, the Agent card renders a "no live session" placeholder. Read-only.
+   */
+  agent?: PwaAgentHandshake | null;
   onClose: () => void;
 }
 
@@ -39,6 +45,7 @@ export function SettingsDrawer(props: SettingsDrawerProps) {
     pairing, onGenerateCode, onCancelPairing,
     appearance, onSetAppearance,
     daemonActionError, pushActionError, pairingError,
+    agent,
     onClose,
   } = props;
 
@@ -106,6 +113,10 @@ export function SettingsDrawer(props: SettingsDrawerProps) {
             {pushActionError && (
               <p className="text-danger mt-2 text-sm">{pushActionError}</p>
             )}
+          </Section>
+
+          <Section title="Agent">
+            <AgentCard agent={agent ?? null} />
           </Section>
 
           <Section title="Appearance">
@@ -493,5 +504,89 @@ function DaemonOverrideRow({
         </div>
       )}
     </div>
+  );
+}
+
+function AgentCard({ agent }: { agent: PwaAgentHandshake | null }) {
+  if (!agent) {
+    return (
+      <p
+        className="text-muted-foreground text-sm"
+        data-testid="agent-card-empty"
+      >
+        No live session — start one to see capabilities.
+      </p>
+    );
+  }
+  const versionLabel = agent.agent_version ?? "(claude binary not found)";
+  return (
+    <div
+      className="rounded-card border-border bg-surface shadow-card border p-3"
+      data-testid="agent-card"
+    >
+      <p className="text-sm">
+        <span className="text-muted-foreground">Version: </span>
+        <span className="font-mono">{versionLabel}</span>
+      </p>
+
+      <p className="text-muted-foreground mt-3 text-xs uppercase">Permission modes</p>
+      <div className="mt-1 flex flex-wrap gap-1">
+        {agent.available_modes.length === 0 ? (
+          <span className="text-muted-foreground text-xs">—</span>
+        ) : (
+          agent.available_modes.map((m) => (
+            <Chip
+              key={m}
+              label={m}
+              highlight={m === agent.default_mode}
+              title={m === agent.default_mode ? "default" : undefined}
+            />
+          ))
+        )}
+      </div>
+
+      <p className="text-muted-foreground mt-3 text-xs uppercase">Models</p>
+      <div className="mt-1 flex flex-wrap gap-1">
+        {agent.available_models.map((m) => (
+          <Chip key={m} label={m} />
+        ))}
+      </div>
+
+      <p className="text-muted-foreground mt-3 text-xs uppercase">Capabilities</p>
+      <ul className="mt-1 space-y-0.5 text-xs">
+        <CapRow label="Notification hook" on={agent.capabilities.supports_notification_hook} />
+        <CapRow label="Ack semantics"     on={agent.capabilities.supports_ack} />
+        <CapRow label="JSONL flush"       on={agent.capabilities.jsonl_flush_quirk} />
+        <CapRow label="MCP"               on={agent.capabilities.has_mcp} />
+        <CapRow label="Plugins"           on={agent.capabilities.has_plugin} />
+      </ul>
+    </div>
+  );
+}
+
+function Chip({ label, highlight, title }: { label: string; highlight?: boolean; title?: string }) {
+  return (
+    <span
+      className={cn(
+        "rounded-full px-2 py-0.5 text-xs font-medium",
+        highlight
+          ? "bg-success-subtle text-success"
+          : "bg-muted text-muted-foreground",
+      )}
+      title={title}
+    >
+      {label}
+    </span>
+  );
+}
+
+function CapRow({ label, on }: { label: string; on: boolean }) {
+  return (
+    <li className="flex items-center justify-between">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={on ? "text-success" : "text-muted-foreground"}>
+        {on ? "✓" : "✗"}
+      </span>
+    </li>
   );
 }

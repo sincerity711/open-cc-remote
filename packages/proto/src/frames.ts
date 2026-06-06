@@ -142,6 +142,7 @@ export type DaemonToHub =
   | DaemonAskUserQuestionRequest
   | DaemonAskUserQuestionResolved
   | DaemonSlashInventory
+  | DaemonAgentHandshake
   | DaemonSessionRebound
   | DaemonFsListResult;
 
@@ -186,6 +187,7 @@ export type HubToPwa =
   | PwaAskUserQuestionRequest
   | PwaAskUserQuestionResolved
   | PwaSlashInventory
+  | PwaAgentHandshake
   | PwaSessionRebound
   | PwaFsListResult;
 
@@ -414,17 +416,84 @@ export interface SlashEntry {
   source: "builtin" | "user" | "project" | "skill";
 }
 
+/**
+ * @deprecated Use `agent_handshake.available_commands` instead. This frame is
+ * kept for backwards compatibility while clients migrate; the handshake frame
+ * carries the same `SlashEntry[]` plus version/modes/capability metadata.
+ */
 export interface DaemonSlashInventory {
   type: "slash_inventory";
   session_id: string;
   entries: SlashEntry[];
 }
 
+/**
+ * @deprecated Use `agent_handshake.available_commands` instead.
+ */
 export interface PwaSlashInventory {
   type: "slash_inventory";
   daemon_id: string;
   session_id: string;
   entries: SlashEntry[];
+}
+
+// ─── agent_handshake (Task #3 AionUi-borrow) ──────────────────────────
+//
+// Once-per-session capability advertisement: agent version, available
+// permission modes (parsed from `claude --help`), default mode (from
+// `~/.claude/settings.json`), available models (hardcoded — CC has no
+// static list), the slash command inventory (same payload as the legacy
+// `slash_inventory` frame), and runtime capability bits keyed off CC
+// version. See docs/superpowers/specs/2026-06-07-agent-handshake-design.md.
+export interface AgentCapabilityBits {
+  /** CC ≥2.1.146 — daemon may install a Notification hook. */
+  supports_notification_hook: boolean;
+  /** CC ≥2.1.150 — daemon-side ack semantics work. */
+  supports_ack: boolean;
+  /** CC ≥2.1.139 — jsonl writer flushes promptly (older versions buffered). */
+  jsonl_flush_quirk: boolean;
+  /** Always true for CC ≥2.0; explicit so future agents can flip it. */
+  has_mcp: boolean;
+  /** `--plugin-dir` flag is present in 2.1.x; hardcoded true for now. */
+  has_plugin: boolean;
+}
+
+export interface DaemonAgentHandshake {
+  type: "agent_handshake";
+  session_id: string;
+  /** null when `claude` binary missing or `--version` parse failed. */
+  agent_version: string | null;
+  /**
+   * Parsed from `claude --help` (`--permission-mode` choices). Falls back
+   * to a hardcoded list when parse fails; empty only when the binary is
+   * missing — UI degrades gracefully.
+   */
+  available_modes: string[];
+  /**
+   * From settings.json `permissions.defaultMode`. Project setting (in
+   * `<cwd>/.claude/settings.json`) overrides user setting (`~/.claude`).
+   */
+  default_mode: string | null;
+  /**
+   * Hardcoded `["sonnet","opus","haiku"]`. CC has no `--list-models` flag,
+   * model is a runtime `--model` argument; revisit if such a flag ships.
+   */
+  available_models: string[];
+  /** Same payload as the legacy `slash_inventory` frame. */
+  available_commands: SlashEntry[];
+  capabilities: AgentCapabilityBits;
+}
+
+export interface PwaAgentHandshake {
+  type: "agent_handshake";
+  daemon_id: string;
+  session_id: string;
+  agent_version: string | null;
+  available_modes: string[];
+  default_mode: string | null;
+  available_models: string[];
+  available_commands: SlashEntry[];
+  capabilities: AgentCapabilityBits;
 }
 
 export interface PwaToHubCliCommand {

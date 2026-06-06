@@ -904,6 +904,101 @@ test("daemon slash_inventory is broadcast to PWAs with daemon_id added", () => {
   expect(inv.entries).toHaveLength(2);
 });
 
+// ─── agent_handshake (Task #3 AionUi-borrow) ──────────────────────────
+
+const SAMPLE_HANDSHAKE_BODY = {
+  agent_version: "2.1.165",
+  available_modes: ["acceptEdits", "default"],
+  default_mode: "default",
+  available_models: ["sonnet", "opus", "haiku"],
+  available_commands: [],
+  capabilities: {
+    supports_notification_hook: true,
+    supports_ack: true,
+    jsonl_flush_quirk: true,
+    has_mcp: true,
+    has_plugin: true,
+  },
+};
+
+test("daemon agent_handshake is broadcast to PWAs with daemon_id added", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const broadcasts: unknown[] = [];
+  preg.add({}, (f) => broadcasts.push(f));
+  const router = new Router(dreg, preg);
+
+  router.onDaemonFrame("d-1", {
+    type: "hello", daemon_id: "d-1", epoch: 1,
+    hostname: "h", agent_version: "0", sessions: [],
+  });
+  router.onDaemonFrame("d-1", {
+    type: "agent_handshake",
+    session_id: "s1",
+    ...SAMPLE_HANDSHAKE_BODY,
+  });
+
+  const h = broadcasts.find((b: any) => b.type === "agent_handshake") as any;
+  expect(h).toBeDefined();
+  expect(h.daemon_id).toBe("d-1");
+  expect(h.session_id).toBe("s1");
+  expect(h.agent_version).toBe("2.1.165");
+  expect(h.default_mode).toBe("default");
+  expect(h.capabilities.supports_ack).toBe(true);
+});
+
+test("agent_handshake is replayed on onPwaSubscribe", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+
+  router.onDaemonFrame("d-1", {
+    type: "hello", daemon_id: "d-1", epoch: 1,
+    hostname: "h", agent_version: "0", sessions: [],
+  });
+  router.onDaemonFrame("d-1", {
+    type: "agent_handshake",
+    session_id: "s1",
+    ...SAMPLE_HANDSHAKE_BODY,
+  });
+
+  // A fresh PWA subscribes after the handshake was already routed.
+  const replay: unknown[] = [];
+  router.onPwaSubscribe((f) => replay.push(f));
+
+  const h = replay.find((f: any) => f.type === "agent_handshake") as any;
+  expect(h).toBeDefined();
+  expect(h.daemon_id).toBe("d-1");
+  expect(h.session_id).toBe("s1");
+  expect(h.agent_version).toBe("2.1.165");
+});
+
+test("agent_handshake is cleared on session_close", () => {
+  const dreg = new DaemonRegistry<unknown>();
+  const preg = new PwaRegistry<unknown>();
+  const router = new Router(dreg, preg);
+
+  router.onDaemonFrame("d-1", {
+    type: "hello", daemon_id: "d-1", epoch: 1,
+    hostname: "h", agent_version: "0", sessions: [],
+  });
+  router.onDaemonFrame("d-1", {
+    type: "agent_handshake",
+    session_id: "s1",
+    ...SAMPLE_HANDSHAKE_BODY,
+  });
+  router.onDaemonFrame("d-1", {
+    type: "session_close",
+    session_id: "s1",
+    reason: "plugin_bye",
+  });
+
+  const replay: unknown[] = [];
+  router.onPwaSubscribe((f) => replay.push(f));
+  const h = replay.find((f: any) => f.type === "agent_handshake");
+  expect(h).toBeUndefined();
+});
+
 test("onPwaCliCommand forwards to the addressed daemon with user attached", () => {
   const dreg = new DaemonRegistry<unknown>();
   const preg = new PwaRegistry<unknown>();
