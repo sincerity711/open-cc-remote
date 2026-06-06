@@ -76,7 +76,7 @@ These are deferred follow-ups beyond what the 16 plans + rework + real-e2e + cha
 
 **Phase 1 — 健壮性地基**
 
-1. **WebSocket 心跳 (#6)** — IN PROGRESS. PWA 主动 ping、hub 回 pong。当前 `useHub.ts:650-728` 有指数退避 + frameless-open 鉴权检测，但 `grep ping|heartbeat|setInterval` 在 PWA 和 hub 双向均 0 命中。Spec 起草中。
+1. ~~**WebSocket 心跳 (#6)**~~ — **DONE** at `cf6d4c1`. PWA 和 daemon 都按 25s 间隔发 `{type:"ping",ts}`，hub 立即回 `{type:"pong",ts}`；client 端 45s watchdog 触发 `ws.close()` → 现有 reconnect；hub 端 5s 扫一次 `lastFrameAt`，>45s 关连接（code 1011）。Spec/plan: `docs/superpowers/{specs,plans}/2026-06-06-ws-heartbeat-*.md`。
 2. **进程残留兜底 (#4)** — daemon 当前 `start_session` spawn 完 `r.unref()` 就走，**完全没有** PID / process group registry。崩溃后留下的 tmux session 现在靠用户手动 `tmux kill-session` 清。抄 AionUi `web-host/src/agent-process-registry.ts` 模式：`runtime/agent-process-registry.json` + 启动遍历清理。
 
 **Phase 2 — Proto 改造（一次性）**
