@@ -191,8 +191,6 @@ export class Router {
         });
         return;
       }
-      case "pong":
-        return;
       case "task_completed": {
         const state = this.daemons.get(daemon_id);
         if (!state) return;

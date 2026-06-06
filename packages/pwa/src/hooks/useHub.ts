@@ -647,6 +647,17 @@ export function useHub(
       if (stopped) return;
       const myEpoch = ++epoch;
       let receivedAnyFrame = false;
+      // Heartbeat state — per connect() closure. See spec
+      // docs/superpowers/specs/2026-06-06-ws-heartbeat-design.md.
+      // The same setInterval drives both ping send and watchdog check;
+      // splitting into two timers would produce false-positive disconnects
+      // when the browser tab is backgrounded (setInterval throttles to 1Hz
+      // on iOS; ping would slow but a fast watchdog would fire).
+      let lastPongAt = Date.now();
+      let pingTimer: ReturnType<typeof setInterval> | null = null;
+      const stopHeartbeat = () => {
+        if (pingTimer !== null) { clearInterval(pingTimer); pingTimer = null; }
+      };
       const sep = hubUrl.includes("?") ? "&" : "?";
       const wsUrl = bearer
         ? `${hubUrl}/ws/pwa${sep}bearer=${encodeURIComponent(bearer)}`
@@ -667,6 +678,17 @@ export function useHub(
         setState((s) => ({ ...s, connected: true }));
         const sub: PwaToHub = { type: "subscribe" };
         ws.send(JSON.stringify(sub));
+        // Start heartbeat after subscribe.
+        lastPongAt = Date.now();
+        stopHeartbeat();
+        pingTimer = setInterval(() => {
+          if (ws.readyState !== WebSocket.OPEN) return;
+          if (Date.now() - lastPongAt > 45_000) {
+            try { ws.close(); } catch {}
+            return;
+          }
+          ws.send(JSON.stringify({ type: "ping", ts: Date.now() } satisfies PwaToHub));
+        }, 25_000);
       };
       ws.onmessage = (ev) => {
         if (wsRef.current !== ws) return;   // stale frame from an orphan ws
@@ -674,6 +696,11 @@ export function useHub(
         framelessOpens = 0;
         try {
           const frame = JSON.parse(ev.data) as HubToPwa;
+          // Heartbeat reply — record liveness and don't forward to reducer.
+          if (frame.type === "pong") {
+            lastPongAt = Date.now();
+            return;
+          }
           // fs_list_result is delivered out-of-band — useFsList registers
           // its own listener via sendFsList() rather than reducing into
           // hub state. Look up + invoke the listener, then DON'T forward
@@ -687,6 +714,7 @@ export function useHub(
         } catch {}
       };
       const reconnect = () => {
+        stopHeartbeat();
         // Only clear wsRef if THIS ws is still the active one. A newer ws
         // (from a different effect closure or a later connect within the
         // same closure) may already own wsRef; clobbering it to null here

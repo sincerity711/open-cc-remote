@@ -9,7 +9,7 @@ import { resolveRequest, parseTrustedProxies, type TrustedProxies } from "./prox
 import { RateLimiter, DEFAULT_RATE_LIMIT, type RateLimitConfig } from "./rate-limit.ts";
 
 type WsKind = "daemon" | "pwa";
-interface WsData { kind: WsKind; key: string; user?: string; user_id?: string; }
+interface WsData { kind: WsKind; key: string; user?: string; user_id?: string; lastFrameAt: number; }
 
 export interface MakeServerOpts {
   db?: Db;
@@ -283,7 +283,7 @@ export function makeServer(opts: MakeServerOpts = {}) {
         }
       }
 
-      const ok = server.upgrade(req, { data: { kind: "daemon", key: id } satisfies WsData });
+      const ok = server.upgrade(req, { data: { kind: "daemon", key: id, lastFrameAt: Date.now() } satisfies WsData });
       return ok ? undefined : new Response("upgrade failed", { status: 500 });
     }
     if (url.pathname === "/devices" && req.method === "GET") {
@@ -387,7 +387,7 @@ export function makeServer(opts: MakeServerOpts = {}) {
         wsUser = "anonymous";
         wsUserId = "anonymous";
       }
-      const ok = server.upgrade(req, { data: { kind: "pwa", key: "", user: wsUser, user_id: wsUserId } satisfies WsData });
+      const ok = server.upgrade(req, { data: { kind: "pwa", key: "", user: wsUser, user_id: wsUserId, lastFrameAt: Date.now() } satisfies WsData });
       return ok ? undefined : new Response("upgrade failed", { status: 500 });
     }
 
@@ -406,13 +406,22 @@ export function makeServer(opts: MakeServerOpts = {}) {
           () => ws.close(1000, "replaced"));
       } else {
         const id = pwaReg.add(ws, (f) => ws.send(JSON.stringify(f)));
-        ws.data = { kind: "pwa", key: id, user: ws.data.user, user_id: ws.data.user_id };
+        ws.data = { kind: "pwa", key: id, user: ws.data.user, user_id: ws.data.user_id, lastFrameAt: Date.now() };
       }
     },
     message(ws: ServerWebSocket<WsData>, msg: string | Buffer) {
+      ws.data.lastFrameAt = Date.now();
       const text = typeof msg === "string" ? msg : msg.toString("utf8");
       let frame: unknown;
       try { frame = JSON.parse(text); } catch { ws.close(1003, "bad json"); return; }
+      // Heartbeat: client → server ping is intercepted here, never reaches router.
+      // ts is echoed back unchanged so the client could compute RTT (out-of-scope
+      // for v1, but the field already exists in the proto schema).
+      if ((frame as { type?: string }).type === "ping") {
+        const ts = (frame as { ts?: number }).ts ?? Date.now();
+        ws.send(JSON.stringify({ type: "pong", ts }));
+        return;
+      }
       if (ws.data.kind === "daemon") {
         router.onDaemonFrame(ws.data.key, frame as DaemonToHub);
       } else {
@@ -452,7 +461,32 @@ export function makeServer(opts: MakeServerOpts = {}) {
     },
   };
 
-  return { fetch, websocket };
+  /**
+   * Start a periodic scan that closes any WS whose `lastFrameAt` is older
+   * than `timeoutMs`. Catches kernel-killed clients and NAT-evicted
+   * connections that never produced a clean FIN/RST. Returns a cancel handle.
+   *
+   * Called by hub bootstrap (index.ts) once after `Bun.serve`. Tests may
+   * call directly to exercise the loop without wall-clock waits.
+   */
+  function startHeartbeatWatchdog(intervalMs: number, timeoutMs: number) {
+    const handle = setInterval(() => {
+      const cutoff = Date.now() - timeoutMs;
+      for (const ws of daemonReg.iterAll()) {
+        if (ws.data.lastFrameAt < cutoff) {
+          try { ws.close(1011, "heartbeat timeout"); } catch {}
+        }
+      }
+      for (const ws of pwaReg.iterAll()) {
+        if (ws.data.lastFrameAt < cutoff) {
+          try { ws.close(1011, "heartbeat timeout"); } catch {}
+        }
+      }
+    }, intervalMs);
+    return () => clearInterval(handle);
+  }
+
+  return { fetch, websocket, startHeartbeatWatchdog };
 }
 
 async function tryStaticFile(static_dir: string, pathname: string): Promise<Response | null> {

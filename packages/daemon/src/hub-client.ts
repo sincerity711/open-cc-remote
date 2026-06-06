@@ -18,6 +18,18 @@ export interface HubClientOptions {
   privateJwk?: JWK;
   backoffStartMs?: number;
   backoffCapMs?: number;
+  /**
+   * Heartbeat ping interval in ms (default 25_000). Set to 0 to disable
+   * heartbeat — only intended for tests that exercise reconnect logic
+   * without timing-sensitive ping/pong.
+   */
+  heartbeatIntervalMs?: number;
+  /**
+   * If no pong is received within this window, the ws is closed and
+   * reconnect logic takes over. Default 45_000. See
+   * docs/superpowers/specs/2026-06-06-ws-heartbeat-design.md for rationale.
+   */
+  heartbeatTimeoutMs?: number;
 }
 
 export interface HubClientHandle {
@@ -29,14 +41,26 @@ export interface HubClientHandle {
 export function startHubClient(opts: HubClientOptions): HubClientHandle {
   const startMs = opts.backoffStartMs ?? 1000;
   const capMs = opts.backoffCapMs ?? 30_000;
+  const hbIntervalMs = opts.heartbeatIntervalMs ?? 25_000;
+  const hbTimeoutMs = opts.heartbeatTimeoutMs ?? 45_000;
   let backoff = startMs;
   let stopped = false;
   let ws: WebSocket | null = null;
   let pending: DaemonToHub[] = [];
+  let lastPongAt = 0;
+  let pingTimer: ReturnType<typeof setInterval> | null = null;
+
+  const stopHeartbeat = () => {
+    if (pingTimer !== null) {
+      clearInterval(pingTimer);
+      pingTimer = null;
+    }
+  };
 
   const url = `${opts.hub_url.replace(/\/$/, "")}/ws/daemon?daemon_id=${encodeURIComponent(opts.daemon_id)}`;
 
   const scheduleReconnect = () => {
+    stopHeartbeat();
     ws = null;
     if (stopped) return;
     const delay = backoff;
@@ -77,12 +101,34 @@ export function startHubClient(opts: HubClientOptions): HubClientHandle {
         const f = pending.shift()!;
         ws!.send(JSON.stringify(f));
       }
+      // Heartbeat: send ping every hbIntervalMs; if no pong arrives within
+      // hbTimeoutMs, close the ws so reconnect logic kicks in. The same
+      // setInterval drives ping AND watchdog so backgrounding effects
+      // (rare on a daemon, but symmetric with the PWA path) don't produce
+      // false-positive disconnects on resume.
+      lastPongAt = Date.now();
+      stopHeartbeat();
+      if (hbIntervalMs > 0) {
+        pingTimer = setInterval(() => {
+          if (!ws || ws.readyState !== WebSocket.OPEN) return;
+          if (Date.now() - lastPongAt > hbTimeoutMs) {
+            try { ws.close(); } catch {}
+            return;
+          }
+          ws.send(JSON.stringify({ type: "ping", ts: Date.now() } satisfies DaemonToHub));
+        }, hbIntervalMs);
+      }
     });
 
     ws.addEventListener("message", (ev) => {
       try {
         const data = typeof ev.data === "string" ? ev.data : new TextDecoder().decode(ev.data as ArrayBuffer);
-        opts.onFrame(JSON.parse(data) as HubToDaemon);
+        const parsed = JSON.parse(data) as HubToDaemon;
+        if ((parsed as { type?: string }).type === "pong") {
+          lastPongAt = Date.now();
+          return;
+        }
+        opts.onFrame(parsed);
       } catch {}
     });
 
@@ -103,6 +149,7 @@ export function startHubClient(opts: HubClientOptions): HubClientHandle {
     },
     close() {
       stopped = true;
+      stopHeartbeat();
       try { ws?.close(); } catch {}
     },
     isConnected() {

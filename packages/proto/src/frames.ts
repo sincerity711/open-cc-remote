@@ -129,7 +129,7 @@ export type DaemonToHub =
   | { type: "hello"; daemon_id: string; epoch: number; hostname: string; agent_version: string; sessions: SessionSnapshot[] }
   | DaemonSessionOpenFrame
   | { type: "session_close"; session_id: string; reason: string }
-  | { type: "pong"; ts: number }
+  | { type: "ping"; ts: number }
   | EventFrame
   | DaemonPermissionRequest
   | DaemonPermissionResolved
@@ -146,7 +146,7 @@ export type DaemonToHub =
   | DaemonFsListResult;
 
 export type HubToDaemon =
-  | { type: "ping"; ts: number }
+  | { type: "pong"; ts: number }
   | HubPermissionReply
   | HubToDaemonRequestHistory
   | HubToDaemonKillSession
@@ -171,6 +171,7 @@ export type HubToPwa =
   | { type: "daemon_online"; daemon_id: string; hostname: string; display_name: string | null; sessions: SessionSnapshot[] }
   | { type: "daemon_offline"; daemon_id: string }
   | { type: "daemon_renamed"; daemon_id: string; display_name: string | null }
+  | { type: "pong"; ts: number }
   | PwaSessionOpenFrame
   | { type: "session_close"; daemon_id: string; session_id: string; reason: string }
   | EventFrameForPwa
@@ -191,6 +192,7 @@ export type HubToPwa =
 
 export type PwaToHub =
   | { type: "subscribe" }  // Plan 1 PWA only subscribes; commands come in Plan 4
+  | { type: "ping"; ts: number }
   | PwaToHubPermissionReply
   | PwaToHubRequestHistory
   | PwaToHubKillSession

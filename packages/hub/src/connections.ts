@@ -39,6 +39,10 @@ export class DaemonRegistry<W> {
   getWs(daemon_id: string): W | undefined {
     return this.entries.get(daemon_id)?.ws;
   }
+
+  *iterAll(): Generator<W> {
+    for (const e of this.entries.values()) yield e.ws;
+  }
 }
 
 export class PwaRegistry<W> {
@@ -64,5 +68,9 @@ export class PwaRegistry<W> {
 
   broadcast(frame: HubToPwa): void {
     for (const e of this.entries.values()) e.send(frame);
+  }
+
+  *iterAll(): Generator<W> {
+    for (const e of this.entries.values()) yield e.ws;
   }
 }
