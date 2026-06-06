@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../components/ui/button";
 import { groupTimelineItems } from "./groupTimelineItems";
 import { renderTimelineGroup } from "./renderTimelineGroup";
 import type { RenderItem } from "./types";
+import { computeReasoningStatus } from "../../lib/reasoning-status";
 
 export interface SessionTimelineProps {
   items: RenderItem[];
@@ -39,6 +40,12 @@ export function SessionTimeline({
   // surface reads as a conversation rather than a wall of cards. Single
   // tools still get the same collapsed-by-default treatment.
   const groups = groupTimelineItems(items);
+
+  // Per-item "is this reasoning still active?" derived once from the
+  // merged items. ReasoningCard reads it to flip from spinner+expanded
+  // to brain+collapsed when a real successor (text/tool/permission/error)
+  // arrives. No daemon "reasoning end" event needed.
+  const reasoningStatus = useMemo(() => computeReasoningStatus(items), [items]);
 
   useEffect(() => {
     if (!autoScroll || !scrollRef.current) return;
@@ -98,7 +105,7 @@ export function SessionTimeline({
             History load not confirmed.
           </div>
         )}
-        {groups.map((g) => renderTimelineGroup(g))}
+        {groups.map((g) => renderTimelineGroup(g, reasoningStatus))}
         {items.length === 0 && (
           <p className="text-muted-foreground py-12 text-center text-sm">
             {historyLoading ? "Loading history…" : "No events yet — send a message to start."}

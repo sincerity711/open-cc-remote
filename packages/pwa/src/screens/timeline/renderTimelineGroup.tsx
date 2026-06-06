@@ -2,6 +2,7 @@ import type React from "react";
 import { renderTimelineItem } from "./renderTimelineItem";
 import { ToolGroup } from "./ToolGroup";
 import type { TimelineGroup } from "./groupTimelineItems";
+import type { ReasoningStatus } from "../../lib/reasoning-status";
 
 /**
  * Dispatch a grouped timeline element to the right surface.
@@ -11,8 +12,16 @@ import type { TimelineGroup } from "./groupTimelineItems";
  *
  * Keeping ToolGroup off the per-item renderer means the existing dispatch
  * logic (markers, AGUIEvent type switch, permission tone) stays untouched.
+ *
+ * `reasoningStatus` is forwarded to per-item rendering so the
+ * `ReasoningCard` knows whether to show its active spinner or its frozen
+ * "Thought" summary. Optional — DemoApp call sites that don't compute a
+ * status map default the card to "active".
  */
-export function renderTimelineGroup(group: TimelineGroup): React.ReactElement {
+export function renderTimelineGroup(
+  group: TimelineGroup,
+  reasoningStatus?: Map<string, ReasoningStatus>,
+): React.ReactElement {
   if (group.kind === "tool-group") {
     return (
       <ToolGroup
@@ -28,5 +37,5 @@ export function renderTimelineGroup(group: TimelineGroup): React.ReactElement {
       />
     );
   }
-  return renderTimelineItem(group.item);
+  return renderTimelineItem(group.item, reasoningStatus);
 }
