@@ -52,6 +52,42 @@ test("unitContent for linux produces valid systemd unit with ExecStart", () => {
   expect(content).toContain("Restart=always");
   expect(content).toContain("StandardOutput=append:/Users/u/.cc-remote/daemon.log");
   expect(content).toContain("WantedBy=default.target");
+  // No path_env passed → no Environment line. Keeps prior behaviour for
+  // anyone who calls unitContent without opts.path_env.
+  expect(content).not.toContain("Environment=PATH=");
+});
+
+test("unitContent for linux bakes PATH into Environment= when path_env provided", () => {
+  const content = unitContent("linux", { ...opts, path_env: "/u/.local/bin:/usr/bin:/bin" });
+  expect(content).toContain("Environment=PATH=/u/.local/bin:/usr/bin:/bin");
+  // Environment must precede ExecStart so systemd applies it to the launched
+  // process. systemd will also accept it after, but ours sits in [Service]
+  // and ordering keeps the file readable.
+  const envIdx = content.indexOf("Environment=PATH=");
+  const execIdx = content.indexOf("ExecStart=");
+  expect(envIdx).toBeGreaterThan(-1);
+  expect(envIdx).toBeLessThan(execIdx);
+});
+
+test("unitContent for darwin omits PATH key when path_env absent", () => {
+  const content = unitContent("darwin", opts);
+  // EnvironmentVariables block exists for HOME but no PATH key.
+  expect(content).toContain("<key>HOME</key>");
+  expect(content).not.toContain("<key>PATH</key>");
+});
+
+test("unitContent for darwin includes XML-escaped PATH key when path_env provided", () => {
+  const content = unitContent("darwin", { ...opts, path_env: "/u/.local/bin:/usr/bin" });
+  expect(content).toContain("<key>PATH</key>");
+  expect(content).toContain("<string>/u/.local/bin:/usr/bin</string>");
+});
+
+test("unitContent for darwin escapes XML special chars in path_env", () => {
+  // Pathological but legal: a PATH entry containing < > & " — must not break
+  // the plist. We xml-escape on the way in.
+  const content = unitContent("darwin", { ...opts, path_env: `/a&b:/c"d:/e<f>` });
+  expect(content).toContain(`/a&amp;b:/c&quot;d:/e&lt;f&gt;`);
+  expect(content).not.toContain("<string>/a&b");
 });
 
 test("installCommands(darwin) returns load + start argv tuples", () => {

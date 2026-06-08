@@ -10,10 +10,11 @@ FROM oven/bun:1 AS pwa-builder
 WORKDIR /repo
 # Synthetic workspace root — narrower than the real one so bun install only
 # resolves what the PWA needs (no daemon/hub/plugin/e2e-real graph).
-RUN echo '{"name":"pwa-build","private":true,"workspaces":["packages/proto","packages/pwa"]}' > package.json
+RUN echo '{"name":"pwa-build","private":true,"workspaces":["packages/proto","packages/observability","packages/pwa"]}' > package.json
 # tsconfig.base.json is referenced by every package's tsconfig via `extends`.
 COPY tsconfig.base.json ./
 COPY packages/proto packages/proto
+COPY packages/observability packages/observability
 COPY packages/pwa packages/pwa
 RUN bun install --no-summary
 RUN bun run --cwd packages/pwa build
@@ -21,17 +22,17 @@ RUN bun run --cwd packages/pwa build
 FROM oven/bun:1
 WORKDIR /app
 
-# Hub's runtime deps. Synthetic package.json — workspace name is replaced with
-# a plain package so bun install doesn't need the workspace graph.
-RUN echo '{"name":"hub-img","version":"0.0.1","private":true,"type":"module","dependencies":{"jose":"^5.6.0","web-push":"^3.6.0"}}' > package.json && \
-    bun install
-
-# Hub source. Proto is referenced via "@cc-remote/proto" — symlink it into
-# node_modules to satisfy the bare specifier.
-COPY packages/proto ./packages/proto
-COPY packages/hub ./packages/hub
+# Synthetic workspace narrowed to just the hub graph (proto + observability +
+# hub) so bun install resolves @cc-remote/* via workspace and pulls every
+# transitive @opentelemetry runtime dep without needing the daemon/plugin/PWA
+# subtrees.
+RUN echo '{"name":"hub-img","private":true,"type":"module","workspaces":["packages/proto","packages/observability","packages/hub"]}' > package.json
+COPY tsconfig.base.json ./
+COPY packages/proto packages/proto
+COPY packages/observability packages/observability
+COPY packages/hub packages/hub
 COPY tools/cf/entrypoint.ts ./tools/cf/entrypoint.ts
-RUN mkdir -p node_modules/@cc-remote && ln -s /app/packages/proto node_modules/@cc-remote/proto
+RUN bun install --no-summary
 
 # PWA dist served by the hub at the app root.
 COPY --from=pwa-builder /repo/packages/pwa/dist /app/pwa-dist

@@ -166,9 +166,13 @@ test("cc-remote init writes a sane config.json with default spawn_command", asyn
     expect(Array.isArray(cfg.allowed_cwd_prefix)).toBe(true);
     expect(cfg.allowed_cwd_prefix.length).toBeGreaterThan(0);
     expect(cfg.idle_window_ms).toBe(3000);
-    expect(cfg.spawn_command).toBe(
-      `claude --mcp-config ${join(stateDir, "mcp-config.json")} --dangerously-load-development-channels server:cc-remote`,
-    );
+    // spawn_command always carries the canonical mcp + flag tail. The leading
+    // claude token is either an absolute path (when the host has claude
+    // resolvable via login shell) or the bare word `claude` (fallback).
+    const tail = ` --mcp-config ${join(stateDir, "mcp-config.json")} --dangerously-load-development-channels server:cc-remote`;
+    expect(cfg.spawn_command.endsWith(tail)).toBe(true);
+    const claudeToken = (cfg.spawn_command as string).slice(0, cfg.spawn_command.length - tail.length);
+    expect(claudeToken === "claude" || claudeToken.startsWith("/")).toBe(true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

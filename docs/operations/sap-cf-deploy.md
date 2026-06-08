@@ -159,6 +159,21 @@ bun run src/cli.ts run
 
 (Hub URL must use `https://` for CF — Gorouter will upgrade WS to WSS for you.)
 
+### Why systemd-installed daemons need the `install` step
+
+`cc-remote init` resolves `claude` via a login shell (bash → zsh → sh) and
+bakes the absolute path into `spawn_command`, and `cc-remote install` captures
+the user's interactive `PATH` and writes `Environment=PATH=…` into the
+systemd unit (or the launchd plist's `EnvironmentVariables`). This matters
+because systemd user services and launchd agents do **not** source `~/.bashrc`
+/ `~/.zshrc` — without these two steps, a daemon started by systemd will fail
+to find `claude` (or `tmux`, `git`, anything in `~/.local/bin` / `~/.bun/bin`)
+the first time the PWA triggers a session, and tmux dies silently.
+
+If you're upgrading an older config and seeing PWA-spawned sessions die
+immediately, either re-run `cc-remote init --force` or hand-edit
+`spawn_command` in `~/.cc-remote/config.json` to use the absolute claude path.
+
 ## 6. Open the PWA
 
 The PWA is bundled into the hub image and served at the app root. Just visit:

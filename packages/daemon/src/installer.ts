@@ -7,6 +7,15 @@ export interface UnitOptions {
   bun_path: string;
   cc_remote_bin: string;
   state_dir: string;
+  /**
+   * PATH to bake into the systemd/launchd unit. systemd user services and
+   * launchd agents do NOT source the user's shell rc files, so without this
+   * the daemon can't find `claude`, `git`, `tmux`, etc. when those live under
+   * ~/.local/bin or ~/.bun/bin. Captured at install time via a login shell.
+   * Optional — when absent the unit gets no Environment line and inherits the
+   * platform default (matches pre-PATH-injection behaviour).
+   */
+  path_env?: string;
 }
 
 export interface PlatformCommands {
@@ -37,6 +46,10 @@ export function unitPath(p: InstallerPlatform): string {
 export function unitContent(p: InstallerPlatform, opts: UnitOptions): string {
   const log = join(opts.state_dir, "daemon.log");
   if (p === "darwin") {
+    // launchd plist string values must be XML-escaped.
+    const pathXml = opts.path_env
+      ? `\n    <key>PATH</key>\n    <string>${escapeXml(opts.path_env)}</string>`
+      : "";
     return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyManager-1.0.dtd">
 <plist version="1.0">
@@ -60,20 +73,24 @@ export function unitContent(p: InstallerPlatform, opts: UnitOptions): string {
   <key>EnvironmentVariables</key>
   <dict>
     <key>HOME</key>
-    <string>${homedir()}</string>
+    <string>${homedir()}</string>${pathXml}
   </dict>
 </dict>
 </plist>
 `;
   }
   if (p === "linux") {
+    // Environment= must come before ExecStart per systemd convention. systemd
+    // values cannot contain newlines or unescaped quotes; PATH from a login
+    // shell is well-formed for this.
+    const envLine = opts.path_env ? `Environment=PATH=${opts.path_env}\n` : "";
     return `[Unit]
 Description=cc-remote daemon
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=${opts.bun_path} ${opts.cc_remote_bin} daemon
+${envLine}ExecStart=${opts.bun_path} ${opts.cc_remote_bin} daemon
 Restart=always
 RestartSec=2
 StandardOutput=append:${log}
@@ -84,6 +101,14 @@ WantedBy=default.target
 `;
   }
   throw new Error(`unsupported platform: ${p}`);
+}
+
+function escapeXml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 export function installCommands(p: InstallerPlatform, path: string): PlatformCommands {
