@@ -68,7 +68,7 @@ export function ReasoningCard({ event, status, startedAt }: ReasoningCardProps) 
       : `Thought · ${formatDuration(elapsedMs)}`;
 
   return (
-    <CatalogCard>
+    <CatalogCard compact>
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
