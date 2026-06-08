@@ -130,6 +130,7 @@ async function cmdInstall(args: ParsedArgs): Promise<void> {
   const {
     detectPlatform, unitPath, unitContent, installCommands,
   } = await import("../src/installer.ts");
+  const { loginShellPath } = await import("../src/login-shell.ts");
 
   const platform = detectPlatform();
   if (platform === "unsupported") {
@@ -147,10 +148,24 @@ async function cmdInstall(args: ParsedArgs): Promise<void> {
   })();
   const stateDir = defaultStateDir();
   const path = unitPath(platform);
+  // Capture interactive PATH so the daemon (and the things it spawns: tmux,
+  // claude, git, hooks) sees what the user sees in their terminal — not the
+  // systemd/launchd-stripped default. Skip if no login shell answered or if
+  // the user passed --no-path-env (e.g. for reproducible test runs).
+  const wantPathEnv = args["no-path-env"] !== "true";
+  const pathEnv = wantPathEnv ? loginShellPath() : null;
+  if (wantPathEnv && !pathEnv) {
+    process.stderr.write(
+      `cc-remote install: warning — could not capture PATH via login shell;\n` +
+      `  unit will rely on the platform default. If 'claude' isn't found at\n` +
+      `  runtime, set spawn_command to an absolute path in config.json.\n`,
+    );
+  }
   const content = unitContent(platform, {
     bun_path: bunPath,
     cc_remote_bin: ccRemoteBin,
     state_dir: stateDir,
+    path_env: pathEnv ?? undefined,
   });
   const cmds = installCommands(platform, path);
 
@@ -159,6 +174,7 @@ async function cmdInstall(args: ParsedArgs): Promise<void> {
   process.stdout.write(`state dir:       ${stateDir}\n`);
   process.stdout.write(`bun:             ${bunPath}\n`);
   process.stdout.write(`cc-remote bin:   ${ccRemoteBin}\n`);
+  process.stdout.write(`PATH baked:      ${pathEnv ? "yes" : "no"}\n`);
   if (dry) {
     process.stdout.write(`\n--- unit content ---\n${content}\n--- end ---\n`);
     if (cmds.reload.length) process.stdout.write(`would run: ${cmds.reload.join(" ")}\n`);
@@ -198,10 +214,26 @@ async function cmdInit(args: ParsedArgs): Promise<void> {
   const home = homedir();
   // Sane defaults: enable allow_kill / allow_start, scope cwd to $HOME, and
   // bake a working spawn_command that pairs with the mcp-config.json the
-  // daemon writes idempotently into <state_dir> on startup. Users with a
-  // non-standard `claude` install can edit config.json afterwards.
+  // daemon writes idempotently into <state_dir> on startup.
+  //
+  // claude path resolution: systemd/launchd run with a stripped PATH that does
+  // NOT include ~/.local/bin, ~/.bun/bin etc., so a bare `claude` token would
+  // hit "command not found" the first time the user creates a session via the
+  // PWA. Resolve it via a login shell now (when a human is on the keyboard)
+  // and bake the absolute path into config.json. Falls back to bare `claude`
+  // with a warning so non-resolvable installs still produce a usable file.
   const mcpConfigPath = join(stateDir, "mcp-config.json");
-  const spawnCommand = `claude --mcp-config ${mcpConfigPath} --dangerously-load-development-channels server:cc-remote`;
+  const { resolveBinaryViaLoginShell } = await import("../src/login-shell.ts");
+  const claudeAbs = resolveBinaryViaLoginShell("claude");
+  const claudeToken = claudeAbs ?? "claude";
+  if (!claudeAbs) {
+    process.stderr.write(
+      `cc-remote init: warning — could not resolve 'claude' via login shell.\n` +
+      `  spawn_command will use bare 'claude'; if PWA-spawned sessions die\n` +
+      `  immediately, install claude or edit ${configPath} with the absolute path.\n`,
+    );
+  }
+  const spawnCommand = `${claudeToken} --mcp-config ${mcpConfigPath} --dangerously-load-development-channels server:cc-remote`;
   const cfg = {
     daemon_id: hostname(),
     hub_url: hub,
@@ -346,7 +378,8 @@ function usage(): string {
     "  daemon rotate-token          rotate the DPoP-bound JWT",
     "  pair --hub <url> --code <c>  bind this machine to the hub",
     "    [--daemon-id <id>]         override default (hostname)",
-    "  install [--dry-run]          install daemon as launchd/systemd unit",
+    "  install [--dry-run] [--no-path-env]",
+    "                               install daemon as launchd/systemd unit",
     "  uninstall [--dry-run]        remove the unit",
     "  status                       show pairing/permission/health state",
   ].join("\n");
