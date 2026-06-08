@@ -28,6 +28,7 @@ import { precheckStartSession } from "./start-session.ts";
 import { ensureMcpConfig } from "./mcp-config.ts";
 import { createPendingStarts } from "./pending-starts.ts";
 import { createProcessRegistry } from "./process-registry.ts";
+import { createRebindArming, shouldArmForCommand } from "./rebind-arming.ts";
 import { initOtel, shutdownOtel } from "@cc-remote/observability";
 import { beginRoundTrip, withSessionChildSpan, endRoundTrip } from "./otel.ts";
 
@@ -187,6 +188,16 @@ const agentHandshakeBySession = new Map<
   Omit<import("@cc-remote/proto").DaemonAgentHandshake, "type" | "session_id">
 >();
 const pendingStarts = createPendingStarts({ ttlMs: 60_000 });
+
+// Per-session rebind-armed bit. The cwd's projects-dir watcher only
+// rebinds when this is set — and disarms after one rebind. Armed by
+// handleCliCommand when the PWA submits a slash command known to rotate
+// claude_session_id (see rebind-arming.ts). Without this gate, an
+// unrelated `claude` running in the same cwd would cause ping-pong
+// rebinding between two jsonls.
+const rebindArming = createRebindArming({
+  log: (m) => process.stderr.write(`daemon: ${m}\n`),
+});
 
 // Process registry — reconcile-only on boot. Spec at
 // docs/superpowers/specs/2026-06-07-process-registry-design.md. We must run
@@ -446,6 +457,14 @@ const hub = startHubClient({
       });
     }
     else if (frame.type === "cli_command") {
+      // Arm the projects-dir watcher BEFORE the keys hit tmux. Otherwise a
+      // very fast claude could write the new jsonl, hit our watcher, and be
+      // ignored because we hadn't armed yet. Idempotent + TTL-bounded so
+      // commands that don't actually rotate (false positive in matcher) just
+      // expire harmlessly.
+      if (shouldArmForCommand(frame.text)) {
+        rebindArming.arm(frame.session_id);
+      }
       handleCliCommand(frame, {
         lookupPane: (id) => {
           const sn = sessions.get(id);
@@ -587,12 +606,21 @@ function startProjectsDirWatcher(s: SessionSnapshot): void {
       const cur = sessions.get(s.session_id);
       if (!cur) return;
       if (cur.claude_session_id === newClaudeId) return; // writes to bound file
+      // Gate: rebind only when something rotate-shaped (PWA-submitted /clear,
+      // /compact, …) has armed us. An unrelated `claude` writing in the same
+      // cwd MUST NOT cause rebinding — that's the ping-pong loop this gate
+      // exists to prevent.
+      if (!rebindArming.isArmed(s.session_id)) return;
       // Defensive: only treat as fresh if the file's mtime is recent. A user
       // rummaging through old jsonls (e.g. `cat old.jsonl`) shouldn't trigger
       // a rebind — only a write that happened just now.
       let mt: number;
       try { mt = statSync(join(dir, filename)).mtimeMs; } catch { return; }
       if (mt < Date.now() - 30_000) return;
+      // Disarm BEFORE rebinding. If anything triggers a second jsonl creation
+      // shortly after (rare but possible: unrelated claude wakes up), we
+      // ignore it. Re-arm requires another cli_command from the PWA.
+      rebindArming.disarm(s.session_id);
       rebindSession(s.session_id, newClaudeId);
     });
     w.on("error", (e) => process.stderr.write(`daemon: projects-dir watcher error for ${s.session_id}: ${(e as Error).message}\n`));
@@ -787,6 +815,7 @@ sessions.onRemove((session_id: string) => {
     dw.close();
     projectsDirWatchers.delete(session_id);
   }
+  rebindArming.disarm(session_id);
   const t = idleTimers.get(session_id);
   if (t) { clearTimeout(t); idleTimers.delete(session_id); }
 });
